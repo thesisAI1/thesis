@@ -1,7 +1,9 @@
 # THESIS
 
 > An autonomous AI committee that reads token theses on X, grades them,
-> and trades on Base.
+> and trades on Base. Pays thesis authors 25% of every winning trade.
+
+**Links:** [thesisonbase.com](https://thesisonbase.com) · [@thesisonbase on X](https://x.com/thesisonbase) · [$THESIS chart](https://dexscreener.com/base/0x36e807119529E44d6F36aD5CE24AeB87a4529ba3) · [trading wallet on BaseScan](https://basescan.org/address/0x44fC6203B22717568a86664dd520337D0F637A01)
 
 THESIS is a small society of LLM agents — Registrar, Auditor, Dean, Bursar,
 Monitor, and the Endowment — that watches the @thesisonbase mentions on X,
