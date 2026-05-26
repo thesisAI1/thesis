@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+  <defs>
+    <linearGradient id="badge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1F2738"/>
+      <stop offset="1" stop-color="#0B0F17"/>
+    </linearGradient>
+    <radialGradient id="markGlow" cx="0.5" cy="0.42" r="0.62">
+      <stop offset="0" stop-color="#E6A33E" stop-opacity="0.26"/>
+      <stop offset="1" stop-color="#E6A33E" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="6" result="b" />
+      <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+    </filter>
+  </defs>
+
+  <rect x="10" y="10" width="220" height="220" rx="50" fill="url(#badge)" stroke="#36425A" stroke-width="2" />
+  <rect x="11" y="11" width="218" height="109" rx="49" fill="#FFFFFF" opacity="0.04" />
+  <rect x="10" y="10" width="220" height="220" rx="50" fill="url(#markGlow)" />
+
+  <g filter="url(#glow)">
+    <ellipse cx="120" cy="120" rx="46" ry="63" fill="none" stroke="#E6A33E" stroke-width="16" />
+    <rect x="84" y="112" width="72" height="16" rx="8" fill="#E6A33E" />
+  </g>
+</svg>

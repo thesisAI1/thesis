@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Runtime data — the file-backed store the service writes into
+data/
+
+# Secrets — NEVER commit the real .env, only the .env.example template
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+
+# Editor / OS noise
+.DS_Store
+.vscode/
+.idea/
+
+# Local scratch
+*.local
+tmp/
+.tmp/
+*.tar.gz
+*.tar

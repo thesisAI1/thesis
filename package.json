@@ -1,0 +1,29 @@
+{
+  "name": "thesis",
+  "private": true,
+  "version": "0.1.0",
+  "description": "THESIS — an AI agent committee that reviews token theses posted on X and trades on Base.",
+  "type": "module",
+  "workspaces": [
+    "packages/shared",
+    "packages/backend",
+    "packages/website"
+  ],
+  "scripts": {
+    "start": "npm start --workspace @thesis/backend",
+    "demo": "npm run demo --workspace @thesis/backend",
+    "dev": "npm run dev --workspace @thesis/backend",
+    "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/backend"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}

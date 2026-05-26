@@ -1,0 +1,383 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>THESIS — website preview</title>
+<style>
+:root{--bg:#080A10;--panel:#11151F;--panel-2:#161C28;--border:#232B3A;--border-2:#2E3848;--text:#EAEEF6;--muted:#8B97AC;--dim:#5C6678;--accent:#E6A33E;--green:#3FB984;--red:#E0653E;--blue:#4F9DDE;--purple:#9B6BDF;--mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;--sans:"Segoe UI",-apple-system,Helvetica,Arial,sans-serif;}
+*{box-sizing:border-box;margin:0;padding:0;}
+html{scroll-behavior:smooth;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden;}
+.bg-grid{position:fixed;inset:0;z-index:-2;background-image:linear-gradient(rgba(120,140,180,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(120,140,180,.05) 1px,transparent 1px);background-size:48px 48px;-webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 30%,transparent 75%);mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 30%,transparent 75%);}
+.bg-glow{position:fixed;inset:0;z-index:-1;pointer-events:none;background:radial-gradient(700px 380px at 78% 4%,rgba(230,163,62,.10),transparent 70%),radial-gradient(620px 420px at 12% 22%,rgba(79,157,222,.08),transparent 70%);}
+main{max-width:1060px;margin:0 auto;padding:0 22px 80px;}
+section{padding:60px 0;}
+h1{font-size:44px;line-height:1.12;font-weight:800;letter-spacing:-1px;}
+h2{font-size:25px;font-weight:800;letter-spacing:-.4px;}
+h3{font-size:16px;font-weight:700;}
+.accent{color:var(--accent);}
+.muted{color:var(--muted);font-size:14px;}
+code{font-family:var(--mono);}
+.section-tag{font-family:var(--mono);font-size:11px;letter-spacing:2px;color:var(--accent);margin-bottom:16px;display:flex;align-items:center;gap:10px;}
+.section-tag::after{content:"";flex:1;height:1px;background:var(--border);}
+.preview-banner{background:#2E2616;border-bottom:1px solid var(--accent);color:#EAD7AE;font-size:13px;text-align:center;padding:9px 16px;font-family:var(--mono);}
+.topbar{display:flex;justify-content:space-between;align-items:center;max-width:1060px;margin:0 auto;padding:18px 22px;}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--text);}
+.brand-mark{display:grid;place-items:center;width:34px;height:34px;background:linear-gradient(160deg,#1d2433,#11151f);border:1px solid var(--border-2);border-radius:10px;color:var(--accent);font-family:Georgia,serif;font-size:21px;font-weight:700;box-shadow:0 0 24px -10px rgba(230,163,62,.6);}
+.brand-name{font-weight:800;letter-spacing:2px;font-size:18px;}
+.status-pill{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11.5px;color:var(--muted);background:var(--panel);border:1px solid var(--border);padding:6px 13px;border-radius:999px;}
+.topbar-right{display:flex;align-items:center;gap:12px;}
+.topbar-link{font-size:13.5px;text-decoration:none;color:var(--muted);padding:6px 11px;border-radius:8px;border:1px solid transparent;display:inline-flex;align-items:center;gap:6px;}
+.topbar-link:hover{color:var(--text);border-color:var(--border-2);}
+.docs-cta{margin-top:22px;display:flex;align-items:center;gap:15px;flex-wrap:wrap;}
+.docs-cta-note{color:var(--muted);font-size:13px;}
+.footer-nav{display:flex;gap:22px;justify-content:center;margin-bottom:14px;flex-wrap:wrap;align-items:center;}
+.footer-nav a{color:var(--muted);text-decoration:none;font-size:13px;display:inline-flex;align-items:center;gap:6px;}
+.footer-nav a:hover{color:var(--text);}
+.x-icon{display:inline-block;}
+.live-dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(63,185,132,.16);animation:blink 2.4s ease-in-out infinite;}
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:.35;}}
+.hero{padding-top:40px;}
+.eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:1px;color:var(--dim);margin-bottom:18px;}
+.lede{color:var(--muted);font-size:18px;margin:22px 0 30px;max-width:600px;}
+.lede strong{color:var(--text);}
+.hero-cta{display:flex;gap:12px;flex-wrap:wrap;}
+.btn{display:inline-block;padding:12px 24px;border-radius:11px;font-weight:600;font-size:15px;text-decoration:none;cursor:pointer;border:1px solid var(--border-2);background:var(--panel-2);color:var(--text);transition:transform .12s,border-color .15s;}
+.btn:hover{transform:translateY(-1px);border-color:#45526b;}
+.btn-primary{background:linear-gradient(160deg,#f0b455,#e09a2e);color:#1a1305;border-color:transparent;box-shadow:0 8px 26px -12px rgba(230,163,62,.8);}
+.room-bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:12px 16px;}
+.room-live{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11.5px;letter-spacing:1px;color:var(--green);}
+.pulse{width:8px;height:8px;border-radius:50%;background:var(--green);box-shadow:0 0 12px var(--green);animation:blink 1.6s ease-in-out infinite;}
+.room-activity{font-family:var(--mono);font-size:12.5px;color:var(--muted);}
+.submission-card{margin-top:14px;background:linear-gradient(160deg,#141a26,#10141d);border:1px solid var(--border-2);border-radius:13px;padding:18px 20px;}
+.sub-label{font-family:var(--mono);font-size:10.5px;letter-spacing:2px;color:var(--dim);}
+.sub-author{font-weight:800;font-size:18px;margin-top:4px;}
+.sub-thesis{color:var(--muted);font-size:14.5px;margin-top:6px;font-style:italic;}
+.sub-ca{display:inline-block;margin-top:10px;font-family:var(--mono);font-size:12px;color:var(--blue);text-decoration:none;background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:4px 9px;}
+.agents{margin-top:16px;}
+.agent-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+.flow-link{width:2px;height:24px;margin:6px auto;background:linear-gradient(var(--border-2),transparent);}
+.agent{background:var(--panel);border:1px solid var(--border);border-radius:13px;padding:16px;transition:border-color .25s,box-shadow .25s,opacity .25s;opacity:.62;}
+.agent.active{opacity:1;border-color:var(--c);box-shadow:0 0 0 1px var(--c),0 14px 44px -20px var(--c);}
+.agent.done{opacity:1;border-color:color-mix(in srgb,var(--c) 45%,var(--border));}
+.agent-head{display:flex;align-items:center;gap:12px;}
+.sig{flex:none;width:40px;height:40px;display:grid;place-items:center;border-radius:10px;color:var(--c);background:color-mix(in srgb,var(--c) 14%,var(--panel-2));border:1px solid color-mix(in srgb,var(--c) 40%,var(--border));}
+.sig svg{width:22px;height:22px;}
+.agent-id{flex:1;}
+.agent-name{font-weight:800;font-size:15px;}
+.agent-role{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.4px;}
+.agent-status{flex:none;width:9px;height:9px;border-radius:50%;background:var(--dim);transition:background .2s;}
+.agent.active .agent-status{background:var(--c);box-shadow:0 0 12px var(--c);animation:blink 1s ease-in-out infinite;}
+.agent.done .agent-status{background:var(--c);}
+.agent-body{margin-top:13px;padding:12px 13px;min-height:116px;background:var(--bg);border:1px solid var(--border);border-radius:9px;font-family:var(--mono);font-size:12.5px;line-height:1.7;}
+.agent-idle{color:var(--dim);}
+.agent.active .agent-body,.agent.done .agent-body{border-color:color-mix(in srgb,var(--c) 30%,var(--border));}
+.line{color:var(--muted);animation:lineIn .32s ease both;display:flex;gap:8px;}
+.line::before{content:"›";color:var(--c);}
+.line.verdict{color:var(--text);font-weight:700;}
+.line.verdict::before{content:"■";}
+@keyframes lineIn{from{opacity:0;transform:translateY(5px);}to{opacity:1;transform:none;}}
+.verdict-banner{margin-top:18px;display:flex;align-items:center;gap:18px;background:linear-gradient(160deg,#161d2b,#10141d);border:1px solid var(--border-2);border-radius:14px;padding:18px 22px;animation:pop .4s cubic-bezier(.2,.9,.3,1.3) both;}
+@keyframes pop{from{opacity:0;transform:scale(.94);}to{opacity:1;transform:none;}}
+.verdict-grade{flex:none;width:64px;height:64px;border-radius:14px;display:grid;place-items:center;font-size:36px;font-weight:800;}
+.verdict-text{font-size:16px;font-weight:600;}
+.verdict-text .vt-sub{display:block;color:var(--muted);font-size:13px;font-weight:400;margin-top:2px;}
+.dash-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;}
+.dash-sub{color:var(--muted);font-size:14px;margin-top:3px;}
+.wallet-link{font-family:var(--mono);font-size:12px;color:var(--blue);text-decoration:none;border:1px solid var(--border);background:var(--panel);border-radius:8px;padding:8px 12px;}
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-top:22px;}
+.stat-card{background:linear-gradient(160deg,#141a26,var(--panel));border:1px solid var(--border);border-radius:13px;padding:19px;}
+.stat-label{font-family:var(--mono);color:var(--dim);font-size:11px;letter-spacing:1px;text-transform:uppercase;}
+.stat-value{font-size:29px;font-weight:800;margin-top:7px;letter-spacing:-.5px;font-variant-numeric:tabular-nums;}
+.stat-sub{color:var(--muted);font-size:12.5px;margin-top:3px;}
+.stat-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:12px;margin-top:12px;}
+.mini{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:13px 15px;}
+.mini-value{font-size:18px;font-weight:700;font-variant-numeric:tabular-nums;}
+.mini-label{color:var(--muted);font-size:11.5px;margin-top:2px;}
+.funnel-line{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:13px;}
+.funnel-line b{color:var(--muted);font-weight:600;}
+.block-title{margin:36px 0 4px;display:flex;align-items:center;gap:9px;}
+.block-sub{color:var(--muted);font-size:13.5px;margin-bottom:14px;}
+.count-chip{font-family:var(--mono);font-size:11px;font-weight:700;color:var(--muted);background:var(--panel-2);border:1px solid var(--border);border-radius:999px;padding:1px 9px;}
+.table-wrap{overflow-x:auto;border:1px solid var(--border);border-radius:12px;margin-top:12px;}
+.data-table{width:100%;border-collapse:collapse;font-size:13px;min-width:640px;}
+.data-table th{text-align:left;color:var(--dim);font-family:var(--mono);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;padding:11px 14px;background:var(--panel-2);border-bottom:1px solid var(--border);}
+.data-table td{padding:12px 14px;border-bottom:1px solid var(--border);}
+.data-table tr:last-child td{border-bottom:none;}
+.data-table tbody tr:hover{background:var(--panel);}
+.data-table .num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;}
+.tok{color:var(--blue);text-decoration:none;font-family:var(--mono);}
+.empty{color:var(--muted);font-size:14px;padding:16px 2px;}
+.pos{color:var(--green);}
+.neg{color:var(--red);}
+.badge{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:700;padding:2px 8px;border-radius:6px;}
+.grade-A{background:rgba(63,185,132,.16);color:var(--green);}
+.grade-B{background:rgba(79,157,222,.16);color:var(--blue);}
+.grade-C{background:rgba(230,163,62,.16);color:var(--accent);}
+.grade-D{background:rgba(224,101,62,.16);color:var(--red);}
+.grade-F{background:rgba(224,101,62,.22);color:var(--red);}
+.buy{background:rgba(63,185,132,.16);color:var(--green);}
+.skip{background:var(--panel-2);color:var(--muted);border:1px solid var(--border);}
+.feed{display:grid;gap:10px;}
+.feed-item{background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:14px 16px;}
+.feed-top{display:flex;align-items:center;gap:10px;flex-wrap:wrap;}
+.feed-handle{font-weight:700;}
+.feed-scores{font-family:var(--mono);color:var(--muted);font-size:12px;}
+.feed-time{font-family:var(--mono);color:var(--dim);font-size:11.5px;margin-left:auto;}
+.feed-rationale{color:var(--muted);font-size:13.5px;margin-top:7px;}
+.dist-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:12px;}
+.dist-card{background:var(--panel);border:1px solid var(--border);border-top:3px solid var(--c);border-radius:11px;padding:16px;}
+.dist-pct{font-family:var(--mono);font-size:12px;color:var(--c);font-weight:700;}
+.dist-value{font-size:20px;font-weight:800;margin:5px 0 2px;font-variant-numeric:tabular-nums;}
+.dist-label{color:var(--muted);font-size:12.5px;}
+.steps{list-style:none;display:grid;gap:12px;}
+.steps li{display:flex;gap:14px;align-items:flex-start;background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:15px 17px;color:var(--muted);}
+.step-n{flex:none;width:28px;height:28px;border-radius:8px;display:grid;place-items:center;font-family:var(--mono);font-weight:700;font-size:13px;background:var(--panel-2);color:var(--accent);border:1px solid var(--border-2);}
+.register-intro{color:var(--muted);max-width:620px;margin:8px 0 22px;}
+.panel{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:24px;}
+.reg-step-head{font-size:16px;font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:10px;}
+.reg-step p{color:var(--muted);margin-bottom:16px;}
+.dot{flex:none;width:24px;height:24px;border-radius:50%;display:grid;place-items:center;font-size:13px;font-weight:700;background:var(--panel-2);border:1px solid var(--border-2);color:var(--accent);}
+footer{border-top:1px solid var(--border);padding:30px 22px;text-align:center;}
+footer p{color:var(--dim);font-size:12.5px;max-width:640px;margin:0 auto;}
+@media (max-width:620px){h1{font-size:33px;}.agent-row{grid-template-columns:1fr;}.stat-value{font-size:24px;}}
+</style>
+</head>
+<body>
+<div class="bg-grid"></div><div class="bg-glow"></div>
+<div class="preview-banner">Static preview — the Faculty Room below runs a looping scripted demo. Run the local server (npm start &rarr; localhost:4319) for the real live stream.</div>
+<header class="topbar">
+  <a class="brand" href="#"><span class="brand-mark">&#920;</span><span class="brand-name">THESIS</span></a>
+  <div class="topbar-right">
+    <a class="topbar-link" href="packages/website/public/docs.html">Docs</a>
+    <a class="topbar-link" href="https://x.com/thesisonbase" target="_blank" rel="noopener noreferrer" title="@thesisonbase on X"><svg class="x-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@thesisonbase</a>
+    <span class="status-pill"><span class="live-dot"></span> preview</span>
+  </div>
+</header>
+<main>
+  <section class="hero">
+    <p class="eyebrow">AUTONOMOUS&nbsp;&nbsp;&middot;&nbsp;&nbsp;ON-CHAIN&nbsp;&nbsp;&middot;&nbsp;&nbsp;BASE</p>
+    <h1>You submit the thesis.<br /><span class="accent">The committee trades it.</span></h1>
+    <p class="lede">Tag the agent on X with a token thesis. Five AI agents put it through review — and you watch every one of them think, in real time. Pass, and <strong>25% of the profit is yours</strong>.</p>
+    <div class="hero-cta"><a class="btn btn-primary" href="#room">Watch the committee</a><a class="btn" href="#payout">How payouts work</a></div>
+  </section>
+
+  <section class="room" id="room">
+    <div class="section-tag">THE FACULTY ROOM</div>
+    <div class="room-bar"><span class="room-live"><span class="pulse"></span> COMMITTEE IN SESSION</span><span class="room-activity" id="room-activity">starting the demo…</span></div>
+    <div class="submission-card" id="submission-card" hidden>
+      <div class="sub-label">NOW REVIEWING</div>
+      <div class="sub-author" id="sub-author">@author</div>
+      <div class="sub-thesis" id="sub-thesis"></div>
+      <a class="sub-ca" id="sub-ca" href="#" target="_blank" rel="noopener">0x…</a>
+    </div>
+    <div class="agents">
+      <div class="agent-row">
+        <article class="agent" id="agent-registrar" style="--c:#4F9DDE">
+          <div class="agent-head"><span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="2.8"/></svg></span><div class="agent-id"><div class="agent-name">The Registrar</div><div class="agent-role">vets the author</div></div><span class="agent-status"></span></div>
+          <div class="agent-body" id="body-registrar"><div class="agent-idle">idle &mdash; awaiting a submission</div></div>
+        </article>
+        <article class="agent" id="agent-auditor" style="--c:#E0A33E">
+          <div class="agent-head"><span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg></span><div class="agent-id"><div class="agent-name">The Auditor</div><div class="agent-role">audits the token</div></div><span class="agent-status"></span></div>
+          <div class="agent-body" id="body-auditor"><div class="agent-idle">idle &mdash; awaiting a submission</div></div>
+        </article>
+      </div>
+      <div class="flow-link"></div>
+      <article class="agent wide" id="agent-dean" style="--c:#9B6BDF">
+        <div class="agent-head"><span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M6 8h12M9 20h6"/><path d="M6 8 3 14a3 3 0 0 0 6 0Z"/><path d="M18 8l3 6a3 3 0 0 1-6 0Z"/></svg></span><div class="agent-id"><div class="agent-name">The Dean</div><div class="agent-role">delivers the verdict</div></div><span class="agent-status"></span></div>
+        <div class="agent-body" id="body-dean"><div class="agent-idle">idle &mdash; awaiting the reports</div></div>
+      </article>
+      <div class="flow-link"></div>
+      <article class="agent wide" id="agent-bursar" style="--c:#3FB984">
+        <div class="agent-head"><span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16.5 9.5 10l4 4L21 6"/><path d="M15.5 6H21v5.5"/></svg></span><div class="agent-id"><div class="agent-name">The Bursar</div><div class="agent-role">executes the trade</div></div><span class="agent-status"></span></div>
+        <div class="agent-body" id="body-bursar"><div class="agent-idle">idle &mdash; awaiting a verdict</div></div>
+      </article>
+      <div class="flow-link"></div>
+      <article class="agent wide" id="agent-endowment" style="--c:#E0653E">
+        <div class="agent-head"><span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17M3.5 12h17"/></svg></span><div class="agent-id"><div class="agent-name">The Endowment</div><div class="agent-role">splits the profit</div></div><span class="agent-status"></span></div>
+        <div class="agent-body" id="body-endowment"><div class="agent-idle">idle &mdash; settles trades when they close</div></div>
+      </article>
+    </div>
+    <div class="verdict-banner" id="verdict-banner" hidden>
+      <div class="verdict-grade" id="verdict-grade">A</div>
+      <div class="verdict-text" id="verdict-text"></div>
+    </div>
+  </section>
+
+  <section class="dash" id="dashboard">
+    <div class="section-tag">LIVE PERFORMANCE</div>
+    <div class="dash-head"><div><h2>Every trade, on the record</h2><p class="dash-sub">Straight from the agent's wallet and trade log — refreshed automatically.</p></div><a class="wallet-link" href="#" target="_blank" rel="noopener">Trading wallet on BaseScan &#8599;</a></div>
+    <div class="stat-grid" id="stat-grid"></div>
+    <div class="stat-row" id="stat-row"></div>
+    <p class="funnel-line" id="funnel-line"></p>
+    <h3 class="block-title">Open positions <span class="count-chip" id="open-count">0</span></h3>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Token</th><th>Author</th><th>Grade</th><th>Stage</th><th class="num">Size</th><th class="num">Now</th><th class="num">Unrealised</th><th class="num">Realised</th></tr></thead><tbody id="open-rows"></tbody></table></div>
+    <h3 class="block-title">Closed trades <span class="count-chip" id="closed-count">0</span></h3>
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Token</th><th>Author</th><th class="num">Size</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">Realised PnL</th><th>Closed</th></tr></thead><tbody id="closed-rows"></tbody></table></div>
+    <h3 class="block-title">Decision log</h3>
+    <p class="block-sub">Every submission the committee has reviewed — scores, grade and verdict.</p>
+    <div class="feed" id="feed"></div>
+    <h3 class="block-title">Profit distribution</h3>
+    <p class="block-sub">Every winning trade splits four ways — 25% each.</p>
+    <div class="dist-grid" id="dist-grid"></div>
+  </section>
+
+  <section class="how">
+    <div class="section-tag">HOW IT WORKS</div>
+    <ol class="steps">
+      <li><span class="step-n">1</span> Post your thesis on X, tag the agent, and paste the token contract address.</li>
+      <li><span class="step-n">2</span> The Faculty reviews the author, the token, and the thesis — graded A&ndash;F, live.</li>
+      <li><span class="step-n">3</span> An A or B grade gets funded: the agent buys on Base with take-profit / stop-loss.</li>
+      <li><span class="step-n">4</span> On a winning exit the profit splits four ways — and the agent replies on your post to send your 25%.</li>
+    </ol>
+    <div class="docs-cta">
+      <a class="btn" href="packages/website/public/docs.html">Read the full documentation &#8594;</a>
+      <span class="docs-cta-note">Every threshold, every agent, the whole pipeline.</span>
+    </div>
+  </section>
+
+  <section class="register" id="payout">
+    <div class="section-tag">GETTING PAID</div>
+    <h2>Your 25% — paid on X</h2>
+    <p class="register-intro">There is nothing to sign up for and no wallet to connect here. When one of your theses closes in profit, the agent comes to you — right under your original post.</p>
+    <div class="panel">
+      <div class="reg-step"><div class="reg-step-head"><span class="dot">1</span> The agent replies to your thesis</div><p>When the trade exits in profit, the committee posts a reply telling you exactly what your 25% author share is — and asks for a Base wallet address.</p></div>
+      <div class="reg-step"><div class="reg-step-head"><span class="dot">2</span> You reply with your wallet</div><p>Reply to that tweet with a 0x address. Only the account that posted the original thesis can claim the payout — a reply from anyone else is ignored, so it cannot be hijacked.</p></div>
+      <div class="reg-step"><div class="reg-step-head"><span class="dot ok">&#10003;</span> The payout is sent on-chain</div><p>The agent sends your ETH on Base and replies with the transaction link. Your wallet is remembered, so any future win pays you straight away.</p></div>
+    </div>
+  </section>
+</main>
+<footer>
+  <nav class="footer-nav">
+    <a href="#room">Faculty Room</a>
+    <a href="#dashboard">Dashboard</a>
+    <a href="packages/website/public/docs.html">Docs</a>
+    <a href="https://x.com/thesisonbase" target="_blank" rel="noopener noreferrer"><svg class="x-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@thesisonbase</a>
+    <a href="https://x.com/thesis_agent" target="_blank" rel="noopener noreferrer"><svg class="x-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@thesis_agent</a>
+  </nav>
+  <p>THESIS runs on Base. Every trade is on-chain and verifiable. Token trading carries financial risk — nothing here is financial advice.</p>
+</footer>
+<script>
+function esc(s){return String(s==null?"":s).replace(/[&<>"]/g,function(c){return{"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c];});}
+function fmtEth(n){return (Number(n)||0).toFixed(4);}
+function fmtPrice(n){n=Number(n)||0;return n===0?"0":n.toPrecision(3);}
+function fmtPct(n){n=Number(n)||0;return (n>=0?"+":"")+n.toFixed(1)+"%";}
+function pnl(n){return Number(n)>=0?"pos":"neg";}
+function shortAddr(a){a=String(a||"");return a.length>14?a.slice(0,6)+"…"+a.slice(-4):a;}
+function ago(min){return new Date(Date.now()-min*60000).toISOString();}
+function timeAgo(iso){var t=Date.parse(iso);if(!t)return"—";var s=Math.max(0,(Date.now()-t)/1000);if(s<60)return Math.floor(s)+"s ago";if(s<3600)return Math.floor(s/60)+"m ago";if(s<86400)return Math.floor(s/3600)+"h ago";return Math.floor(s/86400)+"d ago";}
+function gradeBadge(g){return g?'<span class="badge grade-'+esc(g)+'">'+esc(g)+'</span>':"—";}
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
+var $=function(s){return document.querySelector(s);};
+
+/* ---- dashboard sample data ---- */
+var SAMPLE={
+  portfolio:{balanceEth:1.8421,realizedPnlEth:0.6124,openCount:2,closedCount:5,winCount:4,winRate:0.8},
+  reviews:{total:11,buys:7,skips:4},
+  funnel:{seen:418,passed:34,reviewed:11,queued:5},
+  distributions:{toAuthors:0.1531,toPortfolio:0.1531,toTeam:0.1531,toBuyback:0.1531},
+  openPositions:[
+    {contractAddress:"0x9b2c4f7a1e8d6c5b3a2f1e0d9c8b7a6f5e4d3c2b",authorHandle:"@degen_scholar",grade:"A",status:"open",tiersHit:1,tierCount:4,amountInEth:0.1420,currentPriceEth:5.9e-7,realisedPnlEth:0.0710,unrealizedPnlEth:0.0392,unrealizedPct:55.2,openedAt:ago(132)},
+    {contractAddress:"0x3f1a8d2c5b9e7064a1f3d8c2b5e09a7d6c4f1b3e",authorHandle:"@base_maxi",grade:"B",status:"open",tiersHit:2,tierCount:4,amountInEth:0.0980,currentPriceEth:4.10e-6,realisedPnlEth:0.1320,unrealizedPnlEth:0.0120,unrealizedPct:120.0,openedAt:ago(220)}
+  ],
+  closedPositions:[
+    {contractAddress:"0xa1b2c3d4e5f60718293a4b5c6d7e8f9012345678",authorHandle:"@onchain_owl",amountInEth:0.1100,entryPriceEth:8.0e-7,exitPriceEth:1.60e-6,realisedPnlEth:0.1100,realisedPct:100,closedAt:ago(190)},
+    {contractAddress:"0xf0e1d2c3b4a5968778695a4b3c2d1e0f12348765",authorHandle:"@degen_scholar",amountInEth:0.1260,entryPriceEth:2.1e-7,exitPriceEth:4.30e-7,realisedPnlEth:0.1320,realisedPct:104.8,closedAt:ago(420)},
+    {contractAddress:"0x4c5d6e7f8091a2b3c4d5e6f70819a2b3c4d5e6f7",authorHandle:"@just_aped_again",amountInEth:0.0900,entryPriceEth:5.0e-7,exitPriceEth:3.25e-7,realisedPnlEth:-0.0315,realisedPct:-35,closedAt:ago(610)},
+    {contractAddress:"0x7e8f9a0b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f",authorHandle:"@base_maxi",amountInEth:0.1050,entryPriceEth:9.0e-7,exitPriceEth:1.80e-6,realisedPnlEth:0.1050,realisedPct:100,closedAt:ago(1450)},
+    {contractAddress:"0x2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c",authorHandle:"@alpha_seeker",amountInEth:0.0820,entryPriceEth:4.0e-7,exitPriceEth:7.10e-7,realisedPnlEth:0.0635,realisedPct:77.4,closedAt:ago(2600)}
+  ],
+  recentReviews:[
+    {authorHandle:"@degen_scholar",contractAddress:"0x9b2c4f7a1e8d6c5b3a2f1e0d9c8b7a6f5e4d3c2b",authorScore:88,tokenScore:91,grade:"A",decision:"BUY",reviewedAt:ago(133),rationale:"Strong author, deep liquidity, clean holder spread — high conviction."},
+    {authorHandle:"@base_maxi",contractAddress:"0x3f1a8d2c5b9e7064a1f3d8c2b5e09a7d6c4f1b3e",authorScore:71,tokenScore:78,grade:"B",decision:"BUY",reviewedAt:ago(42),rationale:"Solid setup and a credible author — worth a measured position."},
+    {authorHandle:"@just_aped_again",contractAddress:"0x55a1d8c2b9e7064f1a3d8c2b5e09a7d6c4f1b3e0",authorScore:21,tokenScore:28,grade:"F",decision:"SKIP",reviewedAt:ago(58),rationale:"Thin author, thin liquidity, concentrated supply — likely exit liquidity."},
+    {authorHandle:"@meme_thesis",contractAddress:"0xdeadbeef00112233445566778899aabbccddeeff",authorScore:52,tokenScore:38,grade:"D",decision:"SKIP",reviewedAt:ago(96),rationale:"Top 10 holders own over 60% of supply — concentration risk too high."}
+  ]
+};
+function statCard(l,v,s,c){return '<div class="stat-card"><div class="stat-label">'+esc(l)+'</div><div class="stat-value '+(c||"")+'">'+esc(v)+'</div><div class="stat-sub">'+esc(s)+'</div></div>';}
+function mini(v,l){return '<div class="mini"><div class="mini-value">'+esc(v)+'</div><div class="mini-label">'+esc(l)+'</div></div>';}
+function bsc(a){return"https://basescan.org/token/"+encodeURIComponent(a);}
+function renderDash(d){
+  var p=d.portfolio,r=d.reviews,di=d.distributions;
+  $("#stat-grid").innerHTML=[statCard("Portfolio value",fmtEth(p.balanceEth)+" ETH","trading wallet balance"),statCard("Realised PnL",fmtEth(p.realizedPnlEth)+" ETH","since inception",pnl(p.realizedPnlEth)),statCard("Win rate",Math.round(p.winRate*100)+"%",p.winCount+" / "+p.closedCount+" closed"),statCard("Open positions",String(p.openCount),p.closedCount+" closed")].join("");
+  $("#stat-row").innerHTML=[mini(String(r.total),"theses reviewed"),mini(r.buys+" / "+r.skips,"bought / skipped"),mini(fmtEth(di.toAuthors)+" ETH","paid to authors"),mini(fmtEth(di.toBuyback)+" ETH","$THESIS bought back & burned")].join("");
+  var f=d.funnel||{};$("#funnel-line").innerHTML="Triage funnel —  <b>"+(f.seen||0)+"</b> mentions seen  ·  <b>"+(f.passed||0)+"</b> passed the filters  ·  <b>"+(f.reviewed||0)+"</b> fully reviewed  ·  <b>"+(f.queued||0)+"</b> waiting in the queue";
+  $("#open-count").textContent=d.openPositions.length;
+  $("#open-rows").innerHTML=d.openPositions.map(function(o){var stage=o.tiersHit+"/"+o.tierCount+" TP";return '<tr><td><a class="tok" href="'+bsc(o.contractAddress)+'" target="_blank" rel="noopener">'+esc(shortAddr(o.contractAddress))+'</a></td><td>'+esc(o.authorHandle)+'</td><td>'+gradeBadge(o.grade)+'</td><td>'+esc(stage)+'</td><td class="num">'+fmtEth(o.amountInEth)+'</td><td class="num">'+esc(fmtPrice(o.currentPriceEth))+'</td><td class="num '+pnl(o.unrealizedPnlEth)+'">'+fmtEth(o.unrealizedPnlEth)+' ('+fmtPct(o.unrealizedPct)+')</td><td class="num '+pnl(o.realisedPnlEth)+'">'+fmtEth(o.realisedPnlEth)+'</td></tr>';}).join("");
+  $("#closed-count").textContent=d.closedPositions.length;
+  $("#closed-rows").innerHTML=d.closedPositions.map(function(c){return '<tr><td><a class="tok" href="'+bsc(c.contractAddress)+'" target="_blank" rel="noopener">'+esc(shortAddr(c.contractAddress))+'</a></td><td>'+esc(c.authorHandle)+'</td><td class="num">'+fmtEth(c.amountInEth)+'</td><td class="num">'+esc(fmtPrice(c.entryPriceEth))+'</td><td class="num">'+esc(fmtPrice(c.exitPriceEth))+'</td><td class="num '+pnl(c.realisedPnlEth)+'">'+fmtEth(c.realisedPnlEth)+' ('+fmtPct(c.realisedPct)+')</td><td>'+esc(timeAgo(c.closedAt))+'</td></tr>';}).join("");
+  $("#feed").innerHTML=d.recentReviews.map(function(v){return '<div class="feed-item"><div class="feed-top"><span class="feed-handle">'+esc(v.authorHandle)+'</span><a class="tok" href="'+bsc(v.contractAddress)+'" target="_blank" rel="noopener">'+esc(shortAddr(v.contractAddress))+'</a><span class="feed-scores">Registrar '+v.authorScore+' · Auditor '+v.tokenScore+'</span>'+gradeBadge(v.grade)+'<span class="badge '+(v.decision==="BUY"?"buy":"skip")+'">'+esc(v.decision)+'</span><span class="feed-time">'+esc(timeAgo(v.reviewedAt))+'</span></div><div class="feed-rationale">'+esc(v.rationale)+'</div></div>';}).join("");
+  var dc=[["25%","#4F9DDE",fmtEth(di.toAuthors),"To authors"],["25%","#3FB984",fmtEth(di.toPortfolio),"To trading portfolio"],["25%","#8593AA",fmtEth(di.toTeam),"To team / running costs"],["25%","#E0653E",fmtEth(di.toBuyback),"$THESIS buyback & burn"]];
+  $("#dist-grid").innerHTML=dc.map(function(x){return '<div class="dist-card" style="--c:'+x[1]+'"><div class="dist-pct">'+x[0]+'</div><div class="dist-value">'+x[2]+' ETH</div><div class="dist-label">'+esc(x[3])+'</div></div>';}).join("");
+}
+renderDash(SAMPLE);
+
+/* ---- scripted live Faculty Room ---- */
+function setAgent(a,st){var el=document.getElementById("agent-"+a);if(!el)return;el.classList.remove("active","done");if(st)el.classList.add(st);}
+function idleBody(a,t){document.getElementById("body-"+a).innerHTML='<div class="agent-idle">'+esc(t)+'</div>';}
+function addLine(a,t){var b=document.getElementById("body-"+a);if(b.querySelector(".agent-idle"))b.innerHTML="";var d=document.createElement("div");d.className="line"+(/^verdict/i.test(t)?" verdict":"");d.textContent=t;b.appendChild(d);}
+function resetRoom(){["registrar","auditor","dean","bursar"].forEach(function(a){setAgent(a,null);idleBody(a,"queued — awaiting review");});$("#verdict-banner").hidden=true;}
+
+async function streamAgent(a,steps){setAgent(a,"active");document.getElementById("body-"+a).innerHTML="";for(var i=0;i<steps.length;i++){await sleep(430);addLine(a,steps[i]);}await sleep(380);setAgent(a,"done");}
+
+var SCENARIOS=[
+  {author:"@degen_scholar",thesis:"real community forming, devs active, liquidity locked.",ca:"0x9b2c4f7a1e8d6c5b3a2f1e0d9c8b7a6f5e4d3c2b",
+   registrar:["Pulling @degen_scholar from Frontrun's X index…","Smart followers: 142 KOL / insider accounts","Track record: 4 past calls, 75% reached 2x","Verdict — Author Score 88 / 100"],
+   auditor:["Fetching on-chain data — liquidity, holders, deployer…","Liquidity pool depth: $214,500","Top 10 holders control 19% of supply","Launchpad: clanker","Honeypot / rug checks passed","Verdict — Token Score 91 / 100"],
+   dean:["Reading the thesis submitted by @degen_scholar…","Weighing the Registrar (88) against the Auditor (91)","Consulted the LLM for a judgement call on the thesis","Strong author, deep liquidity, clean holder spread — high conviction","Verdict — Grade A, FUND IT at 9.5% of portfolio"],
+   verdict:{grade:"A",decision:"BUY",pct:9.5},
+   bursar:["Sizing the position at 9.5% of the portfolio","Buying 0.1425 ETH of the token on Base","Take-profit +100% and stop-loss -35% attached","Verdict — position pos-9f2c is now open"],
+   endowment:["A position closed in profit — settling the books…","Realised profit: 0.1840 ETH","Splitting 25/25/25/25 — 0.0460 ETH to @onchain_owl","Verdict — author share sent to their wallet on Base"]},
+  {author:"@just_aped_again",thesis:"stealth launch, tiny mcap, room to run. ser.",ca:"0x55a1d8c2b9e7064f1a3d8c2b5e09a7d6c4f1b3e0",
+   registrar:["Pulling @just_aped_again from Frontrun's X index…","Smart followers: 3 KOL / insider accounts","Track record: no past contract calls on file","No reach and no history — flagging as a likely bot","Verdict — Author Score 21 / 100"],
+   auditor:["Fetching on-chain data — liquidity, holders, deployer…","Liquidity pool depth: $7,300","Top 10 holders control 63% of supply","Launchpad: unrecognised","Honeypot / rug checks passed","Verdict — Token Score 28 / 100"],
+   dean:["Reading the thesis submitted by @just_aped_again…","Weighing the Registrar (21) against the Auditor (28)","Scored against the rule book","Thin author, thin liquidity, concentrated supply — likely exit liquidity","Verdict — Grade F, SKIP (only A and B grades are funded)"],
+   verdict:{grade:"F",decision:"SKIP"},
+   bursar:["No position taken — the Dean graded this submission a SKIP"]},
+  {author:"@base_maxi",thesis:"known team, verified contract, actual utility behind it.",ca:"0x3f1a8d2c5b9e7064a1f3d8c2b5e09a7d6c4f1b3e",
+   registrar:["Pulling @base_maxi from Frontrun's X index…","Smart followers: 67 KOL / insider accounts","Track record: 2 past calls, 50% reached 2x","Verdict — Author Score 71 / 100"],
+   auditor:["Fetching on-chain data — liquidity, holders, deployer…","Liquidity pool depth: $96,200","Top 10 holders control 31% of supply","Launchpad: bankr","Honeypot / rug checks passed","Verdict — Token Score 78 / 100"],
+   dean:["Reading the thesis submitted by @base_maxi…","Weighing the Registrar (71) against the Auditor (78)","Consulted the LLM for a judgement call on the thesis","Solid setup and a credible author — worth a measured position","Verdict — Grade B, FUND IT at 7.4% of portfolio"],
+   verdict:{grade:"B",decision:"BUY",pct:7.4},
+   bursar:["Sizing the position at 7.4% of the portfolio","Buying 0.1110 ETH of the token on Base","Take-profit +100% and stop-loss -35% attached","Verdict — position pos-3f1a is now open"],
+   endowment:["A position closed in profit — settling the books…","Realised profit: 0.1050 ETH","Splitting 25/25/25/25 — 0.0262 ETH to @alpha_seeker","Verdict — author share escrowed; a payout request posted on X"]}
+];
+
+function showVerdict(v){
+  var g=$("#verdict-grade");g.textContent=v.grade;g.className="verdict-grade grade-"+v.grade;
+  $("#verdict-text").innerHTML=v.decision==="BUY"?'<strong>Grade '+v.grade+' — FUND IT</strong><span class="vt-sub">The Bursar opens a '+v.pct+'% position</span>':'<strong>Grade '+v.grade+' — SKIP</strong><span class="vt-sub">Only A and B grades are funded</span>';
+  $("#verdict-banner").hidden=false;
+}
+
+async function playReview(sc){
+  resetRoom();
+  $("#room-activity").textContent="Reviewing a thesis from "+sc.author+"…";
+  $("#submission-card").hidden=false;
+  $("#sub-author").textContent=sc.author;
+  $("#sub-thesis").textContent="“"+sc.thesis+"”";
+  var ca=$("#sub-ca");ca.textContent=shortAddr(sc.ca);ca.href=bsc(sc.ca);
+  await sleep(700);
+  await streamAgent("registrar",sc.registrar);
+  await streamAgent("auditor",sc.auditor);
+  await streamAgent("dean",sc.dean);
+  showVerdict(sc.verdict);
+  await sleep(700);
+  await streamAgent("bursar",sc.bursar);
+  if(sc.endowment){await sleep(900);await streamAgent("endowment",sc.endowment);}
+  $("#room-activity").textContent="Watching X for new submissions…";
+}
+
+async function loop(){
+  var i=0;
+  /* eslint-disable no-constant-condition */
+  while(true){
+    await playReview(SCENARIOS[i%SCENARIOS.length]);
+    i++;
+    await sleep(4200);
+  }
+}
+loop();
+</script>
+</body>
+</html>

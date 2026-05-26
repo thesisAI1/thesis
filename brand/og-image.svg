@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <linearGradient id="badge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1F2738"/>
+      <stop offset="1" stop-color="#0B0F17"/>
+    </linearGradient>
+    <radialGradient id="markGlow" cx="0.5" cy="0.42" r="0.62">
+      <stop offset="0" stop-color="#E6A33E" stop-opacity="0.26"/>
+      <stop offset="1" stop-color="#E6A33E" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="amberGlow" cx="0.5" cy="0.18" r="0.7">
+      <stop offset="0" stop-color="#E6A33E" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#E6A33E" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="54" height="54" patternUnits="userSpaceOnUse">
+      <path d="M54 0H0V54" fill="none" stroke="#7184A6" stroke-width="1"/>
+    </pattern>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="6.5" result="b" />
+      <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1200" height="630" fill="#080A10" />
+  <rect width="1200" height="630" fill="url(#grid)" opacity="0.055" />
+  <rect width="1200" height="630" fill="url(#amberGlow)" />
+
+  <text x="600" y="104" font-size="16" font-weight="700" letter-spacing="6.5" fill="#5C6678" text-anchor="middle">AUTONOMOUS &#183; ON-CHAIN &#183; BASE</text>
+
+  <g transform="translate(491,132) scale(0.92)">
+    <rect x="10" y="10" width="220" height="220" rx="50" fill="url(#badge)" stroke="#36425A" stroke-width="2" />
+    <rect x="10" y="10" width="220" height="220" rx="50" fill="url(#markGlow)" />
+    <g filter="url(#glow)">
+      <ellipse cx="120" cy="120" rx="46" ry="63" fill="none" stroke="#E6A33E" stroke-width="16" />
+      <rect x="84" y="112" width="72" height="16" rx="8" fill="#E6A33E" />
+    </g>
+  </g>
+
+  <text x="600" y="436" font-size="86" font-weight="800" letter-spacing="10" fill="#ECF0F7" text-anchor="middle">THESIS</text>
+  <text x="600" y="482" font-size="23" fill="#9AA7BC" text-anchor="middle">The committee that reviews your thesis &#8212; and trades it on Base.</text>
+
+  <line x1="446" y1="551" x2="754" y2="551" stroke="#2E3848" stroke-width="2" />
+  <g transform="translate(428,523)">
+    <rect width="56" height="56" rx="13" fill="#10141D" stroke="#4F9DDE" stroke-width="1.6" />
+    <g transform="translate(13,13) scale(1.25)" fill="none" stroke="#4F9DDE" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="2.8"/>
+    </g>
+  </g>
+  <g transform="translate(500,523)">
+    <rect width="56" height="56" rx="13" fill="#10141D" stroke="#E6A33E" stroke-width="1.6" />
+    <g transform="translate(13,13) scale(1.25)" fill="none" stroke="#E6A33E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/>
+    </g>
+  </g>
+  <g transform="translate(572,523)">
+    <rect width="56" height="56" rx="13" fill="#10141D" stroke="#9B6BDF" stroke-width="1.6" />
+    <g transform="translate(13,13) scale(1.25)" fill="none" stroke="#9B6BDF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 4v16M6 8h12M9 20h6"/><path d="M6 8 3 14a3 3 0 0 0 6 0Z"/><path d="M18 8l3 6a3 3 0 0 1-6 0Z"/>
+    </g>
+  </g>
+  <g transform="translate(644,523)">
+    <rect width="56" height="56" rx="13" fill="#10141D" stroke="#3FB984" stroke-width="1.6" />
+    <g transform="translate(13,13) scale(1.25)" fill="none" stroke="#3FB984" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 16.5 9.5 10l4 4L21 6"/><path d="M15.5 6H21v5.5"/>
+    </g>
+  </g>
+  <g transform="translate(716,523)">
+    <rect width="56" height="56" rx="13" fill="#10141D" stroke="#E0653E" stroke-width="1.6" />
+    <g transform="translate(13,13) scale(1.25)" fill="none" stroke="#E0653E" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17M3.5 12h17"/>
+    </g>
+  </g>
+</svg>

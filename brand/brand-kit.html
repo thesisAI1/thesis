@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>THESIS — Brand Kit</title>
+<style>
+:root{--bg:#080A10;--panel:#11151F;--panel-2:#161C28;--border:#232B3A;--border-2:#2E3848;--text:#EAEEF6;--muted:#8B97AC;--dim:#5C6678;--accent:#E6A33E;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;--sans:"Segoe UI",-apple-system,Helvetica,Arial,sans-serif;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:920px;margin:0 auto;padding:48px 24px 80px;}
+h1{font-size:13px;font-family:var(--mono);letter-spacing:3px;color:var(--accent);font-weight:700;}
+h2{font-size:13px;font-family:var(--mono);letter-spacing:2px;color:var(--accent);margin-bottom:18px;display:flex;align-items:center;gap:10px;}
+h2::after{content:"";flex:1;height:1px;background:var(--border);}
+section{padding:40px 0;border-top:1px solid var(--border);}
+section:first-of-type{border-top:none;}
+p{color:var(--muted);font-size:14px;}
+.lead{font-size:34px;font-weight:800;letter-spacing:-.5px;color:var(--text);line-height:1.2;margin:14px 0 6px;}
+.lead-sub{font-size:15px;}
+.frame{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:24px;display:flex;align-items:center;justify-content:center;}
+.frame img{max-width:100%;height:auto;display:block;}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.cap{font-family:var(--mono);font-size:11px;color:var(--dim);margin-top:8px;letter-spacing:.5px;}
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;}
+.sw{border:1px solid var(--border);border-radius:11px;overflow:hidden;background:var(--panel);}
+.sw .chip{height:62px;}
+.sw .meta{padding:9px 11px;}
+.sw .name{font-size:12.5px;font-weight:700;}
+.sw .hex{font-family:var(--mono);font-size:11px;color:var(--muted);}
+.agents{display:grid;gap:10px;}
+.agent{display:flex;align-items:center;gap:14px;background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--c);border-radius:11px;padding:13px 15px;}
+.agent .sig{flex:none;width:44px;height:44px;display:grid;place-items:center;border-radius:10px;color:var(--c);background:color-mix(in srgb,var(--c) 14%,var(--panel-2));border:1px solid color-mix(in srgb,var(--c) 40%,var(--border));}
+.agent .sig svg{width:24px;height:24px;}
+.agent .nm{font-weight:800;font-size:14.5px;}
+.agent .ro{font-family:var(--mono);font-size:11.5px;color:var(--dim);}
+.agent .hx{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--muted);}
+.avatar-row{display:flex;gap:20px;align-items:center;flex-wrap:wrap;}
+.avatar-circle{width:150px;height:150px;border-radius:50%;overflow:hidden;border:1px solid var(--border);}
+.avatar-circle img{width:100%;height:100%;}
+.files{font-family:var(--mono);font-size:12.5px;color:var(--muted);}
+.files li{padding:6px 0;border-bottom:1px solid var(--border);list-style:none;display:flex;justify-content:space-between;gap:12px;}
+.files li:last-child{border:none;}
+.files .fn{color:var(--text);}
+.type-sample{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:22px;}
+.t-display{font-size:30px;font-weight:800;letter-spacing:-.5px;}
+.t-mono{font-family:var(--mono);font-size:14px;color:var(--accent);margin-top:6px;letter-spacing:1px;}
+.t-body{color:var(--muted);margin-top:10px;font-size:14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>THESIS &mdash; BRAND KIT</h1>
+  <div class="lead">The committee that trades your theses.</div>
+  <p class="lead-sub">Visual identity for the THESIS project — an AI agent committee that reviews token theses on X and trades them on Base.</p>
+
+  <section>
+    <h2>LOGO</h2>
+    <div class="frame"><img src="logo-lockup.svg" alt="THESIS logo lockup" style="max-width:560px" /></div>
+    <p class="cap">Primary lockup &mdash; logo-lockup.svg</p>
+    <div class="grid2" style="margin-top:16px">
+      <div>
+        <div class="frame"><img src="logomark.svg" alt="THESIS logomark" style="max-width:170px" /></div>
+        <p class="cap">Logomark &mdash; logomark.svg</p>
+      </div>
+      <div>
+        <div class="frame" style="height:100%"><p style="text-align:left">The mark is a theta (&#920;) — the Greek initial of <em>thesis</em>. A clean ring crossed by a bar: an academic seal for an on-chain committee. Use the mark alone where space is tight; the lockup everywhere else.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>X / TWITTER PROFILE</h2>
+    <div class="avatar-row">
+      <div>
+        <div class="frame" style="padding:0;width:150px;height:150px"><img src="x-avatar.svg" alt="avatar" /></div>
+        <p class="cap">avatar (square)</p>
+      </div>
+      <div>
+        <div class="avatar-circle"><img src="x-avatar.svg" alt="avatar circular" /></div>
+        <p class="cap">how X crops it</p>
+      </div>
+    </div>
+    <div class="frame" style="margin-top:16px;padding:0"><img src="x-banner.svg" alt="X banner" /></div>
+    <p class="cap">header banner 1500&times;500 &mdash; x-banner.svg / x-banner.png</p>
+  </section>
+
+  <section>
+    <h2>SOCIAL SHARE</h2>
+    <div class="frame" style="padding:0"><img src="og-image.svg" alt="social share image" /></div>
+    <p class="cap">link-preview image 1200&times;630 &mdash; og-image.svg / og-image.png</p>
+  </section>
+
+  <section>
+    <h2>COLOUR</h2>
+    <div class="swatches">
+      <div class="sw"><div class="chip" style="background:#080A10"></div><div class="meta"><div class="name">Void</div><div class="hex">#080A10</div></div></div>
+      <div class="sw"><div class="chip" style="background:#11151F"></div><div class="meta"><div class="name">Panel</div><div class="hex">#11151F</div></div></div>
+      <div class="sw"><div class="chip" style="background:#232B3A"></div><div class="meta"><div class="name">Border</div><div class="hex">#232B3A</div></div></div>
+      <div class="sw"><div class="chip" style="background:#EAEEF6"></div><div class="meta"><div class="name">Text</div><div class="hex">#EAEEF6</div></div></div>
+      <div class="sw"><div class="chip" style="background:#E6A33E"></div><div class="meta"><div class="name">Accent / Amber</div><div class="hex">#E6A33E</div></div></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>THE FACULTY</h2>
+    <p style="margin-bottom:16px">Five agents, five colours, five sigils.</p>
+    <div class="agents">
+      <div class="agent" style="--c:#4F9DDE">
+        <span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="2.8"/></svg></span>
+        <div><div class="nm">The Registrar</div><div class="ro">vets the author</div></div><div class="hx">#4F9DDE</div>
+      </div>
+      <div class="agent" style="--c:#E6A33E">
+        <span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg></span>
+        <div><div class="nm">The Auditor</div><div class="ro">audits the token</div></div><div class="hx">#E6A33E</div>
+      </div>
+      <div class="agent" style="--c:#9B6BDF">
+        <span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M6 8h12M9 20h6"/><path d="M6 8 3 14a3 3 0 0 0 6 0Z"/><path d="M18 8l3 6a3 3 0 0 1-6 0Z"/></svg></span>
+        <div><div class="nm">The Dean</div><div class="ro">delivers the verdict</div></div><div class="hx">#9B6BDF</div>
+      </div>
+      <div class="agent" style="--c:#3FB984">
+        <span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16.5 9.5 10l4 4L21 6"/><path d="M15.5 6H21v5.5"/></svg></span>
+        <div><div class="nm">The Bursar</div><div class="ro">executes the trade</div></div><div class="hx">#3FB984</div>
+      </div>
+      <div class="agent" style="--c:#E0653E">
+        <span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17M3.5 12h17"/></svg></span>
+        <div><div class="nm">The Endowment</div><div class="ro">splits the profit</div></div><div class="hx">#E0653E</div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>TYPOGRAPHY</h2>
+    <div class="type-sample">
+      <div class="t-display">Display &mdash; bold sans, tight tracking</div>
+      <div class="t-mono">MONO &mdash; LABELS, DATA, ADDRESSES</div>
+      <div class="t-body">Body — a clean grotesk for prose. The website pairs a heavy sans for headlines with a monospace for every number, label and on-chain address: it should always read like a trading terminal, never like a brochure.</div>
+    </div>
+  </section>
+
+  <section>
+    <h2>ASSETS</h2>
+    <ul class="files">
+      <li><span class="fn">logomark.svg</span><span>the theta badge</span></li>
+      <li><span class="fn">logo-lockup.svg</span><span>mark + wordmark</span></li>
+      <li><span class="fn">x-avatar.svg / .png</span><span>X profile picture, 400&times;400</span></li>
+      <li><span class="fn">x-banner.svg / .png</span><span>X header, 1500&times;500</span></li>
+      <li><span class="fn">og-image.svg / .png</span><span>link-preview image, 1200&times;630</span></li>
+      <li><span class="fn">favicon.svg</span><span>website tab icon (in packages/website/public)</span></li>
+    </ul>
+    <p style="margin-top:14px">Upload the <strong>.png</strong> files to X — it does not accept SVG. Everything else stays SVG so it scales cleanly.</p>
+  </section>
+
+</div>
+</body>
+</html>

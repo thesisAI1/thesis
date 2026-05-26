@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 500" width="1500" height="500" font-family="Arial, Helvetica, sans-serif">
+  <defs>
+    <linearGradient id="badge" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1F2738"/>
+      <stop offset="1" stop-color="#0B0F17"/>
+    </linearGradient>
+    <radialGradient id="markGlow" cx="0.5" cy="0.42" r="0.62">
+      <stop offset="0" stop-color="#4F9DDE" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#4F9DDE" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="blueGlow1" cx="0.82" cy="0.05" r="0.62">
+      <stop offset="0" stop-color="#4F9DDE" stop-opacity="0.20"/>
+      <stop offset="1" stop-color="#4F9DDE" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="goldHint" cx="0.08" cy="0.98" r="0.6">
+      <stop offset="0" stop-color="#E6A33E" stop-opacity="0.13"/>
+      <stop offset="1" stop-color="#E6A33E" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="54" height="54" patternUnits="userSpaceOnUse">
+      <path d="M54 0H0V54" fill="none" stroke="#7184A6" stroke-width="1"/>
+    </pattern>
+    <filter id="glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="6.5" result="b" />
+      <feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1500" height="500" fill="#080A10" />
+  <rect width="1500" height="500" fill="url(#grid)" opacity="0.055" />
+  <rect width="1500" height="500" fill="url(#blueGlow1)" />
+  <rect width="1500" height="500" fill="url(#goldHint)" />
+
+  <text x="98" y="86" font-size="16" font-weight="700" letter-spacing="6" fill="#5C6678">AUTOMATED &#183; ON-CHAIN &#183; BASE</text>
+
+  <!-- agent logo mark (blue) -->
+  <g transform="translate(90,138) scale(0.82)">
+    <rect x="10" y="10" width="220" height="220" rx="50" fill="url(#badge)" stroke="#36425A" stroke-width="2" />
+    <rect x="10" y="10" width="220" height="220" rx="50" fill="url(#markGlow)" />
+    <g filter="url(#glow)">
+      <ellipse cx="120" cy="120" rx="46" ry="63" fill="none" stroke="#4F9DDE" stroke-width="16" />
+      <rect x="84" y="112" width="72" height="16" rx="8" fill="#4F9DDE" />
+    </g>
+  </g>
+
+  <!-- handle + instruction -->
+  <text x="322" y="232" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="68" font-weight="800" letter-spacing="2" fill="#ECF0F7">@thesis_agent</text>
+  <text x="326" y="276" font-size="22" fill="#9AA7BC">Tag me with a Base token thesis &#43; 0x address &#8594; the committee reviews live</text>
+
+  <!-- mock tag syntax -->
+  <g transform="translate(322,310)">
+    <rect x="0" y="0" width="560" height="86" rx="14" fill="#10141D" stroke="#2E3848" stroke-width="1.4" />
+    <text x="20" y="34" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="15.5" fill="#74C2F7">@thesis_agent</text>
+    <text x="178" y="34" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="15.5" fill="#9AA7BC">solid base play, real volume…</text>
+    <text x="20" y="64" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="15.5" fill="#9AA7BC">CA:</text>
+    <text x="56" y="64" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-size="15.5" fill="#74C2F7">0x...</text>
+  </g>
+
+  <!-- right cluster: managed by + brand url -->
+  <text x="1402" y="180" font-size="14" font-weight="700" letter-spacing="4.5" fill="#5C6678" text-anchor="end">MANAGED BY</text>
+  <text x="1402" y="222" font-size="30" font-weight="800" letter-spacing="1" fill="#ECF0F7" text-anchor="end">@thesisonbase</text>
+  <line x1="1080" y1="252" x2="1402" y2="252" stroke="#2E3848" stroke-width="2" />
+  <text x="1402" y="292" font-size="13" letter-spacing="2.5" fill="#5C6678" text-anchor="end">FIVE AGENTS &#183; ONE TREASURY</text>
+  <text x="1402" y="338" font-size="20" font-family="ui-monospace, 'SF Mono', Menlo, Consolas, monospace" font-weight="700" fill="#74C2F7" text-anchor="end">thesisonbase.com</text>
+</svg>

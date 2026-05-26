@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>THESIS — the committee that trades your theses</title>
+  <meta name="description" content="Submit a token thesis on X. A committee of five AI agents reviews it live, on-chain, on Base — and pays you 25% when it wins." />
+  <link rel="icon" href="/favicon.svg" />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="/">
+      <span class="brand-mark">&#920;</span>
+      <span class="brand-name">THESIS</span>
+    </a>
+    <div class="topbar-right">
+      <a class="topbar-link" href="docs.html">Docs</a>
+      <a class="topbar-link" href="https://x.com/thesisonbase" target="_blank" rel="noopener noreferrer" title="@thesisonbase on X"><svg class="x-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@thesisonbase</a>
+      <span class="status-pill" id="status-pill"><span class="live-dot"></span> connecting</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <p class="eyebrow">AUTONOMOUS&nbsp;&nbsp;&middot;&nbsp;&nbsp;ON-CHAIN&nbsp;&nbsp;&middot;&nbsp;&nbsp;BASE</p>
+      <h1>You submit the thesis.<br /><span class="accent">The committee trades it.</span></h1>
+      <p class="lede">
+        Tag the agent on X with a token thesis. Five AI agents put it through
+        review — and you watch every one of them think, in real time. Pass, and
+        <strong>25% of the profit is yours</strong>.
+      </p>
+      <div class="hero-cta">
+        <a class="btn btn-primary" href="#room">Watch the committee</a>
+        <a class="btn" href="#payout">How payouts work</a>
+      </div>
+    </section>
+
+    <!-- ===================== $THESIS TOKEN ===================== -->
+    <section class="token-launch" id="token">
+      <div class="section-tag">$THESIS · LIVE ON BASE</div>
+      <h2>The $THESIS token</h2>
+      <p class="token-intro">
+        Launched on Bankr. A quarter of every winning trade buys $THESIS on the
+        open market and burns it — every committee win permanently shrinks the
+        supply.
+      </p>
+      <div class="token-card">
+        <div class="token-row">
+          <span class="token-label">CA</span>
+          <code class="token-ca" id="token-ca">0x36e807119529E44d6F36aD5CE24AeB87a4529ba3</code>
+          <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('token-ca').textContent).then(()=>{this.textContent='&#10003; copied';setTimeout(()=>{this.textContent='copy';},1600);});">copy</button>
+        </div>
+        <div class="token-actions">
+          <a class="btn btn-primary" href="https://dexscreener.com/base/0x36e807119529E44d6F36aD5CE24AeB87a4529ba3" target="_blank" rel="noopener noreferrer">View chart on DexScreener &#8594;</a>
+          <a class="btn" href="https://basescan.org/token/0x36e807119529E44d6F36aD5CE24AeB87a4529ba3" target="_blank" rel="noopener noreferrer">Contract on BaseScan &#8599;</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== LIVE FACULTY ROOM ===================== -->
+    <section class="room" id="room">
+      <div class="section-tag">THE FACULTY ROOM</div>
+      <div class="room-bar">
+        <span class="room-live"><span class="pulse"></span> COMMITTEE IN SESSION</span>
+        <span class="room-activity" id="room-activity">connecting to the live stream…</span>
+      </div>
+
+      <div class="submission-card" id="submission-card" hidden>
+        <div class="sub-label">NOW REVIEWING</div>
+        <div class="sub-author" id="sub-author">@author</div>
+        <div class="sub-thesis" id="sub-thesis"></div>
+        <div class="sub-actions">
+          <a class="sub-ca" id="sub-ca" target="_blank" rel="noopener noreferrer">0x…</a>
+          <button class="sub-btn" id="sub-copy-ca" title="Copy contract address">copy CA</button>
+          <a class="sub-btn" id="sub-view-tweet" href="#" target="_blank" rel="noopener noreferrer" title="Open the original tweet on X" style="display:none">view tweet &#8599;</a>
+        </div>
+      </div>
+
+      <div class="agents">
+        <div class="agent-row">
+          <article class="agent" id="agent-registrar" style="--c:#4F9DDE">
+            <div class="agent-head">
+              <span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12Z"/><circle cx="12" cy="12" r="2.8"/></svg></span>
+              <div class="agent-id"><div class="agent-name">The Registrar</div><div class="agent-role">vets the author</div></div>
+              <span class="agent-status"></span>
+            </div>
+            <div class="agent-body" id="body-registrar"><div class="agent-idle">idle &mdash; awaiting a submission</div></div>
+          </article>
+          <article class="agent" id="agent-auditor" style="--c:#E0A33E">
+            <div class="agent-head">
+              <span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg></span>
+              <div class="agent-id"><div class="agent-name">The Auditor</div><div class="agent-role">audits the token</div></div>
+              <span class="agent-status"></span>
+            </div>
+            <div class="agent-body" id="body-auditor"><div class="agent-idle">idle &mdash; awaiting a submission</div></div>
+          </article>
+        </div>
+
+        <div class="flow-link"></div>
+
+        <article class="agent wide" id="agent-dean" style="--c:#9B6BDF">
+          <div class="agent-head">
+            <span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v16M6 8h12M9 20h6"/><path d="M6 8 3 14a3 3 0 0 0 6 0Z"/><path d="M18 8l3 6a3 3 0 0 1-6 0Z"/></svg></span>
+            <div class="agent-id"><div class="agent-name">The Dean</div><div class="agent-role">delivers the verdict</div></div>
+            <span class="agent-status"></span>
+          </div>
+          <div class="agent-body" id="body-dean"><div class="agent-idle">idle &mdash; awaiting the reports</div></div>
+        </article>
+
+        <div class="flow-link"></div>
+
+        <article class="agent wide" id="agent-bursar" style="--c:#3FB984">
+          <div class="agent-head">
+            <span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 16.5 9.5 10l4 4L21 6"/><path d="M15.5 6H21v5.5"/></svg></span>
+            <div class="agent-id"><div class="agent-name">The Bursar</div><div class="agent-role">executes the trade</div></div>
+            <span class="agent-status"></span>
+          </div>
+          <div class="agent-body" id="body-bursar"><div class="agent-idle">idle &mdash; awaiting a verdict</div></div>
+        </article>
+
+        <div class="flow-link"></div>
+
+        <article class="agent wide" id="agent-endowment" style="--c:#E0653E">
+          <div class="agent-head">
+            <span class="sig"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.5"/><path d="M12 3.5v17M3.5 12h17"/></svg></span>
+            <div class="agent-id"><div class="agent-name">The Endowment</div><div class="agent-role">splits the profit</div></div>
+            <span class="agent-status"></span>
+          </div>
+          <div class="agent-body" id="body-endowment"><div class="agent-idle">idle &mdash; settles trades when they close</div></div>
+        </article>
+      </div>
+
+      <div class="verdict-banner" id="verdict-banner" hidden>
+        <div class="verdict-grade" id="verdict-grade">A</div>
+        <div class="verdict-text" id="verdict-text"></div>
+      </div>
+    </section>
+
+    <!-- ===================== DASHBOARD ===================== -->
+    <section class="dash" id="dashboard">
+      <div class="section-tag">LIVE PERFORMANCE</div>
+      <div class="dash-head">
+        <div>
+          <h2>Every trade, on the record</h2>
+          <p class="dash-sub">Straight from the agent's wallet and trade log — refreshed automatically.</p>
+        </div>
+        <a class="wallet-link" id="wallet-link" href="#" target="_blank" rel="noopener noreferrer">Trading wallet on BaseScan &#8599;</a>
+      </div>
+
+      <div class="stat-grid" id="stat-grid"></div>
+      <div class="stat-row" id="stat-row"></div>
+      <p class="funnel-line" id="funnel-line"></p>
+
+      <h3 class="block-title">Open positions <span class="count-chip" id="open-count">0</span></h3>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>Token</th><th>Author</th><th>Grade</th><th>Stage</th><th class="num">Size</th><th class="num">Now</th><th class="num">Unrealised</th><th class="num">Realised</th><th>Links</th></tr></thead>
+          <tbody id="open-rows"></tbody>
+        </table>
+      </div>
+      <p class="empty" id="open-empty" hidden>No open positions right now.</p>
+
+      <h3 class="block-title">Closed trades <span class="count-chip" id="closed-count">0</span></h3>
+      <div class="table-wrap">
+        <table class="data-table">
+          <thead><tr><th>Token</th><th>Author</th><th class="num">Size</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">Realised PnL</th><th>Closed</th><th>Links</th></tr></thead>
+          <tbody id="closed-rows"></tbody>
+        </table>
+      </div>
+      <p class="empty" id="closed-empty" hidden>No closed trades yet.</p>
+
+      <h3 class="block-title">Decision log</h3>
+      <p class="block-sub">Every submission the committee has reviewed — scores, grade and verdict.</p>
+      <div class="feed" id="feed"></div>
+      <p class="empty" id="feed-empty" hidden>No submissions reviewed yet.</p>
+
+      <h3 class="block-title">Profit distribution</h3>
+      <p class="block-sub">Every winning trade splits four ways — 25% each.</p>
+      <div class="dist-grid" id="dist-grid"></div>
+    </section>
+
+    <section class="how">
+      <div class="section-tag">HOW IT WORKS</div>
+      <ol class="steps">
+        <li><span class="step-n">1</span> Post your thesis on X, tag the agent, and paste the token contract address.</li>
+        <li><span class="step-n">2</span> The Faculty reviews the author, the token, and the thesis — graded A&ndash;F, live.</li>
+        <li><span class="step-n">3</span> An A or B grade gets funded: the agent buys on Base with take-profit / stop-loss.</li>
+        <li><span class="step-n">4</span> On a winning exit the profit splits four ways — and the agent replies on your post to send your 25%.</li>
+      </ol>
+      <div class="docs-cta">
+        <a class="btn" href="docs.html">Read the full documentation &#8594;</a>
+        <span class="docs-cta-note">Every threshold, every agent, the whole pipeline.</span>
+      </div>
+    </section>
+
+    <section class="register" id="payout">
+      <div class="section-tag">GETTING PAID</div>
+      <h2>Your 25% — paid on X</h2>
+      <p class="register-intro">
+        There is nothing to sign up for and no wallet to connect here. When one
+        of your theses closes in profit, the agent comes to you — right under
+        your original post.
+      </p>
+      <div class="panel">
+        <div class="reg-step">
+          <div class="reg-step-head"><span class="dot">1</span> The agent replies to your thesis</div>
+          <p>When the trade exits in profit, the committee posts a reply on your
+          post telling you exactly what your 25% author share is — and asks for
+          a Base wallet address.</p>
+        </div>
+        <div class="reg-step">
+          <div class="reg-step-head"><span class="dot">2</span> You reply with your wallet</div>
+          <p>Reply to that tweet with a 0x address. Only the account that posted
+          the original thesis can claim the payout — a reply from anyone else is
+          ignored, so it cannot be hijacked.</p>
+        </div>
+        <div class="reg-step">
+          <div class="reg-step-head"><span class="dot ok">&#10003;</span> The payout is sent on-chain</div>
+          <p>The agent sends your ETH on Base and replies with the transaction
+          link. Your wallet is remembered, so any future win pays you straight
+          away.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <nav class="footer-nav">
+      <a href="#room">Faculty Room</a>
+      <a href="#dashboard">Dashboard</a>
+      <a href="docs.html">Docs</a>
+      <a href="https://x.com/thesisonbase" target="_blank" rel="noopener noreferrer"><svg class="x-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@thesisonbase</a>
+      <a href="https://x.com/thesis_agent" target="_blank" rel="noopener noreferrer"><svg class="x-icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@thesis_agent</a>
+    </nav>
+    <p>THESIS runs on Base. Every trade is on-chain and verifiable. Token trading carries financial risk — nothing here is financial advice.</p>
+  </footer>
+
+  <script src="/app.js"></script>
+</body>
+</html>

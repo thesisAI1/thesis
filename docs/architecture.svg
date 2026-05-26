@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 1090" font-family="'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto">
+      <path d="M0,0 L7,3 L0,6 Z" fill="#58647A"/>
+    </marker>
+  </defs>
+
+  <rect width="920" height="1090" fill="#0F1420"/>
+
+  <!-- Title -->
+  <text x="460" y="42" text-anchor="middle" fill="#E8EDF4" font-size="24" font-weight="700">THESIS — System Architecture</text>
+  <text x="460" y="64" text-anchor="middle" fill="#9AA7BC" font-size="12">Five agents review every submission on X · profits from a winning trade split 25 / 25 / 25 / 25</text>
+
+  <!-- X / Twitter -->
+  <rect x="250" y="92" width="420" height="58" rx="12" fill="#15202B" stroke="#1D9BF0" stroke-width="1.6"/>
+  <text x="460" y="118" text-anchor="middle" fill="#E8EDF4" font-size="15" font-weight="700">X / TWITTER</text>
+  <text x="460" y="137" text-anchor="middle" fill="#9AA7BC" font-size="11.5">User tags @thesis · writes a thesis · pastes the contract address</text>
+
+  <line x1="460" y1="150" x2="460" y2="168" stroke="#58647A" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- X Adapter -->
+  <rect x="290" y="170" width="340" height="52" rx="10" fill="#1A2130" stroke="#3A4456" stroke-width="1.4"/>
+  <text x="460" y="194" text-anchor="middle" fill="#E8EDF4" font-size="13.5" font-weight="700">X ADAPTER</text>
+  <text x="460" y="211" text-anchor="middle" fill="#9AA7BC" font-size="11">Mention ingestion — polls X for new tags</text>
+
+  <line x1="460" y1="222" x2="460" y2="240" stroke="#58647A" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Submission pill -->
+  <rect x="360" y="242" width="200" height="36" rx="18" fill="#2A3242" stroke="#5A6678" stroke-width="1.4"/>
+  <text x="460" y="265" text-anchor="middle" fill="#E8EDF4" font-size="12.5" font-weight="700" letter-spacing="1">SUBMISSION</text>
+
+  <!-- split to Registrar + Auditor -->
+  <path d="M460,278 V300 H255 V318" fill="none" stroke="#58647A" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M460,278 V300 H665 V318" fill="none" stroke="#58647A" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- The Registrar -->
+  <rect x="60" y="320" width="390" height="96" rx="12" fill="#15273A" stroke="#4F9DDE" stroke-width="1.6"/>
+  <text x="80" y="352" fill="#4F9DDE" font-size="16" font-weight="700">THE REGISTRAR</text>
+  <text x="80" y="376" fill="#C7D0DE" font-size="11.5">Vets the author — bot detection, smart followers, track record</text>
+  <text x="80" y="398" fill="#7FB6E6" font-size="11.5" font-weight="600">→ Author Score (0–100)  ·  data: Frontrun + Base</text>
+
+  <!-- The Auditor -->
+  <rect x="470" y="320" width="390" height="96" rx="12" fill="#2E2616" stroke="#E0A33E" stroke-width="1.6"/>
+  <text x="490" y="352" fill="#E0A33E" font-size="16" font-weight="700">THE AUDITOR</text>
+  <text x="490" y="376" fill="#E2D6BE" font-size="11.5">On-chain forensics — holders, launchpad, liquidity, rug checks</text>
+  <text x="490" y="398" fill="#EAC57E" font-size="11.5" font-weight="600">→ Token Score (0–100)  ·  data: Base APIs</text>
+
+  <!-- converge to Dean -->
+  <path d="M255,416 V452" fill="none" stroke="#58647A" stroke-width="2"/>
+  <path d="M665,416 V452" fill="none" stroke="#58647A" stroke-width="2"/>
+  <path d="M255,452 H665" fill="none" stroke="#58647A" stroke-width="2"/>
+  <line x1="460" y1="452" x2="460" y2="470" stroke="#58647A" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- The Dean -->
+  <rect x="250" y="472" width="420" height="92" rx="12" fill="#241A38" stroke="#9B6BDF" stroke-width="1.6"/>
+  <text x="460" y="504" text-anchor="middle" fill="#9B6BDF" font-size="16" font-weight="700">THE DEAN</text>
+  <text x="460" y="528" text-anchor="middle" fill="#D2C7E6" font-size="11.5">Reads the thesis itself, weighs the Registrar &amp; Auditor reports</text>
+  <text x="460" y="550" text-anchor="middle" fill="#BCA3E6" font-size="11.5" font-weight="600">→ Grade A–F  +  BUY / SKIP  ·  LLM-driven</text>
+
+  <line x1="460" y1="564" x2="460" y2="602" stroke="#58647A" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="472" y="587" fill="#3FB984" font-size="11" font-weight="700">if BUY</text>
+
+  <!-- The Bursar -->
+  <rect x="250" y="604" width="420" height="92" rx="12" fill="#14301F" stroke="#3FB984" stroke-width="1.6"/>
+  <text x="460" y="636" text-anchor="middle" fill="#3FB984" font-size="16" font-weight="700">THE BURSAR</text>
+  <text x="460" y="660" text-anchor="middle" fill="#C2DECF" font-size="11.5">Position sizing 5–10% · buys on Base · sets take-profit / stop-loss</text>
+  <text x="460" y="682" text-anchor="middle" fill="#84CCAA" font-size="11.5" font-weight="600">Anti-spam rate limit  ·  MEV-protected RPC</text>
+
+  <line x1="460" y1="696" x2="460" y2="736" stroke="#58647A" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="472" y="720" fill="#E0653E" font-size="11" font-weight="700">TP / SL hit</text>
+
+  <!-- The Endowment -->
+  <rect x="250" y="738" width="420" height="84" rx="12" fill="#321A12" stroke="#E0653E" stroke-width="1.6"/>
+  <text x="460" y="768" text-anchor="middle" fill="#E0653E" font-size="16" font-weight="700">THE ENDOWMENT</text>
+  <text x="460" y="791" text-anchor="middle" fill="#E6CBC0" font-size="11.5">Splits the realised profit of a winning trade</text>
+  <text x="460" y="812" text-anchor="middle" fill="#EE9576" font-size="13" font-weight="700" letter-spacing="2">25 / 25 / 25 / 25</text>
+
+  <!-- split to four buckets -->
+  <path d="M460,822 V840 H122 V856" fill="none" stroke="#58647A" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M460,822 V840 H347 V856" fill="none" stroke="#58647A" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M460,822 V840 H573 V856" fill="none" stroke="#58647A" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M460,822 V840 H798 V856" fill="none" stroke="#58647A" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- bucket: Author -->
+  <rect x="20" y="858" width="205" height="92" rx="11" fill="#15273A" stroke="#4F9DDE" stroke-width="1.5"/>
+  <text x="122" y="896" text-anchor="middle" fill="#4F9DDE" font-size="22" font-weight="700">25%</text>
+  <text x="122" y="918" text-anchor="middle" fill="#E8EDF4" font-size="12" font-weight="700">AUTHOR</text>
+  <text x="122" y="936" text-anchor="middle" fill="#9AA7BC" font-size="10.5">Paid to the submitter</text>
+
+  <!-- bucket: Portfolio -->
+  <rect x="245" y="858" width="205" height="92" rx="11" fill="#14301F" stroke="#3FB984" stroke-width="1.5"/>
+  <text x="347" y="896" text-anchor="middle" fill="#3FB984" font-size="22" font-weight="700">25%</text>
+  <text x="347" y="918" text-anchor="middle" fill="#E8EDF4" font-size="12" font-weight="700">PORTFOLIO</text>
+  <text x="347" y="936" text-anchor="middle" fill="#9AA7BC" font-size="10.5">Compounded into trading wallet</text>
+
+  <!-- bucket: Team -->
+  <rect x="470" y="858" width="205" height="92" rx="11" fill="#252B38" stroke="#8593AA" stroke-width="1.5"/>
+  <text x="573" y="896" text-anchor="middle" fill="#AEBACE" font-size="22" font-weight="700">25%</text>
+  <text x="573" y="918" text-anchor="middle" fill="#E8EDF4" font-size="12" font-weight="700">TEAM</text>
+  <text x="573" y="936" text-anchor="middle" fill="#9AA7BC" font-size="10.5">Maintenance &amp; running costs</text>
+
+  <!-- bucket: Buyback -->
+  <rect x="695" y="858" width="205" height="92" rx="11" fill="#321A12" stroke="#E0653E" stroke-width="1.5"/>
+  <text x="797" y="896" text-anchor="middle" fill="#E0653E" font-size="22" font-weight="700">25%</text>
+  <text x="797" y="918" text-anchor="middle" fill="#E8EDF4" font-size="12" font-weight="700">BUYBACK &amp; BURN</text>
+  <text x="797" y="936" text-anchor="middle" fill="#9AA7BC" font-size="10.5">Buys $THESIS, burns supply</text>
+
+  <!-- buyback feeds the token -->
+  <path d="M797,950 V968 H460 V983" fill="none" stroke="#58647A" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- $THESIS token -->
+  <rect x="180" y="985" width="560" height="62" rx="12" fill="#2E2616" stroke="#E0A33E" stroke-width="1.6"/>
+  <text x="460" y="1011" text-anchor="middle" fill="#E0A33E" font-size="14" font-weight="700">$THESIS TOKEN — launched on Base via Clanker</text>
+  <text x="460" y="1031" text-anchor="middle" fill="#C9BE9E" font-size="11">Creator fees fund the trading portfolio · buyback &amp; burn shrinks supply</text>
+
+  <!-- creator-fee loop back to the Bursar -->
+  <path d="M180,1016 H44 Q30,1016 30,1002 V664 Q30,650 44,650 H250" fill="none" stroke="#3FB984" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <text x="22" y="828" fill="#3FB984" font-size="11" font-weight="600" transform="rotate(-90 22 828)" text-anchor="middle">Clanker creator fees → trading portfolio</text>
+</svg>

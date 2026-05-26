@@ -1,0 +1,17 @@
+{
+  "name": "@thesis/backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "tsx --env-file-if-exists=../../.env src/index.ts",
+    "demo": "tsx src/index.ts --demo",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@thesis/shared": "*",
+    "viem": "~2.17.0"
+  }
+}
