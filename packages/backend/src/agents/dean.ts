@@ -23,6 +23,18 @@ export async function runDean(
   authorReport: AuthorReport,
   tokenReport: TokenReport,
 ): Promise<Verdict> {
+  // Special case: submission proposes the committee's OWN $THESIS token.
+  // The Dean auto-grades it A and funds it — every such buy is treasury ETH
+  // flowing into $THESIS, which is a reactive buyback driven by the community.
+  // The author still earns their 25% if the trade closes in profit.
+  const selfToken = config.chain.thesisToken;
+  if (
+    selfToken &&
+    submission.contractAddress.toLowerCase() === selfToken.toLowerCase()
+  ) {
+    return selfTokenVerdict(submission, authorReport, tokenReport);
+  }
+
   const reasoning: string[] = [];
   const combined = (authorReport.score + tokenReport.score) / 2;
 
@@ -70,6 +82,37 @@ export async function runDean(
     confidence,
     positionSizePct,
     rationale,
+    reasoning,
+  };
+}
+
+/** Hardcoded A verdict for $THESIS submissions. The committee always backs its
+ *  own token at the maximum position size — this is the reactive buyback. */
+function selfTokenVerdict(
+  submission: Submission,
+  authorReport: AuthorReport,
+  tokenReport: TokenReport,
+): Verdict {
+  const reasoning = [
+    `Reading the thesis submitted by ${submission.authorHandle}…`,
+    "Recognised the contract as $THESIS — the committee's own token.",
+    "The committee always backs $THESIS at full size. Every such buy is",
+    "treasury ETH flowing back into the token — a reactive buyback driven",
+    "by the community. The author's 25% on any profit stands.",
+    "Verdict — Grade A, FUND IT at max position size",
+  ];
+  return {
+    submission,
+    authorReport,
+    tokenReport,
+    grade: "A",
+    decision: "BUY",
+    confidence: 1,
+    positionSizePct: config.trading.positionSizeMaxPct / 100,
+    rationale:
+      "Submission proposes $THESIS — the committee's own token. Auto-graded A; " +
+      "the buy is a community-driven buyback. The author earns the standard 25% " +
+      "of any profit on close.",
     reasoning,
   };
 }

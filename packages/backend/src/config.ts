@@ -127,6 +127,12 @@ export const config = {
     reviewBudgetPerHour: num("REVIEW_BUDGET_PER_HOUR", 30),
     /** A queued submission older than this is dropped as stale (minutes). */
     queueTtlMin: num("QUEUE_TTL_MIN", 40),
+    /** Extra addresses the committee will never review (in addition to its own
+     *  $THESIS and team wallet, which are auto-included). Comma-separated. */
+    selfBlacklist: str("SELF_BLACKLIST")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
   },
 
   trading: {

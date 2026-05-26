@@ -51,6 +51,14 @@ export async function triageMentions(posts: XPost[]): Promise<TriageResult> {
     seenAuthors.add(q.submission.authorXId);
   }
 
+  // Optional opt-in blacklist via SELF_BLACKLIST env var — addresses we don't
+  // want reviewed at all. $THESIS is intentionally NOT here; submissions for
+  // the committee's own token get a hardcoded A grade in the Dean and are
+  // bought with treasury ETH (a reactive, user-driven buyback).
+  const blacklist = new Set<string>(
+    config.triage.selfBlacklist.map((a) => a.toLowerCase()),
+  );
+
   const eligible: QueueItem[] = [];
   for (const post of posts) {
     if (await store.isProcessed(post.postId)) continue;
@@ -58,6 +66,7 @@ export async function triageMentions(posts: XPost[]): Promise<TriageResult> {
 
     const contract = extractContract(post.text);
     if (!contract) continue;
+    if (blacklist.has(contract.toLowerCase())) continue;
     if (post.authorFollowers < config.triage.minAuthorFollowers) continue;
     if (wordCount(thesisText(post.text, contract)) < config.triage.minThesisWords) {
       continue;
