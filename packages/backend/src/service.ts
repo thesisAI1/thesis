@@ -11,6 +11,7 @@ import { createXAdapter } from "./adapters/x/index.js";
 import { config, useMock } from "./config.js";
 import { runMonitorTick } from "./monitor/index.js";
 import { processWalletReplies } from "./payout/index.js";
+import { processChatbotReplies } from "./agents/chatbot.js";
 import { reviewSubmission, type ReviewResult } from "./pipeline/index.js";
 import { getStore } from "./store/index.js";
 import { triageMentions } from "./triage/index.js";
@@ -35,6 +36,11 @@ export async function pollCycle(): Promise<void> {
   // Intercept author wallet replies (payouts) before triage — they are not
   // theses. Whatever is left flows on to the Step 1 triage filters.
   const theses = await processWalletReplies(mentions);
+
+  // Chatbot answers non-thesis mentions (questions about the project) BEFORE
+  // triage runs, so it can see posts that triage will later filter out for
+  // having no contract address.
+  await processChatbotReplies(theses);
 
   const triage = await triageMentions(theses);
   for (const item of triage.eligible) await store.enqueue(item);

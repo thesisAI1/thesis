@@ -83,6 +83,12 @@ export const config = {
     adminSecret: str("ADMIN_SECRET"),
   },
 
+  chatbot: {
+    /** Whether the LLM chatbot answers non-thesis mentions ("what is this",
+     *  "how do I submit", etc.). Set CHATBOT_ENABLED=false to silence it. */
+    enabled: str("CHATBOT_ENABLED", "true") !== "false",
+  },
+
   service: {
     /** How often to poll X for new mentions (seconds). */
     pollIntervalSec: num("POLL_INTERVAL_SEC", 300),
