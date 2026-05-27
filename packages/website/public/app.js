@@ -261,12 +261,11 @@ function tokenCell(symbol, address) {
   const label = symbol ? "$" + symbol : shortAddr(address);
   const dexUrl = dexscreenerUrl(address);
   const addrAttr = esc(address);
-  // Feather Icons "copy" — the two-stacked-rounded-rects pattern that
-  // DexScreener and most web apps use. Proven cross-browser SVG.
+  // Material Icons "content_copy" — single fill path, the most widely
+  // compatible inline SVG copy icon. Same shape as DexScreener uses.
   const copyIcon =
-    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-    '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>' +
-    '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>' +
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+    '<path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>' +
     '</svg>';
   return (
     `<div class="tok-cell">` +
