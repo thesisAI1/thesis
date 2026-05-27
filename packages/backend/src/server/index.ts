@@ -9,6 +9,7 @@
  *   GET   /                  static site (packages/website/public)
  *   GET   /docs              the documentation page (docs.html)
  *   GET   /leaderboard       the author leaderboard page (leaderboard.html)
+ *   GET   /pitch             the submission requirements page (pitch.html)
  *   GET   /api/status        service status JSON
  *   GET   /api/dashboard     the full transparency payload
  *   GET   /api/leaderboard   author ranking by realised author share
@@ -98,6 +99,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   // Clean URL for the documentation page.
   if (path === "/docs") return serveStatic("/docs.html", res);
   if (path === "/leaderboard") return serveStatic("/leaderboard.html", res);
+  if (path === "/pitch") return serveStatic("/pitch.html", res);
 
   return serveStatic(path, res);
 }
