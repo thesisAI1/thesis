@@ -32,7 +32,15 @@ export function buyReplyText(o: {
 /** Categories of SKIP we surface back to the author on X. Anything outside
  *  these maps to `null` and we stay silent (avoids spamming on internal errors). */
 export type SkipKind =
-  | { kind: "low-grade"; grade: string; minGrade: string }
+  | {
+      kind: "low-grade";
+      grade: string;
+      minGrade: string;
+      /** Specific Auditor gate failures (e.g. "market cap $5M — over the $3M
+       *  ceiling", "not launched via Clanker or Bankr"). When present, the
+       *  reply calls them out explicitly so the author knows the real reason. */
+      auditorFlags?: string[];
+    }
   | { kind: "cooldown"; minutesLeft: number }
   | { kind: "daily-limit"; limit: number };
 
@@ -40,6 +48,18 @@ export type SkipKind =
  *  Returns null for skip reasons we don't want to advertise (internal/system). */
 export function skipReplyText(o: SkipKind): string | null {
   if (o.kind === "low-grade") {
+    // If the Auditor flagged a specific hard requirement, call it out by name —
+    // way more useful than "Grade D". Pick up to 2 flags to keep the reply tight.
+    const auditFlags = (o.auditorFlags ?? []).slice(0, 2);
+    if (auditFlags.length > 0) {
+      const formatted = auditFlags.map((f) => `· ${f}`).join("\n");
+      return [
+        `Reviewed by the committee — Grade ${o.grade}.`,
+        "The Auditor flagged a hard requirement:",
+        formatted,
+        "Token fundamentals would need to clear that gate for the committee to fund.",
+      ].join("\n");
+    }
     return [
       `Reviewed by the committee — Grade ${o.grade}.`,
       `Only ${o.minGrade} and above are funded right now, so the position was passed on.`,

@@ -181,6 +181,7 @@ async function replyOnSkip(submission: Submission, result: ReviewResult): Promis
       kind: "low-grade",
       grade: result.verdict.grade,
       minGrade: config.trading.minBuyGrade,
+      auditorFlags: result.verdict.tokenReport.flags,
     });
   } else if (result.skippedReason) {
     const parsed = classifySkipReason(result.skippedReason);
