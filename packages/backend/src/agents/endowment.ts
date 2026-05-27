@@ -101,22 +101,16 @@ async function payAuthorDirect(
 
 /**
  * Escrowed an unregistered author's share — ask them, on their own thesis,
- * to reply with a Base wallet. One open request per author: any further
- * profit simply grows the escrow, paid out in full when they answer.
+ * to reply with a Base wallet. Every settlement gets its own request post on
+ * the new position's thread, even if previous requests are still open. Any
+ * one of the open requests can be answered to claim the FULL escrow (the
+ * payout handler clears every open request for the author on a successful
+ * reply, so duplicate claims are impossible).
  */
 async function requestAuthorPayout(position: Position): Promise<void> {
   const store = getStore();
   const escrow = await store.getEscrow(position.authorXId);
   const owed = escrow?.amountEth ?? 0;
-
-  const open = await store.getPayoutRequests();
-  if (open.some((r) => r.xUserId === position.authorXId)) {
-    log.info(
-      `endowment: ${position.authorHandle} already has an open payout request — ` +
-        `escrow now ${owed.toFixed(4)} ETH`,
-    );
-    return;
-  }
 
   try {
     const requestTweetId = await createXAdapter().replyToPost(
@@ -131,8 +125,7 @@ async function requestAuthorPayout(position: Position): Promise<void> {
       requestedAt: new Date().toISOString(),
     });
     log.info(
-      `endowment: ${position.authorHandle} not registered — escrowed ${owed.toFixed(4)} ETH, ` +
-        `posted payout request ${requestTweetId}`,
+      `endowment: ${position.authorHandle} payout request posted — total escrow ${owed.toFixed(4)} ETH (tweet ${requestTweetId})`,
     );
   } catch (err) {
     log.error(

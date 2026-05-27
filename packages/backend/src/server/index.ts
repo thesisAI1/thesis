@@ -11,8 +11,11 @@
  *   GET   /api/status        service status JSON
  *   GET   /api/dashboard     the full transparency payload
  *   GET   /api/stream        Server-Sent Events — the live agent stream
- *   POST  /admin/test-swap   manual smoke-test of the live swap path
- *                            (gated by ADMIN_SECRET header)
+ *   POST  /admin/test-swap            manual smoke-test of the live swap path
+ *                                     (gated by ADMIN_SECRET header)
+ *   POST  /admin/settle-stuck-payout  pay out an author whose escrow grew
+ *                                     after a payout but no new request was
+ *                                     posted (gated by ADMIN_SECRET header)
  */
 
 import { existsSync } from "node:fs";
@@ -22,10 +25,12 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createBaseDataAdapter } from "../adapters/basedata/index.js";
+import { createXAdapter } from "../adapters/x/index.js";
 import { config } from "../config.js";
 import { subscribe, type StreamEvent } from "../events.js";
 import { getStore } from "../store/index.js";
 import { log } from "../util/log.js";
+import { payoutSentText } from "../util/replies.js";
 
 /** Process-lifetime cache of token tickers (DexScreener calls). Tickers are
  *  immutable for a given contract, so first lookup is the only network hit. */
@@ -77,6 +82,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (path === "/api/dashboard") return apiDashboard(res);
   if (path === "/api/stream") return apiStream(req, res);
   if (path === "/admin/test-swap" && req.method === "POST") return adminTestSwap(req, res);
+  if (path === "/admin/settle-stuck-payout" && req.method === "POST") return adminSettleStuckPayout(req, res);
 
   // Clean URL for the documentation page.
   if (path === "/docs") return serveStatic("/docs.html", res);
@@ -141,6 +147,107 @@ async function adminTestSwap(req: IncomingMessage, res: ServerResponse): Promise
     log.error(`admin: test-swap failed — ${String(err)}`);
     sendJson(res, 500, { ok: false, error: String(err) });
   }
+}
+
+/**
+ * POST /admin/settle-stuck-payout — manually pay an author whose escrow grew
+ * after a payout completed but no new request was posted (the silent-return
+ * bug in requestAuthorPayout, fixed but historical cases need manual fix).
+ *
+ * Auth: header `x-admin-secret` must match config.server.adminSecret.
+ *
+ * Body (JSON):
+ *   {
+ *     xUserId: "2058...",          // numeric X id of the author
+ *     wallet:  "0x...",            // wallet to send the escrow to
+ *     postId:  "20594...",         // (optional) the position's thesis post id
+ *                                  //   to reply on with the payout confirmation
+ *   }
+ *
+ * Behaviour:
+ *   1. Looks up the escrow for xUserId
+ *   2. Sends the escrowed ETH to `wallet`
+ *   3. Links the wallet into the registry (so future settlements pay directly)
+ *   4. Clears the escrow + every open payout request for that user
+ *   5. Posts a payout-sent confirmation reply on the given `postId`
+ *
+ * Returns: { ok, txHash, amountEth, basescanUrl, replyId? }
+ */
+async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const secret = config.server.adminSecret;
+  if (!secret) {
+    return sendJson(res, 503, { ok: false, error: "ADMIN_SECRET is not set — endpoint disabled." });
+  }
+  if (req.headers["x-admin-secret"] !== secret) {
+    return sendJson(res, 401, { ok: false, error: "unauthorized" });
+  }
+  let body: { xUserId?: string; wallet?: string; postId?: string };
+  try {
+    body = JSON.parse(await readBody(req)) as typeof body;
+  } catch {
+    return sendJson(res, 400, { ok: false, error: "invalid JSON body" });
+  }
+  const xUserId = body.xUserId?.trim();
+  const wallet = body.wallet?.trim();
+  const postId = body.postId?.trim();
+  if (!xUserId) return sendJson(res, 400, { ok: false, error: "xUserId is required" });
+  if (!wallet || !/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
+    return sendJson(res, 400, { ok: false, error: "wallet must be a 0x address" });
+  }
+
+  const store = getStore();
+  const escrow = await store.getEscrow(xUserId);
+  if (!escrow || escrow.amountEth <= 0) {
+    return sendJson(res, 400, { ok: false, error: "no escrow for this user" });
+  }
+  const amountEth = escrow.amountEth;
+  const handle = escrow.handle;
+
+  log.info(
+    `admin: settle-stuck-payout — paying ${handle} ${amountEth.toFixed(6)} ETH to ${wallet}`,
+  );
+
+  let txHash: string;
+  try {
+    txHash = await createChainAdapter().sendEth(wallet, amountEth);
+  } catch (err) {
+    log.error(`admin: settle-stuck-payout sendEth failed — ${String(err)}`);
+    return sendJson(res, 500, { ok: false, error: String(err) });
+  }
+
+  // Persist the wallet and clear all owed state so future settlements pay direct.
+  await store.linkWallet({
+    xUserId,
+    handle,
+    wallet,
+    linkedAt: new Date().toISOString(),
+  });
+  await store.clearEscrow(xUserId);
+  await store.clearPayoutRequestsForUser(xUserId);
+  log.info(`admin: settle-stuck-payout — cleared escrow + open requests for ${handle}`);
+
+  // Confirm in the thesis thread if a postId was provided.
+  let replyId: string | undefined;
+  if (postId) {
+    try {
+      replyId = await createXAdapter().replyToPost(
+        postId,
+        payoutSentText({ handle, amountEth, wallet, txHash }),
+      );
+      log.info(`admin: posted payout confirmation on ${postId} (reply ${replyId})`);
+    } catch (err) {
+      log.warn(`admin: settle-stuck-payout reply failed — ${String(err)}`);
+    }
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    handle,
+    amountEth,
+    txHash,
+    basescanUrl: `https://basescan.org/tx/${txHash}`,
+    replyId: replyId ?? null,
+  });
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
