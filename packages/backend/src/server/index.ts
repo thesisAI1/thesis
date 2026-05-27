@@ -158,15 +158,16 @@ async function adminTestSwap(req: IncomingMessage, res: ServerResponse): Promise
  *
  * Body (JSON):
  *   {
- *     xUserId: "2058...",          // numeric X id of the author
- *     wallet:  "0x...",            // wallet to send the escrow to
- *     postId:  "20594...",         // (optional) the position's thesis post id
- *                                  //   to reply on with the payout confirmation
+ *     xUserId:   "2058...",        // numeric X id of the author
+ *     wallet:    "0x...",          // wallet to send the escrow to
+ *     handle:    "@user",          // (optional) used only when no escrow exists
+ *     amountEth: 0.0046,           // (optional) override — paid when no escrow record exists
+ *     postId:    "20594...",       // (optional) thesis post id to reply on
  *   }
  *
  * Behaviour:
- *   1. Looks up the escrow for xUserId
- *   2. Sends the escrowed ETH to `wallet`
+ *   1. Looks up the escrow for xUserId; falls back to `amountEth` override if missing
+ *   2. Sends the ETH to `wallet`
  *   3. Links the wallet into the registry (so future settlements pay directly)
  *   4. Clears the escrow + every open payout request for that user
  *   5. Posts a payout-sent confirmation reply on the given `postId`
@@ -181,7 +182,13 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
   if (req.headers["x-admin-secret"] !== secret) {
     return sendJson(res, 401, { ok: false, error: "unauthorized" });
   }
-  let body: { xUserId?: string; wallet?: string; postId?: string };
+  let body: {
+    xUserId?: string;
+    wallet?: string;
+    handle?: string;
+    amountEth?: number;
+    postId?: string;
+  };
   try {
     body = JSON.parse(await readBody(req)) as typeof body;
   } catch {
@@ -196,12 +203,29 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
   }
 
   const store = getStore();
+  // Prefer the escrow record (real, tracked, comes from a real settlement).
+  // Fall back to the `amountEth` body override for cases where the author leg
+  // failed BEFORE escrow was created (e.g. a payAuthorDirect tx revert).
   const escrow = await store.getEscrow(xUserId);
-  if (!escrow || escrow.amountEth <= 0) {
-    return sendJson(res, 400, { ok: false, error: "no escrow for this user" });
+  let amountEth: number;
+  let handle: string;
+  if (escrow && escrow.amountEth > 0) {
+    amountEth = escrow.amountEth;
+    handle = escrow.handle;
+  } else {
+    const overrideAmount = Number(body.amountEth);
+    if (!Number.isFinite(overrideAmount) || overrideAmount <= 0 || overrideAmount > 1) {
+      return sendJson(res, 400, {
+        ok: false,
+        error: "no escrow found — supply a positive `amountEth` (≤ 1 ETH safety cap) and `handle`",
+      });
+    }
+    if (!body.handle) {
+      return sendJson(res, 400, { ok: false, error: "supply `handle` when overriding amountEth" });
+    }
+    amountEth = overrideAmount;
+    handle = body.handle;
   }
-  const amountEth = escrow.amountEth;
-  const handle = escrow.handle;
 
   log.info(
     `admin: settle-stuck-payout — paying ${handle} ${amountEth.toFixed(6)} ETH to ${wallet}`,
