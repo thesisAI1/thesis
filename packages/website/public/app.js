@@ -251,8 +251,7 @@ function renderOpen(rows) {
     <td>${esc(stage)}</td>
     <td class="num">${fmtEth(o.amountInEth)}</td>
     <td class="num">${mcapCell(o.marketCapAtEntryUsd, o.marketCapNowUsd)}</td>
-    <td class="num ${pnlClass(o.unrealizedPnlEth)}">${fmtEth(o.unrealizedPnlEth)} (${fmtPct(o.unrealizedPct)})</td>
-    <td>${rowLinks(o.postUrl, o.contractAddress)}</td></tr>`;
+    <td class="num ${pnlClass(o.unrealizedPnlEth)}">${fmtEth(o.unrealizedPnlEth)} (${fmtPct(o.unrealizedPct)})</td></tr>`;
     })
     .join("");
 }
@@ -340,8 +339,7 @@ function renderClosed(rows) {
     <td class="num">${esc(fmtPrice(c.entryPriceEth))}</td>
     <td class="num">${esc(fmtPrice(c.exitPriceEth))}</td>
     <td class="num ${pnlClass(c.realisedPnlEth)}">${fmtEth(c.realisedPnlEth)} (${fmtPct(c.realisedPct)})</td>
-    <td>${esc(timeAgo(c.closedAt))}</td>
-    <td>${rowLinks(c.postUrl, c.contractAddress)}</td></tr>`).join("");
+    <td>${esc(timeAgo(c.closedAt))}</td></tr>`).join("");
 }
 function renderFeed(rows) {
   $("#feed-empty").hidden = rows.length > 0;
