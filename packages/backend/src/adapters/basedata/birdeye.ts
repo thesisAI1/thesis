@@ -76,6 +76,41 @@ export class BirdeyeBaseData implements BaseDataAdapter {
     return usd / (await this.getEthUsd());
   }
 
+  async getPricesEth(addresses: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (addresses.length === 0) return out;
+
+    // Birdeye /defi/multi_price accepts up to 100 addresses per request. Split
+    // into chunks of 100, then do ONE more call for the ETH/USD reference price.
+    const chunks: string[][] = [];
+    for (let i = 0; i < addresses.length; i += 100) chunks.push(addresses.slice(i, i + 100));
+
+    const [ethUsd, ...results] = await Promise.all([
+      this.getEthUsd(),
+      ...chunks.map(async (chunk) => {
+        const url = `${BIRDEYE_API}/defi/multi_price?list_address=${encodeURIComponent(chunk.join(","))}`;
+        const res = await fetch(url, { headers: this.headers });
+        if (!res.ok) {
+          throw new Error(`Birdeye /defi/multi_price ${res.status}`);
+        }
+        const json = (await res.json()) as {
+          success?: boolean;
+          data?: Record<string, { value?: number } | null>;
+        };
+        return json.data ?? {};
+      }),
+    ]);
+
+    if (ethUsd <= 0) return out;
+    for (const data of results) {
+      for (const [addr, info] of Object.entries(data)) {
+        const usd = Number(info?.value ?? 0);
+        if (usd > 0) out.set(addr.toLowerCase(), usd / ethUsd);
+      }
+    }
+    return out;
+  }
+
   async getTokenSymbol(address: string): Promise<string> {
     try {
       const o = await this.fetchOverviewRaw(address);

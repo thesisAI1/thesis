@@ -16,6 +16,7 @@
  */
 
 import type { Position } from "@thesis/shared";
+import { createBaseDataAdapter } from "../adapters/basedata/index.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter } from "../adapters/x/index.js";
 import { publish } from "../events.js";
@@ -27,15 +28,27 @@ import { exitReplyText } from "../util/replies.js";
 /** Check every open position once; act on take-profit tiers and the stop-loss. */
 export async function runMonitorTick(): Promise<void> {
   const store = getStore();
-  const chain = createChainAdapter();
   const open = await store.getOpenPositions();
+  if (open.length === 0) return;
+
+  // Pull prices for ALL open positions in a single batched API call. This is
+  // what keeps us under the data-provider rate limit when N positions are
+  // open. With Birdeye's /defi/multi_price one tick = one HTTP request.
+  const addresses = Array.from(
+    new Set(open.map((p) => p.order.contractAddress.toLowerCase())),
+  );
+  let prices: Map<string, number>;
+  try {
+    prices = await createBaseDataAdapter().getPricesEth(addresses);
+  } catch (err) {
+    log.warn(`monitor: batch price fetch failed — skipping tick: ${String(err)}`);
+    return;
+  }
 
   for (const pos of open) {
-    let price: number;
-    try {
-      price = await chain.getTokenPriceEth(pos.order.contractAddress);
-    } catch (err) {
-      log.warn(`monitor: price check failed for ${pos.id}: ${String(err)}`);
+    const price = prices.get(pos.order.contractAddress.toLowerCase());
+    if (price === undefined || price <= 0) {
+      log.warn(`monitor: no live price for ${pos.id} — will retry next tick`);
       continue;
     }
     await processPosition(pos, price);

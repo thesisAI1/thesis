@@ -35,12 +35,39 @@ export interface BaseDataAdapter {
   getToken(address: string): Promise<TokenOnChain>;
   /** Current price in ETH — used by the TP/SL monitor. */
   getPriceEth(address: string): Promise<number>;
+  /**
+   * Batch price lookup — returns a map keyed by lowercased address. Providers
+   * that natively support multi-price (Birdeye, DexScreener) do it in ONE
+   * call; this is what keeps the monitor under the API rate limit when many
+   * positions are open at once. Tokens with no price are simply absent from
+   * the map (caller treats as "skip this tick").
+   */
+  getPricesEth(addresses: string[]): Promise<Map<string, number>>;
   /** Token ticker (e.g. "DEGEN"). Returns empty string when unknown. */
   getTokenSymbol(address: string): Promise<string>;
 }
 
+let _adapterLogged = false;
 export function createBaseDataAdapter(): BaseDataAdapter {
-  if (useMock()) return new MockBaseData();
-  if (config.baseData.birdeyeKey) return new BirdeyeBaseData();
+  if (useMock()) {
+    if (!_adapterLogged) {
+      console.log("[basedata] using MockBaseData");
+      _adapterLogged = true;
+    }
+    return new MockBaseData();
+  }
+  if (config.baseData.birdeyeKey) {
+    if (!_adapterLogged) {
+      console.log(
+        `[basedata] using BirdeyeBaseData (key len=${config.baseData.birdeyeKey.length})`,
+      );
+      _adapterLogged = true;
+    }
+    return new BirdeyeBaseData();
+  }
+  if (!_adapterLogged) {
+    console.log("[basedata] using RealBaseData (DexScreener fallback — no BIRDEYE_API_KEY)");
+    _adapterLogged = true;
+  }
   return new RealBaseData();
 }

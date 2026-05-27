@@ -51,6 +51,44 @@ export class RealBaseData implements BaseDataAdapter {
     return (await this.fetchMarket(address)).priceEth;
   }
 
+  async getPricesEth(addresses: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (addresses.length === 0) return out;
+    // DexScreener /tokens accepts a comma-separated list (up to 30 per call).
+    const chunks: string[][] = [];
+    for (let i = 0; i < addresses.length; i += 30) chunks.push(addresses.slice(i, i + 30));
+
+    await Promise.all(
+      chunks.map(async (chunk) => {
+        try {
+          const res = await fetch(`${DEXSCREENER}/${chunk.join(",")}`);
+          if (!res.ok) return;
+          const json = (await res.json()) as { pairs?: DexPair[] };
+          const byToken = new Map<string, DexPair[]>();
+          for (const p of json.pairs ?? []) {
+            const addr = p.baseToken?.address?.toLowerCase();
+            if (!addr) continue;
+            const list = byToken.get(addr) ?? [];
+            list.push(p);
+            byToken.set(addr, list);
+          }
+          for (const [addr, pairs] of byToken) {
+            const base = pairs.filter((p) => p.chainId === "base");
+            const pool = (base.length ? base : pairs).sort(
+              (a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0),
+            )[0];
+            if (!pool) continue;
+            const price = Number(pool.priceNative ?? 0);
+            if (price > 0) out.set(addr, price);
+          }
+        } catch {
+          /* one chunk failing shouldn't poison the whole batch */
+        }
+      }),
+    );
+    return out;
+  }
+
   async getTokenSymbol(address: string): Promise<string> {
     try {
       const res = await fetch(`${DEXSCREENER}/${address}`);

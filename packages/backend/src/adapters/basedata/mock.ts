@@ -42,6 +42,12 @@ export class MockBaseData implements BaseDataAdapter {
     return 0.0000002 + seed(address, "price") * 0.0000018;
   }
 
+  async getPricesEth(addresses: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    for (const a of addresses) out.set(a.toLowerCase(), await this.getPriceEth(a));
+    return out;
+  }
+
   async getTokenSymbol(address: string): Promise<string> {
     return `MOCK${address.slice(2, 6).toUpperCase()}`;
   }
