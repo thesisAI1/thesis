@@ -95,6 +95,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (path === "/admin/settle-stuck-payout" && req.method === "POST") return adminSettleStuckPayout(req, res);
   if (path === "/admin/reset-position-state" && req.method === "POST") return adminResetPositionState(req, res);
   if (path === "/admin/rebuy-position" && req.method === "POST") return adminRebuyPosition(req, res);
+  if (path === "/admin/backfill-entry-mc" && req.method === "POST") return adminBackfillEntryMc(req, res);
 
   // Clean URL for the documentation page.
   if (path === "/docs") return serveStatic("/docs.html", res);
@@ -432,6 +433,115 @@ async function adminRebuyPosition(req: IncomingMessage, res: ServerResponse): Pr
     txHash: buy.txHash,
     basescanUrl: `https://basescan.org/tx/${buy.txHash}`,
   });
+}
+
+/**
+ * POST /admin/backfill-entry-mc — one-time fix for open positions opened before
+ * the marketCapAtEntryUsd field existed. Reads the agent's recent X timeline,
+ * finds the buy reply we posted for each position (matched by inReplyToId →
+ * postId), and parses the "~$XXk market cap" snippet the bot announced at the
+ * time. Writes the value back to each position so the dashboard's market-cap
+ * column can finally render entry → now for the pre-existing trades.
+ *
+ * Idempotent: positions that already have marketCapAtEntryUsd are skipped. If
+ * a buy reply isn't found in the recent timeline (older than ~100 of our most
+ * recent tweets), that position is reported as `missingReply` and left alone.
+ */
+async function adminBackfillEntryMc(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const secret = config.server.adminSecret;
+  if (!secret) return sendJson(res, 503, { ok: false, error: "ADMIN_SECRET is not set" });
+  if (req.headers["x-admin-secret"] !== secret) {
+    return sendJson(res, 401, { ok: false, error: "unauthorized" });
+  }
+  if (!config.x.agentUserId) {
+    return sendJson(res, 503, { ok: false, error: "X_AGENT_USER_ID is not set" });
+  }
+
+  const store = getStore();
+  const positions = await store.getOpenPositions();
+  const needsBackfill = positions.filter((p) => p.marketCapAtEntryUsd === undefined);
+  if (needsBackfill.length === 0) {
+    return sendJson(res, 200, { ok: true, updated: 0, message: "nothing to backfill" });
+  }
+
+  // Pull the agent's recent timeline (~100 tweets). Every buy reply we ever
+  // posted is in here unless it scrolled past the 100-tweet window.
+  const x = createXAdapter();
+  let timeline: Awaited<ReturnType<typeof x.getUserTimeline>>;
+  try {
+    timeline = await x.getUserTimeline(config.x.agentUserId);
+  } catch (err) {
+    return sendJson(res, 502, { ok: false, error: `timeline fetch failed: ${String(err)}` });
+  }
+
+  // Index our timeline by the post we were replying to. A single original
+  // post can have multiple replies from us (buy + skip + payout), so we keep
+  // the one that actually looks like a buy announcement.
+  const replyByOriginal = new Map<string, string>();
+  for (const t of timeline) {
+    if (!t.inReplyToId) continue;
+    // Prefer the tweet that contains the buy-reply marker.
+    if (/at\s*~?\$/i.test(t.text) && /market\s*cap/i.test(t.text)) {
+      replyByOriginal.set(t.inReplyToId, t.text);
+    } else if (!replyByOriginal.has(t.inReplyToId)) {
+      // Fallback: store anything until we see a better candidate.
+      replyByOriginal.set(t.inReplyToId, t.text);
+    }
+  }
+
+  const updated: Array<{ positionId: string; marketCapAtEntryUsd: number; matched: string }> = [];
+  const missingReply: string[] = [];
+  const unparsable: Array<{ positionId: string; text: string }> = [];
+
+  for (const pos of needsBackfill) {
+    const replyText = replyByOriginal.get(pos.postId);
+    if (!replyText) {
+      missingReply.push(pos.id);
+      continue;
+    }
+    const parsed = parseEntryMcFromReply(replyText);
+    if (parsed === null) {
+      unparsable.push({ positionId: pos.id, text: replyText.slice(0, 120) });
+      continue;
+    }
+    pos.marketCapAtEntryUsd = parsed;
+    await store.savePosition(pos);
+    updated.push({
+      positionId: pos.id,
+      marketCapAtEntryUsd: parsed,
+      matched: replyText.slice(0, 80),
+    });
+    log.info(`admin: backfilled entry MC for ${pos.id} -> $${parsed}`);
+  }
+
+  sendJson(res, 200, {
+    ok: true,
+    consideredOpen: positions.length,
+    needingBackfill: needsBackfill.length,
+    updated: updated.length,
+    missingReply: missingReply.length,
+    unparsable: unparsable.length,
+    details: { updated, missingReply, unparsable },
+  });
+}
+
+/**
+ * Extract the entry market cap from the bot's own buy reply text. The reply
+ * format is "Bought 0.0315 ETH at ~$118K market cap." — the regex below is
+ * tolerant of K / M / B suffixes, decimals, and optional whitespace.
+ * Returns the value in USD, or null if no match.
+ */
+function parseEntryMcFromReply(text: string): number | null {
+  const m = text.match(/~?\$([\d]+(?:\.[\d]+)?)\s*([KMB])\b/i);
+  if (!m) return null;
+  const value = parseFloat(m[1]);
+  if (!isFinite(value)) return null;
+  const suffix = m[2].toUpperCase();
+  const mult = suffix === "B" ? 1e9 : suffix === "M" ? 1e6 : 1e3;
+  return value * mult;
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
