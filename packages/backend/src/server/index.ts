@@ -16,6 +16,9 @@
  *   POST  /admin/settle-stuck-payout  pay out an author whose escrow grew
  *                                     after a payout but no new request was
  *                                     posted (gated by ADMIN_SECRET header)
+ *   POST  /admin/reset-position-state clear fake TP state from a position
+ *                                     after a silent sell failure
+ *                                     (gated by ADMIN_SECRET header)
  */
 
 import { existsSync } from "node:fs";
@@ -83,6 +86,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (path === "/api/stream") return apiStream(req, res);
   if (path === "/admin/test-swap" && req.method === "POST") return adminTestSwap(req, res);
   if (path === "/admin/settle-stuck-payout" && req.method === "POST") return adminSettleStuckPayout(req, res);
+  if (path === "/admin/reset-position-state" && req.method === "POST") return adminResetPositionState(req, res);
 
   // Clean URL for the documentation page.
   if (path === "/docs") return serveStatic("/docs.html", res);
@@ -271,6 +275,72 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
     txHash,
     basescanUrl: `https://basescan.org/tx/${txHash}`,
     replyId: replyId ?? null,
+  });
+}
+
+/**
+ * POST /admin/reset-position-state — clear corrupted TP state from a position
+ * after a silent sell failure (pre-fix bug that recorded fake TP hits with
+ * empty tx hashes). Resets tiersHit, realisedPnLEth, and the lastExit fields
+ * so the monitor will retry the tier cleanly on the next price-check tick.
+ *
+ * Body (JSON): { positionId: "20594..." }
+ *
+ * Returns: { ok, position: { id, tiersHit, realisedPnlEth, ... } }
+ */
+async function adminResetPositionState(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const secret = config.server.adminSecret;
+  if (!secret) {
+    return sendJson(res, 503, { ok: false, error: "ADMIN_SECRET is not set" });
+  }
+  if (req.headers["x-admin-secret"] !== secret) {
+    return sendJson(res, 401, { ok: false, error: "unauthorized" });
+  }
+  let body: { positionId?: string };
+  try {
+    body = JSON.parse(await readBody(req)) as typeof body;
+  } catch {
+    return sendJson(res, 400, { ok: false, error: "invalid JSON body" });
+  }
+  const positionId = body.positionId?.trim();
+  if (!positionId) return sendJson(res, 400, { ok: false, error: "positionId is required" });
+
+  const store = getStore();
+  const positions = await store.getAllPositions();
+  const pos = positions.find((p) => p.id === positionId);
+  if (!pos) return sendJson(res, 404, { ok: false, error: "position not found" });
+
+  const before = {
+    tiersHit: pos.tiersHit,
+    realisedPnlEth: pos.realisedPnlEth,
+    remainingFraction: pos.remainingFraction,
+    lastExitTxHash: pos.lastExitTxHash,
+    status: pos.status,
+  };
+
+  pos.tiersHit = 0;
+  pos.realisedPnlEth = 0;
+  pos.remainingFraction = 1;
+  pos.lastExitTxHash = undefined;
+  pos.lastExitPriceEth = undefined;
+  pos.status = "open";
+  pos.closedAt = undefined;
+  await store.savePosition(pos);
+
+  log.info(`admin: reset position state for ${positionId} (was ${JSON.stringify(before)})`);
+  sendJson(res, 200, {
+    ok: true,
+    positionId,
+    before,
+    after: {
+      tiersHit: pos.tiersHit,
+      realisedPnlEth: pos.realisedPnlEth,
+      remainingFraction: pos.remainingFraction,
+      status: pos.status,
+    },
   });
 }
 

@@ -61,7 +61,8 @@ async function processPosition(pos: Position, price: number): Promise<void> {
     pos.tiersHit < pos.order.takeProfits.length &&
     price >= pos.entryPriceEth * pos.order.takeProfits[pos.tiersHit].priceX
   ) {
-    await takeTier(pos);
+    const ok = await takeTier(pos);
+    if (!ok) return; // sell reverted — leave state untouched, retry next tick
     fired = true;
   }
   if (!fired) return;
@@ -79,14 +80,24 @@ async function processPosition(pos: Position, price: number): Promise<void> {
 }
 
 /** Fire the next take-profit tier: sell its slice AT the tier level. */
-async function takeTier(pos: Position): Promise<void> {
+async function takeTier(pos: Position): Promise<boolean> {
   const tier = pos.order.takeProfits[pos.tiersHit];
   const tierNum = pos.tiersHit + 1;
   const gainPct = Math.round((tier.priceX - 1) * 100);
   const exitPrice = pos.entryPriceEth * tier.priceX;
   const cost = pos.order.amountInEth * tier.sellFraction;
 
-  const sale = await sell(pos, cost, exitPrice);
+  let sale: { proceeds: number; profit: number; txHash: string };
+  try {
+    sale = await sell(pos, cost, exitPrice);
+  } catch (err) {
+    // The on-chain swap reverted (e.g. TransferHelper: TRANSFER_FROM_FAILED).
+    // Do NOT advance the tier counter or credit any PnL — next monitor tick
+    // will retry, by which time the underlying issue may have cleared (balance
+    // settled, anti-MEV cooldown elapsed, slippage room opened up, etc.).
+    log.warn(`monitor: ${pos.id} TP${tierNum} sell reverted — will retry next tick: ${String(err)}`);
+    return false;
+  }
 
   pos.tiersHit += 1;
   pos.remainingFraction = Math.max(0, pos.remainingFraction - tier.sellFraction);
@@ -110,13 +121,23 @@ async function takeTier(pos: Position): Promise<void> {
     final,
     txHash: sale.txHash,
   });
+  return true;
 }
 
 /** Stop-loss: sell the whole remaining position, close, and settle. */
 async function stopOut(pos: Position): Promise<void> {
   const exitPrice = stopPrice(pos);
   const cost = pos.order.amountInEth * pos.remainingFraction;
-  const sale = await sell(pos, cost, exitPrice);
+
+  let sale: { proceeds: number; profit: number; txHash: string };
+  try {
+    sale = await sell(pos, cost, exitPrice);
+  } catch (err) {
+    // Same deal as takeTier — do NOT mark the position closed, do NOT credit
+    // any PnL, do NOT settle. Retry on the next monitor tick.
+    log.warn(`monitor: ${pos.id} stop-out sell reverted — will retry next tick: ${String(err)}`);
+    return;
+  }
 
   pos.realisedPnlEth += sale.profit;
   pos.remainingFraction = 0;
@@ -155,6 +176,13 @@ async function settle(pos: Position): Promise<void> {
  * Sell a slice of the position worth `costEth` of the original buy, realised
  * AT `exitPrice` (the tier or stop-loss level). The on-chain swap still
  * executes; its tx hash is recorded.
+ *
+ * THROWS when the on-chain swap reverts. Callers MUST treat a thrown sell as
+ * "nothing happened" — do NOT advance tier counters, do NOT credit realised
+ * PnL, do NOT post a reply, do NOT settle. The next monitor tick will retry.
+ *
+ * (Previously this swallowed the error and returned an empty tx hash, which
+ * caused fake-profit announcements, fake author payouts, and a fake burn.)
  */
 async function sell(
   pos: Position,
@@ -166,14 +194,9 @@ async function sell(
   const tokens =
     pos.order.amountInEth > 0 ? originalTokens * (costEth / pos.order.amountInEth) : 0;
 
-  let txHash = "";
-  try {
-    txHash = (await createChainAdapter().sell(pos.order.contractAddress, tokens)).txHash;
-  } catch (err) {
-    log.warn(`monitor: sell failed for ${pos.id}: ${String(err)}`);
-  }
+  const result = await createChainAdapter().sell(pos.order.contractAddress, tokens);
   const proceeds = tokens * exitPrice;
-  return { proceeds, profit: proceeds - costEth, txHash };
+  return { proceeds, profit: proceeds - costEth, txHash: result.txHash };
 }
 
 /** Announce an exit on the original X post. */

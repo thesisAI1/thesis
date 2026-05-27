@@ -149,13 +149,18 @@ export class RealChain implements ChainAdapter {
       functionName: "balanceOf",
       args: [this.account.address],
     });
-    const amountIn = requestedAmount < actualBalance ? requestedAmount : actualBalance;
+    // Many Clanker tokens take a 1-3% transfer tax — by the time the router
+    // pulls our balance, it's slightly less than what balanceOf reported. A
+    // 0.5% safety margin off the live balance absorbs the tax + any precision
+    // drift between balanceOf and the router's transferFrom check.
+    const safeBalance = (actualBalance * 995n) / 1000n;
+    const amountIn = requestedAmount < safeBalance ? requestedAmount : safeBalance;
     if (amountIn === 0n) {
       throw new Error(`chain: cannot sell — wallet holds 0 of ${address}`);
     }
     if (amountIn < requestedAmount) {
       log.warn(
-        `chain: sell amount clamped — requested ${requestedAmount.toString()} but wallet holds ${actualBalance.toString()}`,
+        `chain: sell amount clamped — requested ${requestedAmount.toString()} but wallet holds ${actualBalance.toString()} (selling 99.5%: ${amountIn.toString()})`,
       );
     }
     const route = await this.fetchKyberRoute(address, config.chain.weth, amountIn);
