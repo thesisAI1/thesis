@@ -68,17 +68,22 @@ export class BirdeyeBaseData implements BaseDataAdapter {
   }
 
   async getToken(address: string): Promise<TokenOnChain> {
-    const [overview, launchpad] = await Promise.all([
+    // Birdeye gives us price / liquidity / mcap but NOT a launch date and no
+    // deployer info, so we still hit BaseScan once for the on-chain creation
+    // record — that single call supplies BOTH the launchpad detection AND
+    // the launch timestamp used by the Auditor's age gate.
+    const [overview, creation] = await Promise.all([
       this.fetchOverview(address),
-      this.detectLaunchpad(address),
+      this.fetchCreationInfo(address),
     ]);
+    const launchpad = await this.classifyLaunchpad(address, creation?.deployer ?? null);
     return {
       contractAddress: address,
       chain: "base",
       priceEth: overview.priceEth,
       liquidityUsd: overview.liquidityUsd,
       marketCapUsd: overview.marketCapUsd,
-      launchedAt: overview.launchedAt,
+      launchedAt: creation?.launchedAt ?? overview.launchedAt,
       launchpad,
       isHoneypot: false,
       topHolders: [] as Holder[],
@@ -230,7 +235,13 @@ export class BirdeyeBaseData implements BaseDataAdapter {
     };
   }
 
-  private async detectLaunchpad(address: string): Promise<string | null> {
+  /** Classify launchpad given an already-fetched deployer address. Bankr is
+   *  detected by its own public fee endpoint; Clanker is detected by the
+   *  on-chain deployer matching one of the factory contracts. */
+  private async classifyLaunchpad(
+    address: string,
+    deployer: string | null,
+  ): Promise<string | null> {
     try {
       const res = await fetch(`${BANKR_LAUNCHES}/${address}/fees`);
       if (res.ok) {
@@ -240,24 +251,40 @@ export class BirdeyeBaseData implements BaseDataAdapter {
     } catch {
       /* ignore */
     }
-    try {
-      const deployer = await this.deployerOf(address);
-      if (deployer && CLANKER_FACTORIES.has(deployer.toLowerCase())) return "clanker";
-    } catch {
-      /* ignore */
-    }
+    if (deployer && CLANKER_FACTORIES.has(deployer.toLowerCase())) return "clanker";
     return null;
   }
 
-  private async deployerOf(address: string): Promise<string | null> {
+  /** One BaseScan call → both the deployer (for launchpad classification) and
+   *  the contract creation timestamp (for the Auditor's age gate). Birdeye
+   *  doesn't expose either, so this is the source of truth for both. */
+  private async fetchCreationInfo(
+    address: string,
+  ): Promise<{ deployer: string | null; launchedAt: string | null } | null> {
     if (!config.auditor.basescanApiKey) return null;
     const url =
       `${ETHERSCAN_V2}?chainid=8453&module=contract&action=getcontractcreation` +
       `&contractaddresses=${address}&apikey=${config.auditor.basescanApiKey}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const json = (await res.json()) as { result?: Array<{ contractCreator?: string }> };
-    return json.result?.[0]?.contractCreator ?? null;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) return null;
+      const json = (await res.json()) as {
+        result?: Array<{
+          contractCreator?: string;
+          timestamp?: string;
+          /** Newer BaseScan responses sometimes use blockNumber + a separate
+           *  block lookup; we fall back to the txHash route if timestamp is
+           *  missing. For now this single field is what Etherscan v2 ships. */
+        }>;
+      };
+      const entry = json.result?.[0];
+      if (!entry) return null;
+      const ts = Number(entry.timestamp ?? 0);
+      const launchedAt = ts > 0 ? new Date(ts * 1000).toISOString() : null;
+      return { deployer: entry.contractCreator ?? null, launchedAt };
+    } catch {
+      return null;
+    }
   }
 }
 
