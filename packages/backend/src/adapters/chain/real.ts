@@ -180,10 +180,12 @@ export class RealChain implements ChainAdapter {
 
   async sendEth(toAddress: string, amountEth: number): Promise<string> {
     this.ensureArmed();
-    return this.walletClient.sendTransaction({
+    const hash = await this.walletClient.sendTransaction({
       to: toAddress as Address,
       value: parseEther(amountEth.toFixed(18)),
     });
+    await this.confirmOrThrow(hash, `sendEth to ${toAddress}`);
+    return hash;
   }
 
   async buybackAndBurn(amountInEth: number): Promise<{ txHash: string; tokensBurned: number }> {
@@ -230,6 +232,7 @@ export class RealChain implements ChainAdapter {
       args: [config.chain.burnAddress as Address, balance],
     });
     const burnTx = await this.walletClient.writeContract(request);
+    await this.confirmOrThrow(burnTx, "burn $THESIS");
     log.info(`chain: burn ${balance.toString()} $THESIS — tx ${burnTx}`);
     return { txHash: burnTx, tokensBurned: buy.amountOut };
   }
@@ -323,13 +326,29 @@ export class RealChain implements ChainAdapter {
   }
 
   /** Submit the swap transaction. For ETH-input swaps the router is paid via
-   *  the `value` field (KyberSwap returns it in `transactionValue`). */
+   *  the `value` field (KyberSwap returns it in `transactionValue`). Waits
+   *  for the receipt and throws on an on-chain revert so callers don't treat
+   *  a reverted swap as a successful sale. */
   private async sendSwap(built: KyberBuildData, hasEthInput: boolean): Promise<string> {
-    return this.walletClient.sendTransaction({
+    const hash = await this.walletClient.sendTransaction({
       to: built.routerAddress as Address,
       data: built.data as Hex,
       value: hasEthInput ? BigInt(built.transactionValue ?? built.amountIn) : undefined,
     });
+    await this.confirmOrThrow(hash, `swap via ${built.routerAddress}`);
+    return hash;
+  }
+
+  /** Wait for a tx to be mined; throw if its receipt reports a revert.
+   *  walletClient.sendTransaction only returns when the tx is BROADCAST, so
+   *  without this check a reverted swap looks identical to a successful one. */
+  private async confirmOrThrow(hash: Hex | string, label: string): Promise<void> {
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash: hash as Hex });
+    if (receipt.status !== "success") {
+      throw new Error(
+        `chain: ${label} reverted on-chain — tx ${hash} (block ${receipt.blockNumber})`,
+      );
+    }
   }
 
   private ensureArmed(): void {
