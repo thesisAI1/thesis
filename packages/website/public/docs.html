@@ -281,8 +281,8 @@
             <div class="spec"><span class="k">Contract address present</span><span class="v">required</span></div>
             <div class="spec"><span class="k">Author follower count</span><span class="v accent">&ge; 50</span></div>
             <div class="spec"><span class="k">Thesis length (tag &amp; contract stripped)</span><span class="v accent">&ge; 6 words</span></div>
-            <div class="spec"><span class="k">Same contract not seen within</span><span class="v">6 hours</span></div>
-            <div class="spec"><span class="k">Same author cooldown</span><span class="v">1 per 3 hours</span></div>
+            <div class="spec"><span class="k">Same contract not seen within</span><span class="v">2 hours</span></div>
+            <div class="spec"><span class="k">Same author cooldown</span><span class="v">1 per 2 hours</span></div>
           </div>
           <h3>The priority queue</h3>
           <p>
@@ -344,7 +344,7 @@
             <div class="specs">
               <div class="spec"><span class="k">Launchpad</span><span class="v accent">Clanker or Bankr only</span></div>
               <div class="spec"><span class="k">Minimum token age</span><span class="v accent">&ge; 1 hour</span></div>
-              <div class="spec"><span class="k">Top-10 real-holder concentration</span><span class="v accent">&le; 30% (LP / burn / lock excluded)</span></div>
+              <div class="spec"><span class="k">Top-10 real-holder concentration</span><span class="v">currently relaxed during launch (target &le; 30%)</span></div>
               <div class="spec"><span class="k">Market cap floor</span><span class="v accent">&ge; $40K</span></div>
               <div class="spec"><span class="k">Market cap ceiling</span><span class="v accent">&le; $3M</span></div>
             </div>
@@ -375,8 +375,10 @@
               text and produces the verdict: a letter <strong>grade A–F</strong>,
               a <strong>BUY or SKIP</strong> decision, a confidence level, a
               recommended position size, and a written rationale. Only an
-              <strong>A or B</strong> grade is funded — everything else is a
-              SKIP that still gets logged for the record.
+              <strong>A, B or C</strong> grade is funded — everything else is a
+              SKIP that still gets logged for the record. (The minimum buy
+              grade is intentionally relaxed to C during launch and will tighten
+              back to B as the portfolio scales.)
             </p>
           </article>
 
@@ -393,9 +395,14 @@
             </p>
             <div class="specs">
               <div class="spec"><span class="k">Position size</span><span class="v">5–10% of portfolio</span></div>
-              <div class="spec"><span class="k">Max buys per day</span><span class="v accent">15</span></div>
-              <div class="spec"><span class="k">Cooldown between buys</span><span class="v">30 min</span></div>
+              <div class="spec"><span class="k">Max buys per rolling 24h</span><span class="v accent">30</span></div>
+              <div class="spec"><span class="k">Cooldown between buys</span><span class="v">10 min</span></div>
             </div>
+            <p style="margin-top:8px; font-size:13px; color:var(--muted);">
+              The daily cap and cooldown are intentionally loose for launch so
+              the committee can build a meaningful sample of trades. Both
+              tighten as the portfolio scales.
+            </p>
           </article>
 
           <article class="agent-doc" style="--c:#E0653E">
