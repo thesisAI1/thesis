@@ -1,15 +1,18 @@
 /**
  * Adapter: Base-chain token data — holders, liquidity, launchpad, rug checks.
  *
- *   - MockBaseData  (./mock.ts)  — fake snapshot, $0
- *   - RealBaseData  (./real.ts)  — DexScreener / GeckoTerminal / Birdeye
+ *   - MockBaseData    (./mock.ts)    — fake snapshot, $0
+ *   - RealBaseData    (./real.ts)    — DexScreener + GoPlus (free public APIs)
+ *   - BirdeyeBaseData (./birdeye.ts) — paid Birdeye feed (fast prices, no 429s)
  *
- * Note: the real version can be built now — DexScreener and GeckoTerminal
- * have free public APIs.
+ * Provider chosen by env: if BIRDEYE_API_KEY is set we use Birdeye, otherwise
+ * we fall back to the DexScreener-based RealBaseData. Same interface across
+ * the board so the rest of the codebase doesn't know or care which feed runs.
  */
 
 import type { Chain, Holder } from "@thesis/shared";
-import { useMock } from "../../config.js";
+import { config, useMock } from "../../config.js";
+import { BirdeyeBaseData } from "./birdeye.js";
 import { MockBaseData } from "./mock.js";
 import { RealBaseData } from "./real.js";
 
@@ -37,5 +40,7 @@ export interface BaseDataAdapter {
 }
 
 export function createBaseDataAdapter(): BaseDataAdapter {
-  return useMock() ? new MockBaseData() : new RealBaseData();
+  if (useMock()) return new MockBaseData();
+  if (config.baseData.birdeyeKey) return new BirdeyeBaseData();
+  return new RealBaseData();
 }
