@@ -245,22 +245,95 @@ function renderOpen(rows) {
     .map((o) => {
       const stage = `${o.tiersHit}/${o.tierCount} TP`;
       return `<tr>
-    <td><a class="tok" href="${bscToken(o.contractAddress)}" target="_blank" rel="noopener" title="${esc(o.contractAddress)}">${esc(o.tokenSymbol ? "$" + o.tokenSymbol : shortAddr(o.contractAddress))}</a></td>
-    <td>${esc(o.authorHandle)}</td><td>${gradeBadge(o.grade)}</td>
+    <td>${tokenCell(o.tokenSymbol, o.contractAddress)}</td>
+    <td>${authorCell(o)}</td>
+    <td>${gradeBadge(o.grade)}</td>
     <td>${esc(stage)}</td>
     <td class="num">${fmtEth(o.amountInEth)}</td>
-    <td class="num">${esc(fmtPrice(o.currentPriceEth))}</td>
+    <td class="num">${mcapCell(o.marketCapAtEntryUsd, o.marketCapNowUsd)}</td>
     <td class="num ${pnlClass(o.unrealizedPnlEth)}">${fmtEth(o.unrealizedPnlEth)} (${fmtPct(o.unrealizedPct)})</td>
-    <td class="num ${pnlClass(o.realisedPnlEth)}">${fmtEth(o.realisedPnlEth)}</td>
     <td>${rowLinks(o.postUrl, o.contractAddress)}</td></tr>`;
     })
     .join("");
+}
+
+/** Render the token cell: $TICKER link to DexScreener + copy-CA icon button. */
+function tokenCell(symbol, address) {
+  const label = symbol ? "$" + symbol : shortAddr(address);
+  const dexUrl = dexscreenerUrl(address);
+  const addrAttr = esc(address);
+  // Inline SVG = the classic "two stacked rounded rects" copy icon.
+  const copyIcon =
+    '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<rect x="9" y="9" width="11" height="11" rx="2"/>' +
+    '<path d="M5 15V5a2 2 0 0 1 2-2h10"/>' +
+    '</svg>';
+  return (
+    `<div class="tok-cell">` +
+    `<a class="tok" href="${dexUrl}" target="_blank" rel="noopener noreferrer" title="${addrAttr}">${esc(label)}</a>` +
+    `<button class="copy-btn" type="button" data-copy="${addrAttr}" onclick="copyCA(this)" title="Copy contract address" aria-label="Copy contract address">${copyIcon}</button>` +
+    `</div>`
+  );
+}
+
+/** Copy a contract address to the clipboard with a brief visual confirmation. */
+window.copyCA = function (btn) {
+  const value = btn.getAttribute("data-copy") || "";
+  const finish = () => {
+    btn.classList.add("copied");
+    setTimeout(() => btn.classList.remove("copied"), 1300);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(value).then(finish).catch(finish);
+  } else {
+    // Fallback for older browsers / non-secure contexts.
+    const ta = document.createElement("textarea");
+    ta.value = value;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand("copy"); } catch (_) { /* swallow */ }
+    document.body.removeChild(ta);
+    finish();
+  }
+};
+
+/** Render the avatar + handle + "view thesis" cell. Whole block links to the X post. */
+function authorCell(o) {
+  const handle = esc(o.authorHandle || "@author");
+  const initials = (o.authorHandle || "?").replace(/^@/, "").slice(0, 2).toUpperCase();
+  const avatar = o.authorAvatarUrl
+    ? `<img class="ac-avatar" src="${esc(o.authorAvatarUrl)}" alt="" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ac-avatar ac-fallback',textContent:'${esc(initials)}'}))" />`
+    : `<div class="ac-avatar ac-fallback">${esc(initials)}</div>`;
+  const inner = `${avatar}<div class="ac-meta"><span class="ac-handle">${handle}</span><span class="ac-view">VIEW THESIS &#x2197;</span></div>`;
+  return o.postUrl
+    ? `<a class="ac" href="${esc(o.postUrl)}" target="_blank" rel="noopener">${inner}</a>`
+    : `<div class="ac">${inner}</div>`;
+}
+
+/** Render entry → now market cap with coloured delta. */
+function mcapCell(entry, now) {
+  if (entry == null && now == null) return '<span class="mc-na">—</span>';
+  if (entry == null) return `<div class="mc"><span class="mc-now">${fmtMcap(now)}</span></div>`;
+  if (now == null) return `<div class="mc"><span class="mc-entry">${fmtMcap(entry)}</span></div>`;
+  const pct = entry > 0 ? ((now - entry) / entry) * 100 : 0;
+  const dir = pct >= 0 ? "up" : "down";
+  const sign = pct >= 0 ? "+" : "";
+  return `<div class="mc"><span class="mc-entry">${fmtMcap(entry)}</span><span class="mc-now ${dir}">${fmtMcap(now)} (${sign}${pct.toFixed(1)}%)</span></div>`;
+}
+
+function fmtMcap(usd) {
+  if (usd == null || !isFinite(usd)) return "—";
+  if (usd >= 1_000_000) return "$" + (usd / 1_000_000).toFixed(usd >= 10_000_000 ? 0 : 2) + "M";
+  if (usd >= 1_000) return "$" + Math.round(usd / 1_000) + "K";
+  return "$" + Math.round(usd);
 }
 function renderClosed(rows) {
   $("#closed-count").textContent = rows.length;
   $("#closed-empty").hidden = rows.length > 0;
   $("#closed-rows").innerHTML = rows.map((c) => `<tr>
-    <td><a class="tok" href="${bscToken(c.contractAddress)}" target="_blank" rel="noopener" title="${esc(c.contractAddress)}">${esc(c.tokenSymbol ? "$" + c.tokenSymbol : shortAddr(c.contractAddress))}</a></td>
+    <td>${tokenCell(c.tokenSymbol, c.contractAddress)}</td>
     <td>${esc(c.authorHandle)}</td>
     <td class="num">${fmtEth(c.amountInEth)}</td>
     <td class="num">${esc(fmtPrice(c.entryPriceEth))}</td>

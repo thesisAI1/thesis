@@ -268,6 +268,20 @@ code { font-family: var(--mono); }
 .data-table .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .tok { color: var(--blue); text-decoration: none; font-family: var(--mono); }
 .tok:hover { text-decoration: underline; }
+
+/* Token cell with $TICKER link + copy-CA icon button. */
+.tok-cell { display: inline-flex; align-items: center; gap: 8px; }
+.copy-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 5px;
+  background: var(--panel); border: 1px solid var(--border);
+  color: var(--muted); cursor: pointer; padding: 0;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.copy-btn:hover { color: var(--text); border-color: var(--border-2); background: var(--panel-2); }
+.copy-btn.copied { color: var(--green); border-color: var(--green); background: rgba(63,185,132,0.08); }
+.copy-btn.copied svg { display: none; }
+.copy-btn.copied::after { content: "\2713"; font-size: 13px; font-weight: 600; line-height: 1; }
 .empty { color: var(--muted); font-size: 14px; padding: 16px 2px; }
 
 .row-links { display: inline-flex; gap: 6px; }
@@ -279,6 +293,31 @@ code { font-family: var(--mono); }
   transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
 }
 .row-icon:hover { color: var(--text); border-color: #45526b; background: var(--panel-2); }
+
+/* Author cell with avatar + "view thesis" — whole cell linked to the X post. */
+.ac { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
+.ac-avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--panel-2); flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--muted); font-size: 11px; font-weight: 600;
+  font-family: var(--sans);
+  object-fit: cover;
+}
+.ac-fallback { background: var(--panel-2); color: var(--muted); }
+.ac-meta { display: flex; flex-direction: column; line-height: 1.2; }
+.ac-handle { color: var(--text); font-size: 13px; font-weight: 500; }
+.ac-view { color: var(--dim); font-size: 10px; font-family: var(--mono); letter-spacing: 0.5px; }
+.ac:hover .ac-handle { color: var(--accent); }
+.ac:hover .ac-view { color: var(--muted); }
+
+/* Entry → now market cap cell. */
+.mc { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.25; }
+.mc-entry { color: var(--dim); font-family: var(--mono); font-size: 11px; }
+.mc-now { font-family: var(--mono); font-size: 13px; color: var(--text); }
+.mc-now.up { color: var(--green); }
+.mc-now.down { color: var(--red); }
+.mc-na { color: var(--dim); font-family: var(--mono); }
 
 .pos { color: var(--green); }
 .neg { color: var(--red); }

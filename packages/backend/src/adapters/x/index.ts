@@ -23,6 +23,8 @@ export interface XPost {
   engagement: number;
   /** Id of the tweet this post replies to, or null if it is a top-level post. */
   inReplyToId: string | null;
+  /** X profile image URL of the author (display only, may be empty). */
+  authorAvatarUrl?: string;
 }
 
 export interface XAdapter {

@@ -72,10 +72,15 @@ export async function runBursar(verdict: Verdict): Promise<BursarResult> {
     postId: verdict.submission.postId,
     authorXId: verdict.submission.authorXId,
     authorHandle: verdict.submission.authorHandle,
+    authorAvatarUrl: verdict.submission.authorAvatarUrl,
+    postUrl: verdict.submission.postUrl,
     order,
     status: "open",
     entryPriceEth: fill.priceEth,
     entryTxHash: fill.txHash,
+    // Snapshot the on-chain market cap at the moment the buy fills, so the
+    // dashboard can show the entry-vs-now spread without a historical lookup.
+    marketCapAtEntryUsd: verdict.tokenReport.marketCapUsd,
     remainingFraction: 1,
     tiersHit: 0,
     realisedPnlEth: 0,

@@ -144,6 +144,7 @@ export async function triageMentions(posts: XPost[]): Promise<TriageResult> {
       postId: post.postId,
       authorXId: post.authorXId,
       authorHandle: post.authorHandle,
+      authorAvatarUrl: post.authorAvatarUrl,
       thesisText: post.text,
       contractAddress: contract,
       chain: guessChain(contract),

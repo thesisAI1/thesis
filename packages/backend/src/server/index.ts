@@ -458,6 +458,8 @@ interface OpenPositionView {
   /** Token ticker — e.g. "DEGEN". Empty when DexScreener doesn't know it yet. */
   tokenSymbol: string;
   authorHandle: string;
+  /** X profile image URL of the author (display only). */
+  authorAvatarUrl: string | null;
   grade: string | null;
   /** Permalink to the X post that triggered this trade — for the "view tweet" button. */
   postUrl: string | null;
@@ -468,6 +470,11 @@ interface OpenPositionView {
   amountInEth: number;
   entryPriceEth: number;
   currentPriceEth: number;
+  /** Token market cap in USD at buy time (null if not captured — pre-redesign). */
+  marketCapAtEntryUsd: number | null;
+  /** Current token market cap in USD, computed from current price × the same
+   *  supply ratio captured at entry. Null if entry MC is unknown. */
+  marketCapNowUsd: number | null;
   realisedPnlEth: number;
   unrealizedPnlEth: number;
   unrealizedPct: number;
@@ -530,13 +537,21 @@ async function apiDashboard(res: ServerResponse): Promise<void> {
     const remainingCost = p.order.amountInEth * p.remainingFraction;
     const remainingTokens = p.entryPriceEth > 0 ? remainingCost / p.entryPriceEth : 0;
     const unrealizedPnlEth = remainingTokens * currentPriceEth - remainingCost;
+    // Current MC = entry MC × (current price / entry price). Token supply is
+    // constant for Clanker/Bankr deploys, so price ratio is a clean proxy.
+    const marketCapAtEntryUsd = p.marketCapAtEntryUsd ?? null;
+    const marketCapNowUsd =
+      marketCapAtEntryUsd !== null && p.entryPriceEth > 0
+        ? marketCapAtEntryUsd * (currentPriceEth / p.entryPriceEth)
+        : null;
     openPositions.push({
       id: p.id,
       contractAddress: p.order.contractAddress,
       tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
       authorHandle: p.authorHandle,
+      authorAvatarUrl: p.authorAvatarUrl ?? null,
       grade: gradeByPosition.get(p.id) ?? null,
-      postUrl: postUrlByPosition.get(p.id) ?? null,
+      postUrl: postUrlByPosition.get(p.id) ?? p.postUrl ?? null,
       status: p.status,
       tiersHit: p.tiersHit,
       tierCount: p.order.takeProfits.length,
@@ -544,6 +559,8 @@ async function apiDashboard(res: ServerResponse): Promise<void> {
       amountInEth: p.order.amountInEth,
       entryPriceEth: p.entryPriceEth,
       currentPriceEth,
+      marketCapAtEntryUsd,
+      marketCapNowUsd,
       realisedPnlEth: p.realisedPnlEth,
       unrealizedPnlEth,
       unrealizedPct: remainingCost > 0 ? (unrealizedPnlEth / remainingCost) * 100 : 0,

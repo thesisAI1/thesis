@@ -23,6 +23,9 @@ export interface Submission {
   authorXId: string;
   /** @handle at time of submission (display only). */
   authorHandle: string;
+  /** X profile image URL at submission time (display only). Empty when X
+   *  didn't return one (very rare — every active account has a default). */
+  authorAvatarUrl?: string;
   /** The free-text thesis the author wrote. */
   thesisText: string;
   /** Token contract address found in the post. */
@@ -143,9 +146,16 @@ export interface Position {
   authorXId: string;
   /** Author @handle at submission time (display only). */
   authorHandle: string;
+  /** X profile image URL at submission time (display only). */
+  authorAvatarUrl?: string;
+  /** The thesis post URL on X (so the UI can link back to the original pitch). */
+  postUrl?: string;
   order: TradeOrder;
   status: "open" | "closed";
   entryPriceEth: number;
+  /** Token market cap in USD at the moment the buy executed. Used by the UI
+   *  to show the entry-vs-now spread without an extra historical-price fetch. */
+  marketCapAtEntryUsd?: number;
   /** Tx hash of the entry buy. */
   entryTxHash: string;
   /** Fraction of the original position still held (1 -> ... -> moonbag -> 0). */

@@ -65,6 +65,9 @@ export class RealX implements XAdapter {
       // boundary. Reading just `text` loses any CA placed at the end of a long
       // thesis, which silently drops the submission in triage.
       const fullText = t.note_tweet?.text ?? t.text;
+      // X returns a `_normal` (48px) avatar URL by default — swap to `_400x400`
+      // for crisp rendering in the dashboard's 26-52px circles.
+      const avatarUrl = (user?.profile_image_url ?? "").replace("_normal.", "_400x400.");
       return {
         postId: t.id,
         authorXId: t.author_id,
@@ -75,6 +78,7 @@ export class RealX implements XAdapter {
         authorFollowers: user?.public_metrics?.followers_count ?? 0,
         engagement: (metrics?.like_count ?? 0) + (metrics?.retweet_count ?? 0),
         inReplyToId: repliedTo?.id ?? null,
+        authorAvatarUrl: avatarUrl || undefined,
       };
     });
   }
@@ -84,7 +88,7 @@ function baseParams(): URLSearchParams {
   return new URLSearchParams({
     "tweet.fields": "created_at,author_id,public_metrics,referenced_tweets,note_tweet",
     expansions: "author_id",
-    "user.fields": "username,public_metrics",
+    "user.fields": "username,public_metrics,profile_image_url",
     max_results: "50",
   });
 }
@@ -93,6 +97,8 @@ interface XUser {
   id: string;
   username: string;
   public_metrics?: { followers_count?: number };
+  /** "_normal" sized (48px) avatar URL. */
+  profile_image_url?: string;
 }
 
 interface XTweet {
