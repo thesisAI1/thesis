@@ -8,8 +8,10 @@
  * Routes:
  *   GET   /                  static site (packages/website/public)
  *   GET   /docs              the documentation page (docs.html)
+ *   GET   /leaderboard       the author leaderboard page (leaderboard.html)
  *   GET   /api/status        service status JSON
  *   GET   /api/dashboard     the full transparency payload
+ *   GET   /api/leaderboard   author ranking by realised author share
  *   GET   /api/stream        Server-Sent Events — the live agent stream
  *   POST  /admin/test-swap            manual smoke-test of the live swap path
  *                                     (gated by ADMIN_SECRET header)
@@ -83,6 +85,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
   if (path === "/api/status") return apiStatus(res);
   if (path === "/api/dashboard") return apiDashboard(res);
+  if (path === "/api/leaderboard") return apiLeaderboard(res);
   if (path === "/api/stream") return apiStream(req, res);
   if (path === "/admin/test-swap" && req.method === "POST") return adminTestSwap(req, res);
   if (path === "/admin/settle-stuck-payout" && req.method === "POST") return adminSettleStuckPayout(req, res);
@@ -90,6 +93,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
 
   // Clean URL for the documentation page.
   if (path === "/docs") return serveStatic("/docs.html", res);
+  if (path === "/leaderboard") return serveStatic("/leaderboard.html", res);
 
   return serveStatic(path, res);
 }
@@ -522,6 +526,125 @@ async function apiDashboard(res: ServerResponse): Promise<void> {
     openPositions,
     closedPositions: closedPositions.slice(0, 25),
     recentReviews: reviews.slice(-20).reverse(),
+  });
+}
+
+interface LeaderboardEntry {
+  rank: number;
+  xUserId: string;
+  authorHandle: string;
+  submitted: number;
+  funded: number;
+  closed: number;
+  wins: number;
+  winRate: number;
+  totalEarnedEth: number;
+  bestTradePct: number;
+}
+
+/**
+ * GET /api/leaderboard — author ranking by realised author share.
+ *
+ * Aggregates positions + reviews + distributions per authorXId. Authors with
+ * zero funded positions are excluded so the board reflects real contributions.
+ */
+async function apiLeaderboard(res: ServerResponse): Promise<void> {
+  const store = getStore();
+  const [positions, reviews, distributions] = await Promise.all([
+    store.getAllPositions(),
+    store.getReviews(),
+    store.getDistributions(),
+  ]);
+
+  // Map positionId → author so distributions can be credited correctly.
+  const positionToAuthor = new Map<string, { xUserId: string; handle: string }>();
+  for (const p of positions) {
+    positionToAuthor.set(p.id, { xUserId: p.authorXId, handle: p.authorHandle });
+  }
+
+  interface Agg {
+    xUserId: string;
+    authorHandle: string;
+    submitted: number;
+    funded: number;
+    closed: number;
+    wins: number;
+    totalEarnedEth: number;
+    bestTradePct: number;
+  }
+  const by = new Map<string, Agg>();
+  const ensure = (xUserId: string, handle: string): Agg => {
+    let row = by.get(xUserId);
+    if (!row) {
+      row = {
+        xUserId,
+        authorHandle: handle,
+        submitted: 0,
+        funded: 0,
+        closed: 0,
+        wins: 0,
+        totalEarnedEth: 0,
+        bestTradePct: 0,
+      };
+      by.set(xUserId, row);
+    }
+    // Prefer the most-recently-seen handle (handles change less often than ids).
+    if (handle) row.authorHandle = handle;
+    return row;
+  };
+
+  // Every review counts as a submission; only BUYs count as funded.
+  for (const r of reviews) {
+    if (!r.authorXId) continue;
+    const a = ensure(r.authorXId, r.authorHandle);
+    a.submitted += 1;
+    if (r.decision === "BUY") a.funded += 1;
+  }
+
+  // Closed positions feed wins + best-trade percentage.
+  for (const p of positions) {
+    if (p.status !== "closed") continue;
+    const a = ensure(p.authorXId, p.authorHandle);
+    a.closed += 1;
+    if (p.realisedPnlEth > 0) a.wins += 1;
+    const pct =
+      p.order.amountInEth > 0 ? (p.realisedPnlEth / p.order.amountInEth) * 100 : 0;
+    if (pct > a.bestTradePct) a.bestTradePct = pct;
+  }
+
+  // Distributions credit the author's 25% to whoever sourced the position.
+  for (const d of distributions) {
+    const owner = positionToAuthor.get(d.positionId);
+    if (!owner) continue;
+    const a = ensure(owner.xUserId, owner.handle);
+    a.totalEarnedEth += d.toAuthorEth ?? 0;
+  }
+
+  // Surface only authors who have actually had a position funded.
+  const ranked: LeaderboardEntry[] = Array.from(by.values())
+    .filter((a) => a.funded > 0)
+    .sort((a, b) => {
+      if (b.totalEarnedEth !== a.totalEarnedEth) return b.totalEarnedEth - a.totalEarnedEth;
+      if (b.wins !== a.wins) return b.wins - a.wins;
+      return b.funded - a.funded;
+    })
+    .map((a, i) => ({
+      rank: i + 1,
+      xUserId: a.xUserId,
+      authorHandle: a.authorHandle,
+      submitted: a.submitted,
+      funded: a.funded,
+      closed: a.closed,
+      wins: a.wins,
+      winRate: a.closed > 0 ? a.wins / a.closed : 0,
+      totalEarnedEth: a.totalEarnedEth,
+      bestTradePct: a.bestTradePct,
+    }));
+
+  sendJson(res, 200, {
+    mode: config.mode,
+    totalAuthors: ranked.length,
+    leaderboard: ranked,
   });
 }
 
