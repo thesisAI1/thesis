@@ -137,7 +137,27 @@ export class RealChain implements ChainAdapter {
     this.ensureArmed();
     const price = await this.getTokenPriceEth(address);
     // NOTE: assumes the token uses 18 decimals — read decimals() for others.
-    const amountIn = parseEther(amountTokens.toFixed(18));
+    const requestedAmount = parseEther(amountTokens.toFixed(18));
+    // The Monitor sizes sells off the cost basis (amountInEth / entryPrice),
+    // but slippage on the original buy and transfer-tax tokens both leave the
+    // on-chain balance slightly below that figure. Trying to sell more than we
+    // hold reverts the router with `TransferHelper: TRANSFER_FROM_FAILED`, so
+    // we read the live balance and clamp the input.
+    const actualBalance = await this.publicClient.readContract({
+      address: address as Address,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [this.account.address],
+    });
+    const amountIn = requestedAmount < actualBalance ? requestedAmount : actualBalance;
+    if (amountIn === 0n) {
+      throw new Error(`chain: cannot sell — wallet holds 0 of ${address}`);
+    }
+    if (amountIn < requestedAmount) {
+      log.warn(
+        `chain: sell amount clamped — requested ${requestedAmount.toString()} but wallet holds ${actualBalance.toString()}`,
+      );
+    }
     const route = await this.fetchKyberRoute(address, config.chain.weth, amountIn);
     const built = await this.buildKyberTx(route);
     // For ERC20 input we must approve the router once (max approval) before
@@ -163,7 +183,20 @@ export class RealChain implements ChainAdapter {
     }
     // KyberSwap delivers swap output to the recipient (our wallet). Buy $THESIS
     // to our wallet, then transfer the received balance to the burn address.
-    const buy = await this.buy(config.chain.thesisToken, amountInEth);
+    //
+    // Some Clanker v4 hooks revert the buy if we just sold the same token in
+    // the previous block (anti-MEV / anti-snipe protection). Retry once after
+    // a short delay so the hook's cooldown elapses.
+    let buy;
+    try {
+      buy = await this.buy(config.chain.thesisToken, amountInEth);
+    } catch (err) {
+      log.warn(
+        `chain: buyback first attempt reverted — retrying in 30s (${String(err).slice(0, 120)})`,
+      );
+      await new Promise((r) => setTimeout(r, 30_000));
+      buy = await this.buy(config.chain.thesisToken, amountInEth);
+    }
     const balance = await this.publicClient.readContract({
       address: config.chain.thesisToken as Address,
       abi: ERC20_ABI,
