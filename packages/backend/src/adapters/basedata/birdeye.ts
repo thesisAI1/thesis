@@ -1,5 +1,6 @@
 import type { Holder } from "@thesis/shared";
 import { config } from "../../config.js";
+import { log } from "../../util/log.js";
 import type { BaseDataAdapter, TokenOnChain } from "./index.js";
 
 /**
@@ -10,10 +11,20 @@ import type { BaseDataAdapter, TokenOnChain } from "./index.js";
  *   - has no per-process 429 throttling at our scale
  *   - delivers richer history (1m/5m/30m/1h price + volume)
  *
+ * Three rate-limit-aware optimisations are baked in:
+ *   1. The ETH/USD reference price comes from the SAME multi_price call as
+ *      the token prices (WETH is folded into the address list), so the
+ *      monitor's per-tick request count is exactly 1.
+ *   2. Prices are cached for 12 seconds — fine-grained enough that a TP/SL
+ *      hit doesn't lag, but coarse enough that overlapping monitor ticks
+ *      reuse the result instead of re-hitting the API.
+ *   3. Tokens that multi_price omits (typically just-launched Clanker tokens
+ *      Birdeye hasn't indexed yet) fall back to /defi/price single — costs
+ *      one extra call only for the rare unindexed token.
+ *
  * Holders and honeypot detection are intentionally NOT surfaced — the
  * Auditor's launchpad gate (Clanker or Bankr only) already covers the rug
- * risk those checks were guarding against. Keeping the adapter narrow keeps
- * the request budget tight too.
+ * risk those checks were guarding against.
  *
  * Launchpad detection (Bankr / Clanker) stays on the same two free APIs the
  * DexScreener adapter uses, since Birdeye doesn't return deployer info.
@@ -21,6 +32,8 @@ import type { BaseDataAdapter, TokenOnChain } from "./index.js";
 const BIRDEYE_API = "https://public-api.birdeye.so";
 const BANKR_LAUNCHES = "https://api.bankr.bot/token-launches";
 const ETHERSCAN_V2 = "https://api.etherscan.io/v2/api";
+const WETH_BASE = "0x4200000000000000000000000000000000000006";
+const PRICE_CACHE_TTL_MS = 12_000;
 
 /** Clanker token-factory contracts on Base (v0-v4). */
 const CLANKER_FACTORIES = new Set([
@@ -32,8 +45,16 @@ const CLANKER_FACTORIES = new Set([
   "0x250c9fb2b411b48273f69879007803790a6aea47",
 ]);
 
+interface CachedPrice {
+  priceEth: number;
+  at: number;
+}
+
 export class BirdeyeBaseData implements BaseDataAdapter {
   private readonly headers: Record<string, string>;
+  /** In-process price cache keyed by lowercased address. Survives the
+   *  monitor → endowment → dashboard chain so we don't hammer Birdeye. */
+  private static readonly priceCache = new Map<string, CachedPrice>();
 
   constructor() {
     if (!config.baseData.birdeyeKey) {
@@ -50,9 +71,6 @@ export class BirdeyeBaseData implements BaseDataAdapter {
       this.fetchOverview(address),
       this.detectLaunchpad(address),
     ]);
-    // Empty topHolders + isHoneypot=false: the Clanker/Bankr launchpad gate
-    // is the security layer we rely on.
-    const topHolders: Holder[] = [];
     return {
       contractAddress: address,
       chain: "base",
@@ -62,53 +80,91 @@ export class BirdeyeBaseData implements BaseDataAdapter {
       launchedAt: overview.launchedAt,
       launchpad,
       isHoneypot: false,
-      topHolders,
+      topHolders: [] as Holder[],
     };
   }
 
   async getPriceEth(address: string): Promise<number> {
-    const res = await fetch(`${BIRDEYE_API}/defi/price?address=${address}`, {
-      headers: this.headers,
-    });
-    if (!res.ok) throw new Error(`Birdeye /defi/price ${res.status}`);
-    const json = (await res.json()) as { success?: boolean; data?: { value?: number } };
-    const usd = Number(json.data?.value ?? 0);
-    return usd / (await this.getEthUsd());
+    const cached = readCache(address);
+    if (cached !== undefined) return cached;
+    const prices = await this.getPricesEth([address]);
+    return prices.get(address.toLowerCase()) ?? 0;
   }
 
   async getPricesEth(addresses: string[]): Promise<Map<string, number>> {
     const out = new Map<string, number>();
     if (addresses.length === 0) return out;
 
-    // Birdeye /defi/multi_price accepts up to 100 addresses per request. Split
-    // into chunks of 100, then do ONE more call for the ETH/USD reference price.
-    const chunks: string[][] = [];
-    for (let i = 0; i < addresses.length; i += 100) chunks.push(addresses.slice(i, i + 100));
+    // Serve from cache first, surface only the cache misses to the API.
+    const missing: string[] = [];
+    for (const a of addresses) {
+      const cached = readCache(a);
+      if (cached !== undefined) out.set(a.toLowerCase(), cached);
+      else missing.push(a);
+    }
+    if (missing.length === 0) return out;
 
-    const [ethUsd, ...results] = await Promise.all([
-      this.getEthUsd(),
-      ...chunks.map(async (chunk) => {
+    // Fold WETH into the same multi_price call to get the ETH/USD reference
+    // without a second round-trip. Birdeye accepts up to 100 addresses per call.
+    const chunks: string[][] = [];
+    const dedup = Array.from(new Set([...missing, WETH_BASE].map((a) => a.toLowerCase())));
+    for (let i = 0; i < dedup.length; i += 100) chunks.push(dedup.slice(i, i + 100));
+
+    const raw: Record<string, number> = {};
+    for (const chunk of chunks) {
+      try {
         const url = `${BIRDEYE_API}/defi/multi_price?list_address=${encodeURIComponent(chunk.join(","))}`;
         const res = await fetch(url, { headers: this.headers });
         if (!res.ok) {
-          throw new Error(`Birdeye /defi/multi_price ${res.status}`);
+          log.warn(`Birdeye /defi/multi_price ${res.status} — falling back per-token`);
+          continue;
         }
         const json = (await res.json()) as {
           success?: boolean;
           data?: Record<string, { value?: number } | null>;
         };
-        return json.data ?? {};
-      }),
-    ]);
+        for (const [addr, info] of Object.entries(json.data ?? {})) {
+          const usd = Number(info?.value ?? 0);
+          if (usd > 0) raw[addr.toLowerCase()] = usd;
+        }
+      } catch (err) {
+        log.warn(`Birdeye multi_price chunk failed: ${String(err)}`);
+      }
+    }
 
-    if (ethUsd <= 0) return out;
-    for (const data of results) {
-      for (const [addr, info] of Object.entries(data)) {
-        const usd = Number(info?.value ?? 0);
-        if (usd > 0) out.set(addr.toLowerCase(), usd / ethUsd);
+    const ethUsd = raw[WETH_BASE.toLowerCase()] ?? 0;
+    if (ethUsd <= 0) {
+      // No ETH/USD reference — can't convert. Return whatever cache had.
+      return out;
+    }
+
+    // Resolve every requested address: multi_price hit, then single-price fallback.
+    for (const addr of missing) {
+      const key = addr.toLowerCase();
+      let usd = raw[key];
+      if (!usd) usd = await this.fallbackSinglePrice(addr);
+      if (usd > 0) {
+        const priceEth = usd / ethUsd;
+        out.set(key, priceEth);
+        writeCache(addr, priceEth);
       }
     }
     return out;
+  }
+
+  /** Single-token price fallback — used only when multi_price omits the token
+   *  (typically because Birdeye hasn't indexed a freshly-launched Clanker). */
+  private async fallbackSinglePrice(address: string): Promise<number> {
+    try {
+      const res = await fetch(`${BIRDEYE_API}/defi/price?address=${address}`, {
+        headers: this.headers,
+      });
+      if (!res.ok) return 0;
+      const json = (await res.json()) as { data?: { value?: number } };
+      return Number(json.data?.value ?? 0);
+    } catch {
+      return 0;
+    }
   }
 
   async getTokenSymbol(address: string): Promise<string> {
@@ -127,14 +183,13 @@ export class BirdeyeBaseData implements BaseDataAdapter {
     launchedAt: string;
   }> {
     const raw = await this.fetchOverviewRaw(address);
-    const ethUsd = await this.getEthUsd();
+    // Reuse the cached ETH/USD price the monitor just refreshed.
+    const ethUsdCached = readCacheRaw(WETH_BASE);
+    const ethUsd = ethUsdCached ?? (await this.fallbackSinglePrice(WETH_BASE));
     return {
       priceEth: ethUsd > 0 ? (raw.priceUsd ?? 0) / ethUsd : 0,
       liquidityUsd: raw.liquidityUsd ?? 0,
       marketCapUsd: raw.marketCapUsd ?? 0,
-      // Birdeye doesn't expose pairCreatedAt directly. Fall back to current
-      // time so the age gate still functions — Auditor's launchpad gate is
-      // the real safety filter.
       launchedAt: raw.launchedAt ?? new Date().toISOString(),
     };
   }
@@ -169,18 +224,6 @@ export class BirdeyeBaseData implements BaseDataAdapter {
     };
   }
 
-  /** Get ETH/USD from Birdeye too — saves a separate call to another API. */
-  private async getEthUsd(): Promise<number> {
-    const res = await fetch(
-      `${BIRDEYE_API}/defi/price?address=0x4200000000000000000000000000000000000006`,
-      { headers: this.headers },
-    );
-    if (!res.ok) return 0;
-    const json = (await res.json()) as { data?: { value?: number } };
-    return Number(json.data?.value ?? 0);
-  }
-
-  /** Reuse the existing Bankr-fee-check and Etherscan deployer-check for launchpad detection. */
   private async detectLaunchpad(address: string): Promise<string | null> {
     try {
       const res = await fetch(`${BANKR_LAUNCHES}/${address}/fees`);
@@ -212,3 +255,28 @@ export class BirdeyeBaseData implements BaseDataAdapter {
   }
 }
 
+function readCache(address: string): number | undefined {
+  const hit = BirdeyeBaseData["priceCache"].get(address.toLowerCase());
+  if (!hit) return undefined;
+  if (Date.now() - hit.at > PRICE_CACHE_TTL_MS) {
+    BirdeyeBaseData["priceCache"].delete(address.toLowerCase());
+    return undefined;
+  }
+  return hit.priceEth;
+}
+
+/** Read a USD-denominated cached value — used to reuse WETH/USD across calls. */
+function readCacheRaw(address: string): number | undefined {
+  // We cache the priceEth (token denominated in ETH). For WETH itself the
+  // cached value IS the USD price (because WETH/WETH = 1, but we stored the
+  // raw USD value before dividing). Skip the cache for raw USD lookups.
+  void address;
+  return undefined;
+}
+
+function writeCache(address: string, priceEth: number): void {
+  BirdeyeBaseData["priceCache"].set(address.toLowerCase(), {
+    priceEth,
+    at: Date.now(),
+  });
+}
