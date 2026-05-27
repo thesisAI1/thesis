@@ -882,14 +882,24 @@ function apiStream(req: IncomingMessage, res: ServerResponse): void {
 // --- helpers ------------------------------------------------------------
 
 async function serveStatic(path: string, res: ServerResponse): Promise<void> {
-  const full = normalize(join(WEBROOT, path === "/" ? "/index.html" : path));
+  // Drop a query string before resolving the file (used for cache-busting).
+  const clean = (path.split("?")[0] ?? path) || "/";
+  const full = normalize(join(WEBROOT, clean === "/" ? "/index.html" : clean));
   if (!full.startsWith(WEBROOT) || !existsSync(full)) {
     sendJson(res, 404, { error: "not found" });
     return;
   }
   const body = await readFile(full);
+  const ext = extname(full);
+  // HTML / JS / CSS change every deploy and must never serve a stale copy.
+  // Images and other assets can cache for a few minutes (they rarely change
+  // and the cache-busting query string handles the ones that do).
+  const noCache = ext === ".html" || ext === ".js" || ext === ".css";
   res.writeHead(200, {
-    "content-type": MIME[extname(full)] ?? "application/octet-stream",
+    "content-type": MIME[ext] ?? "application/octet-stream",
+    "cache-control": noCache
+      ? "no-store, no-cache, must-revalidate, max-age=0"
+      : "public, max-age=300",
   });
   res.end(body);
 }
