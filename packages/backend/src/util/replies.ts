@@ -63,6 +63,37 @@ export function skipReplyText(o: SkipKind): string | null {
   return null;
 }
 
+/** Why a thesis didn't even make it past Step-1 triage. */
+export type TriageRejectKind =
+  | { kind: "author_cooldown"; hoursLeft: number }
+  | { kind: "contract_dedup"; hoursLeft: number }
+  | { kind: "thesis_too_short"; words: number; minWords: number };
+
+/** Reply text for a mention that failed Step-1 triage. */
+export function triageRejectReplyText(r: TriageRejectKind): string {
+  const formatHours = (h: number): string => {
+    if (h < 1) return `~${Math.max(1, Math.round(h * 60))} minutes`;
+    return `~${h.toFixed(1)} hours`;
+  };
+  if (r.kind === "author_cooldown") {
+    return [
+      "Got your thesis, but the committee already reviewed a submission from you recently.",
+      `Same-author cooldown clears in ${formatHours(r.hoursLeft)}. Re-tag the committee then.`,
+      "The cooldown keeps the queue fair — one thesis per author at a time.",
+    ].join("\n");
+  }
+  if (r.kind === "contract_dedup") {
+    return [
+      "That contract was already reviewed by the committee very recently — skipping to avoid a duplicate position.",
+      `Re-eligible in ${formatHours(r.hoursLeft)}. Tag the committee again then if your read still holds.`,
+    ].join("\n");
+  }
+  return [
+    `Your thesis is too short — the committee needs at least ${r.minWords} real words of analysis (got ${r.words}).`,
+    "Tell us what you see: holders, liquidity, narrative, why now. The Dean grades on substance, not enthusiasm.",
+  ].join("\n");
+}
+
 /** Parse the free-form skippedReason string from the Bursar into a structured SkipKind. */
 export function classifySkipReason(reason: string): SkipKind | null {
   const cooldown = /cooldown active \((\d+)m left\)/.exec(reason);

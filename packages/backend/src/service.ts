@@ -16,7 +16,12 @@ import { reviewSubmission, type ReviewResult } from "./pipeline/index.js";
 import { getStore } from "./store/index.js";
 import { triageMentions } from "./triage/index.js";
 import { log } from "./util/log.js";
-import { buyReplyText, classifySkipReason, skipReplyText } from "./util/replies.js";
+import {
+  buyReplyText,
+  classifySkipReason,
+  skipReplyText,
+  triageRejectReplyText,
+} from "./util/replies.js";
 
 let lastSeenId: string | undefined;
 
@@ -45,11 +50,37 @@ export async function pollCycle(): Promise<void> {
   const triage = await triageMentions(theses);
   for (const item of triage.eligible) await store.enqueue(item);
   await store.bumpFunnel(triage.seen, triage.passed);
+  await replyToTriageRejects(triage.rejected);
 
   const depth = (await store.getQueue()).length;
   log.info(
     `poll: ${triage.seen} mention(s), ${triage.passed} passed triage, queue depth ${depth}`,
   );
+}
+
+/** Per-author rate limit on triage rejection replies — one reply per author
+ *  per 24h. Prevents spam loops where a serial submitter keeps tagging us. */
+const triageReplyCooldown = new Map<string, number>();
+const TRIAGE_REPLY_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
+async function replyToTriageRejects(
+  rejected: Array<{ post: { postId: string; authorXId: string; authorHandle: string }; reason: Parameters<typeof triageRejectReplyText>[0] }>,
+): Promise<void> {
+  const now = Date.now();
+  for (const { post, reason } of rejected) {
+    const last = triageReplyCooldown.get(post.authorXId) ?? 0;
+    if (now - last < TRIAGE_REPLY_COOLDOWN_MS) continue;
+    const text = triageRejectReplyText(reason);
+    try {
+      const replyId = await createXAdapter().replyToPost(post.postId, text);
+      log.info(
+        `x: replied to ${post.postId} (${post.authorHandle}) — triage reject (${reason.kind}, reply ${replyId})`,
+      );
+      triageReplyCooldown.set(post.authorXId, now);
+    } catch (err) {
+      log.warn(`x: triage reject reply failed for ${post.postId}: ${String(err)}`);
+    }
+  }
 }
 
 /** One review-loop tick: prune stale items, respect the budget, review one. */
