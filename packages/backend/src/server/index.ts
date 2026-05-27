@@ -21,6 +21,9 @@
  *   POST  /admin/reset-position-state clear fake TP state from a position
  *                                     after a silent sell failure
  *                                     (gated by ADMIN_SECRET header)
+ *   POST  /admin/rebuy-position       re-open a closed position by buying
+ *                                     the token again with the same ETH
+ *                                     amount (gated by ADMIN_SECRET header)
  */
 
 import { existsSync } from "node:fs";
@@ -90,6 +93,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (path === "/admin/test-swap" && req.method === "POST") return adminTestSwap(req, res);
   if (path === "/admin/settle-stuck-payout" && req.method === "POST") return adminSettleStuckPayout(req, res);
   if (path === "/admin/reset-position-state" && req.method === "POST") return adminResetPositionState(req, res);
+  if (path === "/admin/rebuy-position" && req.method === "POST") return adminRebuyPosition(req, res);
 
   // Clean URL for the documentation page.
   if (path === "/docs") return serveStatic("/docs.html", res);
@@ -345,6 +349,86 @@ async function adminResetPositionState(
       remainingFraction: pos.remainingFraction,
       status: pos.status,
     },
+  });
+}
+
+/**
+ * POST /admin/rebuy-position — manually re-open a closed position by buying
+ * the token again with the SAME ETH amount as the original buy. Used to
+ * honour an author whose position was wrongly closed by a bug (fake TP1,
+ * silent sell failure, etc.) and we want to give the thesis another shot
+ * without faking the entry price.
+ *
+ * Auth: header `x-admin-secret`.
+ *
+ * Body (JSON): { positionId: "pos-..." }
+ *
+ * Behaviour:
+ *   1. Loads the position; fails if not found.
+ *   2. Calls chain.buy(token, position.order.amountInEth) — real on-chain spend.
+ *   3. Replaces entryPriceEth / entryTxHash / openedAt with the new buy data;
+ *      resets tiersHit, realisedPnlEth, remainingFraction, lastExit fields;
+ *      flips status back to "open".
+ *
+ * Returns: { ok, positionId, oldEntryPriceEth, newEntryPriceEth, txHash, basescanUrl }
+ */
+async function adminRebuyPosition(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  const secret = config.server.adminSecret;
+  if (!secret) return sendJson(res, 503, { ok: false, error: "ADMIN_SECRET is not set" });
+  if (req.headers["x-admin-secret"] !== secret) {
+    return sendJson(res, 401, { ok: false, error: "unauthorized" });
+  }
+  let body: { positionId?: string };
+  try {
+    body = JSON.parse(await readBody(req)) as typeof body;
+  } catch {
+    return sendJson(res, 400, { ok: false, error: "invalid JSON body" });
+  }
+  const positionId = body.positionId?.trim();
+  if (!positionId) return sendJson(res, 400, { ok: false, error: "positionId is required" });
+
+  const store = getStore();
+  const positions = await store.getAllPositions();
+  const pos = positions.find((p) => p.id === positionId);
+  if (!pos) return sendJson(res, 404, { ok: false, error: "position not found" });
+
+  const amountInEth = pos.order.amountInEth;
+  const oldEntryPriceEth = pos.entryPriceEth;
+  log.info(
+    `admin: rebuy-position ${positionId} — buying ${amountInEth} ETH of ${pos.order.contractAddress}`,
+  );
+
+  let buy;
+  try {
+    buy = await createChainAdapter().buy(pos.order.contractAddress, amountInEth);
+  } catch (err) {
+    log.error(`admin: rebuy-position buy failed — ${String(err)}`);
+    return sendJson(res, 500, { ok: false, error: String(err) });
+  }
+
+  pos.entryPriceEth = buy.priceEth;
+  pos.entryTxHash = buy.txHash;
+  pos.openedAt = new Date().toISOString();
+  pos.tiersHit = 0;
+  pos.realisedPnlEth = 0;
+  pos.remainingFraction = 1;
+  pos.lastExitPriceEth = undefined;
+  pos.lastExitTxHash = undefined;
+  pos.status = "open";
+  pos.closedAt = undefined;
+  await store.savePosition(pos);
+
+  log.info(
+    `admin: rebuy-position ${positionId} — new entry ${buy.priceEth} ETH/tok (was ${oldEntryPriceEth}), tx ${buy.txHash}`,
+  );
+  sendJson(res, 200, {
+    ok: true,
+    positionId,
+    oldEntryPriceEth,
+    newEntryPriceEth: buy.priceEth,
+    amountInEth,
+    txHash: buy.txHash,
+    basescanUrl: `https://basescan.org/tx/${buy.txHash}`,
   });
 }
 
