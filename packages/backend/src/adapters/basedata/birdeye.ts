@@ -26,8 +26,13 @@ import type { BaseDataAdapter, TokenOnChain } from "./index.js";
  * Auditor's launchpad gate (Clanker or Bankr only) already covers the rug
  * risk those checks were guarding against.
  *
- * Launchpad detection (Bankr / Clanker) stays on the same two free APIs the
- * DexScreener adapter uses, since Birdeye doesn't return deployer info.
+ * Launchpad detection:
+ *   - Bankr → its own public fee endpoint (HTTP 200 with non-error body)
+ *   - Clanker → Blockscout V2 contract metadata. Clanker-deployed tokens are
+ *     verified on Base with a Solidity class name starting with "Clanker"
+ *     (e.g. "ClankerToken" for v4). The old deployer-vs-factory check is kept
+ *     as a secondary path for when a paid BaseScan plan is configured, but
+ *     Blockscout is the source that actually works on the free tier.
  *
  * launchedAt has a 3-tier fallback chain because no single source is reliable
  * on Base:
@@ -44,6 +49,7 @@ const BIRDEYE_API = "https://public-api.birdeye.so";
 const BANKR_LAUNCHES = "https://api.bankr.bot/token-launches";
 const ETHERSCAN_V2 = "https://api.etherscan.io/v2/api";
 const DEXSCREENER_API = "https://api.dexscreener.com";
+const BLOCKSCOUT_BASE = "https://base.blockscout.com";
 const WETH_BASE = "0x4200000000000000000000000000000000000006";
 const PRICE_CACHE_TTL_MS = 30_000;
 const RATE_LIMIT_BACKOFF_MS = 2_000;
@@ -254,9 +260,11 @@ export class BirdeyeBaseData implements BaseDataAdapter {
     };
   }
 
-  /** Classify launchpad given an already-fetched deployer address. Bankr is
-   *  detected by its own public fee endpoint; Clanker is detected by the
-   *  on-chain deployer matching one of the factory contracts. */
+  /** Classify launchpad. Bankr first via its own public fee endpoint; then
+   *  Clanker via two signals — (a) on-chain deployer matching one of the
+   *  factory contracts (only works when a paid BaseScan plan supplies the
+   *  deployer), (b) Blockscout-verified contract name starting with "Clanker"
+   *  (works on the free tier and is the path used in production today). */
   private async classifyLaunchpad(
     address: string,
     deployer: string | null,
@@ -271,7 +279,24 @@ export class BirdeyeBaseData implements BaseDataAdapter {
       /* ignore */
     }
     if (deployer && CLANKER_FACTORIES.has(deployer.toLowerCase())) return "clanker";
+    const contractName = await this.fetchBlockscoutContractName(address);
+    if (contractName && /^clanker/i.test(contractName)) return "clanker";
     return null;
+  }
+
+  /** Fetch the verified Solidity class name of a contract from Blockscout's
+   *  V2 API. Used for Clanker detection — every Clanker-launched token is
+   *  source-verified with a class name starting with "Clanker" (e.g.
+   *  "ClankerToken" for v4 deployments). Free, no API key, supports Base. */
+  private async fetchBlockscoutContractName(address: string): Promise<string | null> {
+    try {
+      const res = await fetch(`${BLOCKSCOUT_BASE}/api/v2/addresses/${address}`);
+      if (!res.ok) return null;
+      const json = (await res.json()) as { name?: string | null };
+      return json.name ?? null;
+    } catch {
+      return null;
+    }
   }
 
   /** One BaseScan call → both the deployer (for launchpad classification) and
