@@ -60,11 +60,16 @@ export class RealX implements XAdapter {
       const user = users.get(t.author_id);
       const metrics = t.public_metrics;
       const repliedTo = (t.referenced_tweets ?? []).find((r) => r.type === "replied_to");
+      // X Premium long tweets (>280 chars) put the full body in `note_tweet.text`;
+      // the regular `text` field is truncated with an ellipsis at the 280-char
+      // boundary. Reading just `text` loses any CA placed at the end of a long
+      // thesis, which silently drops the submission in triage.
+      const fullText = t.note_tweet?.text ?? t.text;
       return {
         postId: t.id,
         authorXId: t.author_id,
         authorHandle: "@" + (user?.username ?? "unknown"),
-        text: t.text,
+        text: fullText,
         createdAt: t.created_at ?? new Date().toISOString(),
         url: `https://x.com/i/status/${t.id}`,
         authorFollowers: user?.public_metrics?.followers_count ?? 0,
@@ -77,7 +82,7 @@ export class RealX implements XAdapter {
 
 function baseParams(): URLSearchParams {
   return new URLSearchParams({
-    "tweet.fields": "created_at,author_id,public_metrics,referenced_tweets",
+    "tweet.fields": "created_at,author_id,public_metrics,referenced_tweets,note_tweet",
     expansions: "author_id",
     "user.fields": "username,public_metrics",
     max_results: "50",
@@ -93,6 +98,8 @@ interface XUser {
 interface XTweet {
   id: string;
   text: string;
+  /** Full body for X Premium long tweets — preferred over `text` when present. */
+  note_tweet?: { text?: string };
   author_id: string;
   created_at?: string;
   public_metrics?: { like_count?: number; retweet_count?: number };
