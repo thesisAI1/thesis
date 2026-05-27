@@ -28,10 +28,22 @@ import type { BaseDataAdapter, TokenOnChain } from "./index.js";
  *
  * Launchpad detection (Bankr / Clanker) stays on the same two free APIs the
  * DexScreener adapter uses, since Birdeye doesn't return deployer info.
+ *
+ * launchedAt has a 3-tier fallback chain because no single source is reliable
+ * on Base:
+ *   1. BaseScan contract creation timestamp — the source of truth, but the
+ *      free Etherscan v2 plan does NOT support Base, so this returns null
+ *      unless a paid plan key is configured.
+ *   2. DexScreener pairCreatedAt of the earliest base pair — free, accurate
+ *      for any token that has an indexed liquidity pair (which every tradable
+ *      token does). This is the de-facto primary source today.
+ *   3. Birdeye overview launchedAt — which is just `new Date()` at fetch
+ *      time, so it makes everything look <1h old. Only used if both above fail.
  */
 const BIRDEYE_API = "https://public-api.birdeye.so";
 const BANKR_LAUNCHES = "https://api.bankr.bot/token-launches";
 const ETHERSCAN_V2 = "https://api.etherscan.io/v2/api";
+const DEXSCREENER_API = "https://api.dexscreener.com";
 const WETH_BASE = "0x4200000000000000000000000000000000000006";
 const PRICE_CACHE_TTL_MS = 30_000;
 const RATE_LIMIT_BACKOFF_MS = 2_000;
@@ -69,21 +81,28 @@ export class BirdeyeBaseData implements BaseDataAdapter {
 
   async getToken(address: string): Promise<TokenOnChain> {
     // Birdeye gives us price / liquidity / mcap but NOT a launch date and no
-    // deployer info, so we still hit BaseScan once for the on-chain creation
-    // record — that single call supplies BOTH the launchpad detection AND
-    // the launch timestamp used by the Auditor's age gate.
-    const [overview, creation] = await Promise.all([
+    // deployer info. BaseScan is the source of truth for the creation timestamp
+    // but the free Etherscan v2 plan rejects Base, so DexScreener pairCreatedAt
+    // is fetched in parallel as a free fallback. All three calls are run in
+    // parallel so the slowest one (typically DexScreener) sets the latency.
+    const [overview, creation, dexLaunchedAt] = await Promise.all([
       this.fetchOverview(address),
       this.fetchCreationInfo(address),
+      this.fetchDexScreenerLaunchedAt(address),
     ]);
     const launchpad = await this.classifyLaunchpad(address, creation?.deployer ?? null);
+    // Prefer BaseScan (exact contract creation), fall back to DexScreener
+    // (earliest pair created — usually within seconds of the token deploy on
+    // launchpads like Clanker / Bankr), then finally to overview.launchedAt
+    // which is just now() and would make every token look brand new.
+    const launchedAt = creation?.launchedAt ?? dexLaunchedAt ?? overview.launchedAt;
     return {
       contractAddress: address,
       chain: "base",
       priceEth: overview.priceEth,
       liquidityUsd: overview.liquidityUsd,
       marketCapUsd: overview.marketCapUsd,
-      launchedAt: creation?.launchedAt ?? overview.launchedAt,
+      launchedAt,
       launchpad,
       isHoneypot: false,
       topHolders: [] as Holder[],
@@ -282,6 +301,33 @@ export class BirdeyeBaseData implements BaseDataAdapter {
       const ts = Number(entry.timestamp ?? 0);
       const launchedAt = ts > 0 ? new Date(ts * 1000).toISOString() : null;
       return { deployer: entry.contractCreator ?? null, launchedAt };
+    } catch {
+      return null;
+    }
+  }
+
+  /** Fallback launch timestamp via DexScreener. We pick the earliest
+   *  `pairCreatedAt` across all base pairs because Clanker / Bankr deploys
+   *  spawn the first pool atomically with the token, so the first pair
+   *  creation tracks the actual token launch within a few seconds. Returns
+   *  null if DexScreener hasn't indexed the token yet (typical only for
+   *  brand-new launches, in which case the Auditor's age gate would block
+   *  it anyway under the under-1h rule). */
+  private async fetchDexScreenerLaunchedAt(address: string): Promise<string | null> {
+    try {
+      const res = await fetch(`${DEXSCREENER_API}/latest/dex/tokens/${address}`);
+      if (!res.ok) return null;
+      const json = (await res.json()) as {
+        pairs?: Array<{ chainId?: string; pairCreatedAt?: number }>;
+      };
+      const basePairs = (json.pairs ?? []).filter((p) => p.chainId === "base");
+      let earliest = Number.POSITIVE_INFINITY;
+      for (const p of basePairs) {
+        const ts = Number(p.pairCreatedAt ?? 0);
+        if (ts > 0 && ts < earliest) earliest = ts;
+      }
+      if (!Number.isFinite(earliest)) return null;
+      return new Date(earliest).toISOString();
     } catch {
       return null;
     }
