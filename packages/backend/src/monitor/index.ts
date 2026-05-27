@@ -186,21 +186,25 @@ async function settle(pos: Position): Promise<void> {
 }
 
 /**
- * Sell a slice of the position worth `costEth` of the original buy, realised
- * AT `exitPrice` (the tier or stop-loss level). The on-chain swap still
- * executes; its tx hash is recorded.
+ * Sell a slice of the position worth `costEth` of the original buy. The
+ * on-chain swap actually executes; we credit the ETH we ACTUALLY received
+ * (`result.amountOut`) as proceeds — not the theoretical tier price.
+ *
+ * This used to compute `proceeds = tokens × exitPrice`, which assumed the
+ * sell filled at the trigger price. When the price provider briefly spiked
+ * above the tier threshold (causing the monitor to fire) but the actual
+ * KyberSwap fill came in at a lower price, the system recorded profit that
+ * was never realised on-chain. Now proceeds come straight from the swap
+ * output, so the recorded PnL matches what the wallet actually received.
  *
  * THROWS when the on-chain swap reverts. Callers MUST treat a thrown sell as
  * "nothing happened" — do NOT advance tier counters, do NOT credit realised
  * PnL, do NOT post a reply, do NOT settle. The next monitor tick will retry.
- *
- * (Previously this swallowed the error and returned an empty tx hash, which
- * caused fake-profit announcements, fake author payouts, and a fake burn.)
  */
 async function sell(
   pos: Position,
   costEth: number,
-  exitPrice: number,
+  _exitPrice: number,
 ): Promise<{ proceeds: number; profit: number; txHash: string }> {
   const originalTokens =
     pos.entryPriceEth > 0 ? pos.order.amountInEth / pos.entryPriceEth : 0;
@@ -208,7 +212,10 @@ async function sell(
     pos.order.amountInEth > 0 ? originalTokens * (costEth / pos.order.amountInEth) : 0;
 
   const result = await createChainAdapter().sell(pos.order.contractAddress, tokens);
-  const proceeds = tokens * exitPrice;
+  // result.amountOut is the ETH the wallet actually received from KyberSwap.
+  // exitPrice is kept in the signature only so the call sites stay
+  // self-documenting (which tier triggered us); we no longer multiply by it.
+  const proceeds = result.amountOut;
   return { proceeds, profit: proceeds - costEth, txHash: result.txHash };
 }
 
