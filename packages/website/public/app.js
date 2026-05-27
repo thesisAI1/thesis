@@ -270,7 +270,7 @@ function tokenCell(symbol, address) {
   return (
     `<div class="tok-cell">` +
     `<a class="tok" href="${dexUrl}" target="_blank" rel="noopener noreferrer" title="${addrAttr}">${esc(label)}</a>` +
-    `<button class="copy-btn" type="button" data-copy="${addrAttr}" onclick="copyCA(this)" title="Copy contract address" aria-label="Copy contract address">${copyIcon}</button>` +
+    `<button class="tok-copy" type="button" data-copy="${addrAttr}" onclick="copyCA(this)" title="Copy contract address" aria-label="Copy contract address">${copyIcon}</button>` +
     `</div>`
   );
 }
