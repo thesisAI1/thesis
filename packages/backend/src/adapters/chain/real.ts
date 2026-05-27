@@ -12,7 +12,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { base, baseSepolia } from "viem/chains";
 import { config } from "../../config.js";
 import { log } from "../../util/log.js";
-import { RealBaseData } from "../basedata/real.js";
+import { createBaseDataAdapter } from "../basedata/index.js";
 import type { ChainAdapter, SwapResult } from "./index.js";
 
 /** KyberSwap Aggregator API on Base — free public endpoint, no API key required. */
@@ -91,7 +91,11 @@ export class RealChain implements ChainAdapter {
   private readonly publicClient;
   private readonly walletClient;
   private readonly account;
-  private readonly market = new RealBaseData();
+  // Use the factory so the chain adapter inherits whichever data provider is
+  // configured (Birdeye when BIRDEYE_API_KEY is set, DexScreener otherwise).
+  // Hardcoding `new RealBaseData()` here was the silent bug that kept the
+  // monitor's price checks pinned to DexScreener even after Birdeye was on.
+  private readonly market = createBaseDataAdapter();
 
   constructor() {
     if (!config.chain.tradingWalletKey) {
@@ -202,12 +206,22 @@ export class RealChain implements ChainAdapter {
       await new Promise((r) => setTimeout(r, 30_000));
       buy = await this.buy(config.chain.thesisToken, amountInEth);
     }
+    // Wait for the buy tx to be MINED before reading balanceOf — otherwise
+    // we read pre-buy state, see 0 $THESIS in the wallet, and try to burn 0
+    // (which viem rejects with "Missing or invalid parameters"). Also avoids
+    // nonce conflicts on the immediately-following burn tx.
+    await this.publicClient.waitForTransactionReceipt({ hash: buy.txHash as Hex });
     const balance = await this.publicClient.readContract({
       address: config.chain.thesisToken as Address,
       abi: ERC20_ABI,
       functionName: "balanceOf",
       args: [this.account.address],
     });
+    if (balance === 0n) {
+      throw new Error(
+        `chain: buyback succeeded (tx ${buy.txHash}) but $THESIS balance is 0 — cannot burn`,
+      );
+    }
     const { request } = await this.publicClient.simulateContract({
       account: this.account,
       address: config.chain.thesisToken as Address,
