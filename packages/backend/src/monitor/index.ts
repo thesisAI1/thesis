@@ -241,14 +241,17 @@ async function reply(
 ): Promise<void> {
   const x = createXAdapter();
   const text = exitReplyText(o);
-  // The card celebrates wins. Any TP firing is a win for that tranche; a
-  // trailing-stop with tiersHit > 0 also banked profit on the way up. Pure
-  // stop-outs (sl with tiersHit === 0) stay text-only.
-  const profitable =
-    o.kind === "tp" || (o.kind === "sl" && o.tiersHit > 0 && o.netPnlEth > 0);
+  // The card represents the FULL settlement story — author share, $THESIS
+  // burn, the lot. Real settlement only runs at full close (TP4 final, or any
+  // stop-out). Per-tier intermediate exits don't settle anything yet, so we
+  // mustn't post a card claiming "shared / earned / burned" when none of that
+  // has happened. Gate the card to fire exactly when settle() does.
+  const fullyClosed =
+    (o.kind === "tp" && o.final && pos.realisedPnlEth > 0) ||
+    (o.kind === "sl" && pos.realisedPnlEth > 0);
 
   let mediaPng: Buffer | null = null;
-  if (profitable) {
+  if (fullyClosed) {
     try {
       mediaPng = await buildProfitCardPng(pos, o);
     } catch (err) {
@@ -298,9 +301,10 @@ async function buildProfitCardPng(
       ? pos.marketCapAtEntryUsd * (pos.lastExitPriceEth / pos.entryPriceEth)
       : null;
 
-  // Card numbers: for a TP exit we surface THIS tier's profit + this exit's
-  // 25% slice. For a trailing-stop close we surface the total realised PnL.
-  const totalProfitEth = o.kind === "tp" ? o.profitEth : o.netPnlEth;
+  // Card always surfaces the FULL realised PnL across all tiers (not just
+  // the last exit's slice). This is only called at full-close, where
+  // pos.realisedPnlEth holds the total banked across every tranche.
+  const totalProfitEth = pos.realisedPnlEth;
   const authorShareEth = totalProfitEth > 0 ? totalProfitEth * 0.25 : 0;
   const buybackEth = authorShareEth; // same 25% slice.
   const pnlPct =
