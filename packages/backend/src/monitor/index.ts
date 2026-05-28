@@ -141,15 +141,37 @@ async function takeTier(pos: Position): Promise<boolean> {
 
 /** Stop-loss: sell the whole remaining position, close, and settle. */
 async function stopOut(pos: Position): Promise<void> {
-  const exitPrice = stopPrice(pos);
+  await closeOutWithKind(pos, stopPrice(pos), "sl");
+}
+
+/**
+ * Close the remaining position at a given price and run the full
+ * close pipeline: on-chain sell → save closed state → settle splits →
+ * announce + card on X. Shared between automatic stop-out and the
+ * author-triggered manual close. The `kind` parameter chooses the
+ * announcement copy ("sl" / "manual") — same machinery underneath.
+ *
+ * Throws when the on-chain sell reverts (so callers can decide whether
+ * to swallow the error or surface it to the user).
+ */
+async function closeOutWithKind(
+  pos: Position,
+  exitPrice: number,
+  kind: "sl" | "manual",
+): Promise<void> {
   const cost = pos.order.amountInEth * pos.remainingFraction;
 
   let sale: { proceeds: number; profit: number; txHash: string };
   try {
     sale = await sell(pos, cost, exitPrice);
   } catch (err) {
-    // Same deal as takeTier — do NOT mark the position closed, do NOT credit
-    // any PnL, do NOT settle. Retry on the next monitor tick.
+    if (kind === "manual") {
+      // Surface to the author-actions caller so it can post a "try again" reply.
+      log.warn(`monitor: ${pos.id} manual-close sell reverted: ${String(err)}`);
+      throw err;
+    }
+    // Automatic SL — same logic as takeTier: do NOT mark closed, do NOT
+    // credit PnL, do NOT settle. Retry on the next monitor tick.
     log.warn(`monitor: ${pos.id} stop-out sell reverted — will retry next tick: ${String(err)}`);
     return;
   }
@@ -164,10 +186,33 @@ async function stopOut(pos: Position): Promise<void> {
 
   const total = pos.realisedPnlEth;
   log.info(
-    `monitor: ${pos.id} stopped out — net result ${total >= 0 ? "+" : ""}${total.toFixed(4)} ETH`,
+    `monitor: ${pos.id} ${kind === "manual" ? "manually closed by author" : "stopped out"} — ` +
+      `net result ${total >= 0 ? "+" : ""}${total.toFixed(4)} ETH`,
   );
   await settle(pos); // split only if the trade is net positive overall
-  await reply(pos, { kind: "sl", netPnlEth: total, tiersHit: pos.tiersHit, txHash: sale.txHash });
+  await reply(pos, { kind, netPnlEth: total, tiersHit: pos.tiersHit, txHash: sale.txHash });
+}
+
+/**
+ * Close an open position triggered by the original author via X reply.
+ * The caller (pipeline/author-actions) is responsible for validating
+ * authorship, the 20% profit threshold, and rate-limiting BEFORE
+ * calling this. We re-check `pos.status === "open"` defensively to
+ * avoid double-close races within the same poll cycle.
+ *
+ * On revert, throws — the caller will post a "try again" reply to the author.
+ */
+export async function closeByAuthor(pos: Position, currentPrice: number): Promise<void> {
+  // Re-fetch from the store to defeat the in-memory race where another
+  // close (TP4, SL, or a second close request) ran between validation
+  // and this call.
+  const all = await getStore().getAllPositions();
+  const fresh = all.find((p) => p.id === pos.id);
+  if (!fresh || fresh.status !== "open") {
+    log.info(`monitor: closeByAuthor skipped — ${pos.id} no longer open`);
+    return;
+  }
+  await closeOutWithKind(fresh, currentPrice, "manual");
 }
 
 /** Split the position's total realised profit 25/25/25/25 (once, at close). */
@@ -237,7 +282,8 @@ async function reply(
         final: boolean;
         txHash: string;
       }
-    | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string },
+    | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string }
+    | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string },
 ): Promise<void> {
   const x = createXAdapter();
   const text = exitReplyText(o);
@@ -246,9 +292,12 @@ async function reply(
   // stop-out). Per-tier intermediate exits don't settle anything yet, so we
   // mustn't post a card claiming "shared / earned / burned" when none of that
   // has happened. Gate the card to fire exactly when settle() does.
+  // Manual closes are always validated as profitable by the caller, so they
+  // always get a card.
   const fullyClosed =
     (o.kind === "tp" && o.final && pos.realisedPnlEth > 0) ||
-    (o.kind === "sl" && pos.realisedPnlEth > 0);
+    (o.kind === "sl" && pos.realisedPnlEth > 0) ||
+    (o.kind === "manual" && pos.realisedPnlEth > 0);
 
   let mediaPng: Buffer | null = null;
   if (fullyClosed) {
@@ -286,7 +335,8 @@ async function buildProfitCardPng(
         final: boolean;
         txHash: string;
       }
-    | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string },
+    | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string }
+    | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string },
 ): Promise<Buffer> {
   const symbol = await createBaseDataAdapter()
     .getTokenSymbol(pos.order.contractAddress)

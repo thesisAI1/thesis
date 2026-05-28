@@ -141,6 +141,35 @@
         </div>
       </div>
 
+      <div class="pitch-grid" style="grid-template-columns: 1fr; margin-bottom: 34px;">
+        <div class="pitch-col">
+          <h3>Close your own position early</h3>
+          <div class="pitch-rule">
+            <div class="pitch-rule-key">Reply to your thesis with <code>@thesis_agent close</code></div>
+            <div class="pitch-rule-why">
+              Or any of: <code>exit</code> · <code>sell now</code> · <code>tp now</code> · <code>dump</code>.
+              The committee sells the remaining tokens immediately, runs the
+              full 25/25/25/25 settlement, and posts the close card on the thread.
+            </div>
+          </div>
+          <div class="pitch-rule">
+            <div class="pitch-rule-key">Requires the position to be ≥+20% in net profit</div>
+            <div class="pitch-rule-why">
+              Below that the request is rejected with a short note. The stop-loss
+              handles losing trades — manual close is for taking profit early when
+              your conviction shifts, not for ducking the SL.
+            </div>
+          </div>
+          <div class="pitch-rule">
+            <div class="pitch-rule-key">Only the original author can close</div>
+            <div class="pitch-rule-why">
+              Anti-hijack: replies from other accounts are silently ignored. One close
+              attempt per author per 60 seconds.
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="pitch-cta">
         <h2>Ready to pitch?</h2>
         <p>Open X with a thesis template pre-loaded. Replace the placeholders with your real read, drop the CA, hit post.</p>

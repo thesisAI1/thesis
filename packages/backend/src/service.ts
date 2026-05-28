@@ -11,6 +11,7 @@ import { createXAdapter } from "./adapters/x/index.js";
 import { config, useMock } from "./config.js";
 import { runMonitorTick } from "./monitor/index.js";
 import { processWalletReplies } from "./payout/index.js";
+import { processAuthorCloseRequests } from "./pipeline/author-actions.js";
 import { processChatbotReplies } from "./agents/chatbot.js";
 import { reviewSubmission, type ReviewResult } from "./pipeline/index.js";
 import { getStore } from "./store/index.js";
@@ -40,14 +41,19 @@ export async function pollCycle(): Promise<void> {
 
   // Intercept author wallet replies (payouts) before triage — they are not
   // theses. Whatever is left flows on to the Step 1 triage filters.
-  const theses = await processWalletReplies(mentions);
+  const afterWallet = await processWalletReplies(mentions);
+
+  // Intercept author manual-close requests next (replies like "@thesis_agent
+  // close" in-thread of their own open position). Consumed if valid, so they
+  // don't accidentally feed the chatbot or triage.
+  const afterCloseRequests = await processAuthorCloseRequests(afterWallet);
 
   // Chatbot answers non-thesis mentions (questions about the project) BEFORE
   // triage runs, so it can see posts that triage will later filter out for
   // having no contract address.
-  await processChatbotReplies(theses);
+  await processChatbotReplies(afterCloseRequests);
 
-  const triage = await triageMentions(theses);
+  const triage = await triageMentions(afterCloseRequests);
   for (const item of triage.eligible) await store.enqueue(item);
   await store.bumpFunnel(triage.seen, triage.passed);
   await replyToTriageRejects(triage.rejected);

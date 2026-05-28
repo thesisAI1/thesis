@@ -114,6 +114,20 @@ export function triageRejectReplyText(r: TriageRejectKind): string {
   ].join("\n");
 }
 
+/**
+ * Reply text when an author asks to close manually but the position isn't
+ * profitable enough yet. We require at least 20% net profit to manual-close
+ * — anything tighter and the close barely beats slippage / fees.
+ */
+export function manualCloseRejectText(currentPct: number): string {
+  const fmt = currentPct >= 0 ? `+${currentPct.toFixed(1)}%` : `${currentPct.toFixed(1)}%`;
+  return [
+    "Can't close yet — manual close needs at least 20% net profit.",
+    `Position is currently ${fmt}.`,
+    "Stop-loss will protect at -30% from entry if it breaks down. Patience.",
+  ].join("\n");
+}
+
 /** Parse the free-form skippedReason string from the Bursar into a structured SkipKind. */
 export function classifySkipReason(reason: string): SkipKind | null {
   const cooldown = /cooldown active \((\d+)m left\)/.exec(reason);
@@ -136,8 +150,19 @@ export function exitReplyText(
         final: boolean;
         txHash: string;
       }
-    | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string },
+    | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string }
+    | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string },
 ): string {
+  if (o.kind === "manual") {
+    const sign = o.netPnlEth >= 0 ? "+" : "";
+    return [
+      "Closed at your request.",
+      `${o.tiersHit > 0 ? `${o.tiersHit} take-profit tier${o.tiersHit === 1 ? "" : "s"} banked profit before you called the close.` : "Position fully closed."}`,
+      `Net result on the position: ${sign}${o.netPnlEth.toFixed(4)} ETH.`,
+      "Author share + buyback + burn settled — see the card.",
+      bscTx(o.txHash),
+    ].join("\n");
+  }
   if (o.kind === "sl") {
     const sign = o.netPnlEth >= 0 ? "+" : "";
     const result = `Net result on the position: ${sign}${o.netPnlEth.toFixed(4)} ETH.`;

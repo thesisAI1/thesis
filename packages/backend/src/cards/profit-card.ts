@@ -28,7 +28,8 @@ export interface ProfitCardData {
   /** Which exit fired — for the headline copy. */
   exit:
     | { kind: "tp"; tier: number; gainPct: number; final: boolean }
-    | { kind: "trail"; tiersHit: number };
+    | { kind: "trail"; tiersHit: number }
+    | { kind: "manual"; tiersHit: number };
 }
 
 /** Build the SVG string for a profit-close card. */
@@ -125,6 +126,12 @@ function buildHeadline(d: ProfitCardData, pnlEth: string): {
   if (d.exit.kind === "trail") {
     return {
       line1: "Trailing stop hit.",
+      line2Svg: `<tspan class="green">${escapeText(pnlEth)} &#926;</tspan> banked.`,
+    };
+  }
+  if (d.exit.kind === "manual") {
+    return {
+      line1: "Closed at author's call.",
       line2Svg: `<tspan class="green">${escapeText(pnlEth)} &#926;</tspan> banked.`,
     };
   }

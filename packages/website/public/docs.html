@@ -467,6 +467,32 @@
             half rides with its stop now trailing the +100% milestone, so the
             worst case from here is still a profit.
           </div>
+
+          <h3>Author manual close</h3>
+          <p>
+            The original author of a thesis can ask the committee to close
+            the position early — useful when their conviction shifts or
+            they spot something the auto-monitor doesn't. To trigger it:
+            reply to your own thesis tweet with <code>@thesis_agent close</code>
+            (or <code>exit</code>, <code>sell now</code>, <code>tp now</code>,
+            <code>dump</code>).
+          </p>
+          <p>
+            The committee accepts the close only if the position is currently
+            at least <strong>+20% in net profit</strong>. Below that, the
+            request is rejected with a short note — the stop-loss handles
+            losing trades, not the author. Only the original author of the
+            thesis can trigger the close (same anti-hijack check as the
+            payout flow); replies from other accounts are silently ignored.
+            One close attempt per author per 60 seconds, to keep the queue
+            calm.
+          </p>
+          <p>
+            On approval, the bot sells the remaining tokens at the current
+            price, runs the full settlement (author 25% / portfolio 25% /
+            team 25% / buyback &amp; burn 25%), and posts the standard close
+            announcement with the PnL card.
+          </p>
         </section>
 
         <!-- 06 SPLIT -->
