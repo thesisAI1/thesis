@@ -161,11 +161,18 @@ export function exitReplyText(
     ].join("\n");
   }
 
-  const lines = [
-    `Take-profit TP${o.tier} hit at +${o.gainPct}%.`,
-    `Sold ${o.sellPct}% — ${o.proceedsEth.toFixed(4)} ETH back (+${o.profitEth.toFixed(4)} profit).`,
-  ];
-  if (o.final) lines.push("Final tier — every rung of the ladder cleared, position closed.");
+  // Per-tier text is intentionally claim-free about "profit". A partial TP
+  // is just an on-chain swap — real settlement (author 25%, $THESIS burn,
+  // etc.) only runs at full close, where the final-close text + card carry
+  // the actual profit narrative. "Holding the rest" makes it obvious that
+  // the position is still open.
+  const lines = [`Take-profit TP${o.tier} hit at +${o.gainPct}%.`];
+  if (o.final) {
+    lines.push(`Sold the remaining ${o.sellPct}% — ${o.proceedsEth.toFixed(4)} ETH back.`);
+    lines.push("Final tier — every rung of the ladder cleared, position closed.");
+  } else {
+    lines.push(`Sold ${o.sellPct}% — ${o.proceedsEth.toFixed(4)} ETH back. Holding the rest.`);
+  }
   lines.push(bscTx(o.txHash));
   return lines.join("\n");
 }
