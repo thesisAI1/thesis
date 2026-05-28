@@ -19,6 +19,8 @@ import type { Position } from "@thesis/shared";
 import { createBaseDataAdapter } from "../adapters/basedata/index.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter } from "../adapters/x/index.js";
+import { renderProfitCardSvg, type ProfitCardData } from "../cards/profit-card.js";
+import { fetchAvatarAsDataUri, rasterise } from "../cards/render.js";
 import { publish } from "../events.js";
 import { settlePosition } from "../pipeline/index.js";
 import { getStore } from "../store/index.js";
@@ -219,7 +221,9 @@ async function sell(
   return { proceeds, profit: proceeds - costEth, txHash: result.txHash };
 }
 
-/** Announce an exit on the original X post. */
+/** Announce an exit on the original X post. Profitable exits also attach a
+ *  generated share card image (V3 design). Pure-loss stop-outs stay text-only
+ *  — no card to celebrate a loss. */
 async function reply(
   pos: Position,
   o:
@@ -235,10 +239,92 @@ async function reply(
       }
     | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string },
 ): Promise<void> {
+  const x = createXAdapter();
+  const text = exitReplyText(o);
+  // The card celebrates wins. Any TP firing is a win for that tranche; a
+  // trailing-stop with tiersHit > 0 also banked profit on the way up. Pure
+  // stop-outs (sl with tiersHit === 0) stay text-only.
+  const profitable =
+    o.kind === "tp" || (o.kind === "sl" && o.tiersHit > 0 && o.netPnlEth > 0);
+
+  let mediaPng: Buffer | null = null;
+  if (profitable) {
+    try {
+      mediaPng = await buildProfitCardPng(pos, o);
+    } catch (err) {
+      log.warn(`x: card render failed for ${pos.id}, falling back to text-only: ${String(err)}`);
+    }
+  }
+
   try {
-    const replyId = await createXAdapter().replyToPost(pos.postId, exitReplyText(o));
-    log.info(`x: replied to ${pos.postId} (${o.kind}) — reply ${replyId}`);
+    const replyId = mediaPng
+      ? await x.replyToPostWithMedia(pos.postId, text, mediaPng)
+      : await x.replyToPost(pos.postId, text);
+    log.info(
+      `x: replied to ${pos.postId} (${o.kind}${mediaPng ? " + card" : ""}) — reply ${replyId}`,
+    );
   } catch (err) {
     log.warn(`x: exit reply failed for ${pos.postId}: ${String(err)}`);
   }
+}
+
+/** Build the profit-close share card PNG for this exit. Pulls the position's
+ *  data + symbol + author avatar, hands to the SVG template, rasterises. */
+async function buildProfitCardPng(
+  pos: Position,
+  o:
+    | {
+        kind: "tp";
+        tier: number;
+        gainPct: number;
+        sellPct: number;
+        proceedsEth: number;
+        profitEth: number;
+        final: boolean;
+        txHash: string;
+      }
+    | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string },
+): Promise<Buffer> {
+  const symbol = await createBaseDataAdapter()
+    .getTokenSymbol(pos.order.contractAddress)
+    .catch(() => "");
+
+  // Exit market cap is derived from the entry MC and the price ratio at exit.
+  // pos.lastExitPriceEth was set by the caller right before reply().
+  const exitMarketCapUsd =
+    pos.marketCapAtEntryUsd != null &&
+    pos.entryPriceEth > 0 &&
+    pos.lastExitPriceEth != null
+      ? pos.marketCapAtEntryUsd * (pos.lastExitPriceEth / pos.entryPriceEth)
+      : null;
+
+  // Card numbers: for a TP exit we surface THIS tier's profit + this exit's
+  // 25% slice. For a trailing-stop close we surface the total realised PnL.
+  const totalProfitEth = o.kind === "tp" ? o.profitEth : o.netPnlEth;
+  const authorShareEth = totalProfitEth > 0 ? totalProfitEth * 0.25 : 0;
+  const buybackEth = authorShareEth; // same 25% slice.
+  const pnlPct =
+    pos.order.amountInEth > 0 ? (totalProfitEth / pos.order.amountInEth) * 100 : 0;
+
+  const exit: ProfitCardData["exit"] =
+    o.kind === "tp"
+      ? { kind: "tp", tier: o.tier, gainPct: o.gainPct, final: o.final }
+      : { kind: "trail", tiersHit: o.tiersHit };
+
+  const data: ProfitCardData = {
+    tokenSymbol: symbol,
+    authorHandle: pos.authorHandle,
+    authorAvatarUrl: pos.authorAvatarUrl,
+    totalProfitEth,
+    pnlPct,
+    entryMarketCapUsd: pos.marketCapAtEntryUsd ?? null,
+    exitMarketCapUsd,
+    authorShareEth,
+    buybackEth,
+    exit,
+  };
+
+  const avatarDataUri = await fetchAvatarAsDataUri(data.authorAvatarUrl);
+  const svg = renderProfitCardSvg(data, avatarDataUri ?? undefined);
+  return rasterise(svg);
 }

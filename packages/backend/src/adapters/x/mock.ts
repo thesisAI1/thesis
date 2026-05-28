@@ -130,4 +130,14 @@ export class MockX implements XAdapter {
     replyCounter += 1;
     return `mock-reply-${Date.now()}-${replyCounter}`;
   }
+
+  async replyToPostWithMedia(
+    _postId: string,
+    _text: string,
+    _media: Buffer,
+  ): Promise<string> {
+    // Mock doesn't actually post — same behaviour as text reply, media ignored.
+    replyCounter += 1;
+    return `mock-reply-${Date.now()}-${replyCounter}`;
+  }
 }

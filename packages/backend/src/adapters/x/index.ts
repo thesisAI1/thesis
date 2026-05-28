@@ -34,6 +34,9 @@ export interface XAdapter {
   getUserTimeline(xUserId: string): Promise<XPost[]>;
   /** Reply to a post. Returns the new post's id. */
   replyToPost(postId: string, text: string): Promise<string>;
+  /** Reply to a post with an image attached (e.g. a profit-close share card).
+   *  Returns the new post's id. Falls back to text-only if the upload fails. */
+  replyToPostWithMedia(postId: string, text: string, media: Buffer): Promise<string>;
 }
 
 export function createXAdapter(): XAdapter {

@@ -1,5 +1,7 @@
 import { config } from "../../config.js";
 import { oauth1Header } from "../../util/oauth1.js";
+import { log } from "../../util/log.js";
+import { uploadPng } from "./media.js";
 import type { XAdapter, XPost } from "./index.js";
 
 const API = "https://api.twitter.com/2";
@@ -29,6 +31,22 @@ export class RealX implements XAdapter {
   }
 
   async replyToPost(postId: string, text: string): Promise<string> {
+    return this.postReply(postId, text, []);
+  }
+
+  async replyToPostWithMedia(postId: string, text: string, media: Buffer): Promise<string> {
+    // Upload the image first; if that fails, gracefully fall back to a
+    // text-only reply so the announcement still lands.
+    let mediaId: string | null = null;
+    try {
+      mediaId = await uploadPng(media);
+    } catch (err) {
+      log.warn(`x: media upload failed, falling back to text-only reply: ${String(err)}`);
+    }
+    return this.postReply(postId, text, mediaId ? [mediaId] : []);
+  }
+
+  private async postReply(postId: string, text: string, mediaIds: string[]): Promise<string> {
     if (!config.x.apiKey || !config.x.accessToken) {
       throw new Error("X OAuth 1.0a credentials (X_API_KEY etc.) are required to post replies.");
     }
@@ -39,10 +57,17 @@ export class RealX implements XAdapter {
       accessToken: config.x.accessToken,
       accessSecret: config.x.accessSecret,
     });
+    const body: Record<string, unknown> = {
+      text,
+      reply: { in_reply_to_tweet_id: postId },
+    };
+    if (mediaIds.length > 0) {
+      body.media = { media_ids: mediaIds };
+    }
     const res = await fetch(url, {
       method: "POST",
       headers: { Authorization: auth, "content-type": "application/json" },
-      body: JSON.stringify({ text, reply: { in_reply_to_tweet_id: postId } }),
+      body: JSON.stringify(body),
     });
     if (!res.ok) throw new Error(`X reply ${res.status}: ${await res.text()}`);
     const json = (await res.json()) as { data?: { id?: string } };
