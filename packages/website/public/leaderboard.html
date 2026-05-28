@@ -6,7 +6,7 @@
   <title>THESIS — Leaderboard</title>
   <meta name="description" content="Top thesis hunters on THESIS, ranked by realised author share. Every winning trade pays the author 25%." />
   <link rel="icon" href="favicon.svg" />
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20260528-lb1" />
   <style>
     .lb-wrap { max-width: 1080px; margin: 0 auto; padding: 0 22px 90px; }
     .lb-hero { padding: 26px 0 14px; }
@@ -53,6 +53,26 @@
     .lb-table .rank-top { color: #d4a23a; }
     .lb-handle { color: var(--text); text-decoration: none; }
     .lb-handle:hover { text-decoration: underline; color: var(--blue); }
+
+    /* Avatars — used in both the podium and the table. */
+    .lb-avatar {
+      border-radius: 50%;
+      background: var(--panel-2);
+      object-fit: cover;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .lb-avatar-fallback {
+      display: inline-flex; align-items: center; justify-content: center;
+      color: var(--muted); font-size: 13px; font-weight: 600;
+      font-family: var(--sans);
+      background: var(--panel-2);
+    }
+    .podium-avatar { display: flex; justify-content: center; margin: 0 0 12px; }
+    .podium-card.gold .podium-avatar { margin-bottom: 14px; }
+    /* Author cell in the table — avatar + handle side-by-side, whole link clickable. */
+    .lb-author { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
+    .lb-author:hover .lb-handle { color: var(--accent); }
 
     .lb-foot { margin-top: 18px; color: var(--dim); font-size: 12.5px; }
     .lb-empty { color: var(--muted); font-size: 14px; padding: 40px 18px; text-align: center; }
@@ -122,6 +142,6 @@
     <p>THESIS runs on Base. Every trade is on-chain and verifiable. Token trading carries financial risk — nothing here is financial advice.</p>
   </footer>
 
-  <script src="leaderboard.js"></script>
+  <script src="leaderboard.js?v=20260528-lb1"></script>
 </body>
 </html>

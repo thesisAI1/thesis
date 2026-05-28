@@ -746,6 +746,8 @@ interface LeaderboardEntry {
   rank: number;
   xUserId: string;
   authorHandle: string;
+  /** X profile image URL (display only). Null when none on file. */
+  authorAvatarUrl: string | null;
   submitted: number;
   funded: number;
   closed: number;
@@ -778,6 +780,7 @@ async function apiLeaderboard(res: ServerResponse): Promise<void> {
   interface Agg {
     xUserId: string;
     authorHandle: string;
+    authorAvatarUrl: string | null;
     submitted: number;
     funded: number;
     closed: number;
@@ -786,12 +789,13 @@ async function apiLeaderboard(res: ServerResponse): Promise<void> {
     bestTradePct: number;
   }
   const by = new Map<string, Agg>();
-  const ensure = (xUserId: string, handle: string): Agg => {
+  const ensure = (xUserId: string, handle: string, avatarUrl?: string | null): Agg => {
     let row = by.get(xUserId);
     if (!row) {
       row = {
         xUserId,
         authorHandle: handle,
+        authorAvatarUrl: avatarUrl ?? null,
         submitted: 0,
         funded: 0,
         closed: 0,
@@ -803,6 +807,8 @@ async function apiLeaderboard(res: ServerResponse): Promise<void> {
     }
     // Prefer the most-recently-seen handle (handles change less often than ids).
     if (handle) row.authorHandle = handle;
+    // Prefer the most-recently-seen avatar (newest positions have it).
+    if (avatarUrl) row.authorAvatarUrl = avatarUrl;
     return row;
   };
 
@@ -814,10 +820,17 @@ async function apiLeaderboard(res: ServerResponse): Promise<void> {
     if (r.decision === "BUY") a.funded += 1;
   }
 
+  // First pass over ALL positions — pick up avatar URLs from any position
+  // (open or closed) the author has on file. Reviews don't carry avatars
+  // so positions are the only source for now.
+  for (const p of positions) {
+    ensure(p.authorXId, p.authorHandle, p.authorAvatarUrl);
+  }
+
   // Closed positions feed wins + best-trade percentage.
   for (const p of positions) {
     if (p.status !== "closed") continue;
-    const a = ensure(p.authorXId, p.authorHandle);
+    const a = ensure(p.authorXId, p.authorHandle, p.authorAvatarUrl);
     a.closed += 1;
     if (p.realisedPnlEth > 0) a.wins += 1;
     const pct =
@@ -845,6 +858,7 @@ async function apiLeaderboard(res: ServerResponse): Promise<void> {
       rank: i + 1,
       xUserId: a.xUserId,
       authorHandle: a.authorHandle,
+      authorAvatarUrl: a.authorAvatarUrl,
       submitted: a.submitted,
       funded: a.funded,
       closed: a.closed,
