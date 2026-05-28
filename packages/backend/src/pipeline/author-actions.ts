@@ -37,10 +37,32 @@ const CLOSE_RATE_LIMIT_MS = 60_000;
 /** Net-profit threshold for a manual close (20% above the initial cost). */
 const MIN_PROFIT_MULTIPLE = 1.20;
 
-/** Strict close-intent regex. Matches short, command-like replies — won't
- *  fire on prose ("we should close this thing eventually"). The text is
- *  trimmed of leading @mentions before matching. */
-const CLOSE_INTENT_RE = /^(close|exit|sell|tp\s*now|dump)\s*(it|now|all|out)?\s*\.?$/i;
+/** Keywords that signal a close intent. Word-boundary matched. */
+const CLOSE_KEYWORD_RE = /\b(close|exit|sell|tp\s*now|take\s*profit|dump|cash\s*out)\b/i;
+/** Negations that flip a close keyword into "don't close". */
+const NEGATION_RE = /\b(don'?t|do\s+not|not|never|cant|can'?t|cannot)\b/i;
+/** Anything longer than this is prose, not a command. */
+const MAX_CLOSE_INTENT_WORDS = 5;
+
+/** Recognise close-intent in a reply: short text (≤5 words after stripping
+ *  leading @mentions) that contains a close keyword and no negation.
+ *
+ *  Matches natural phrasings like "close", "close it", "close position",
+ *  "close the position", "tp now", "take profit", "dump now", "sell all"
+ *  while ignoring prose like "I might close this thing eventually maybe"
+ *  (too many words) and "don't close" (negated). */
+function isCloseRequest(text: string): boolean {
+  const cleaned = text
+    .replace(/^(?:\s*@\w+\s*)+/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return false;
+  const wordCount = cleaned.split(" ").length;
+  if (wordCount > MAX_CLOSE_INTENT_WORDS) return false;
+  if (!CLOSE_KEYWORD_RE.test(cleaned)) return false;
+  if (NEGATION_RE.test(cleaned)) return false;
+  return true;
+}
 
 /**
  * Pull author-close requests out of a batch of mentions, act on the valid
@@ -71,11 +93,8 @@ export async function processAuthorCloseRequests(mentions: XPost[]): Promise<XPo
       passthrough.push(mention);
       continue;
     }
-    // Intent check — strict regex on trimmed text (drop leading @mentions).
-    const cleaned = mention.text
-      .replace(/^(?:\s*@\w+\s*)+/i, "")
-      .trim();
-    if (!CLOSE_INTENT_RE.test(cleaned)) {
+    // Intent check — short text + close keyword + no negation.
+    if (!isCloseRequest(mention.text)) {
       passthrough.push(mention);
       continue;
     }
@@ -88,6 +107,10 @@ export async function processAuthorCloseRequests(mentions: XPost[]): Promise<XPo
     lastCloseAttemptAt.set(mention.authorXId, Date.now());
 
     await handleCloseRequest(pos, mention);
+    // Mark the close-request tweet as processed so subsequent polls don't
+    // re-feed it into the chatbot or triage. The position is closed by now,
+    // but the tweet may still surface in X's recent-mentions window for hours.
+    await store.markProcessed(mention.postId);
     // Consumed — don't pass on to chatbot/triage.
   }
 

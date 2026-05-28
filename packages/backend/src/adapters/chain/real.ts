@@ -192,9 +192,20 @@ export class RealChain implements ChainAdapter {
     if (!config.chain.thesisToken) {
       throw new Error("THESIS_TOKEN_ADDRESS is not set — cannot run the buyback.");
     }
-    // KyberSwap delivers swap output to the recipient (our wallet). Buy $THESIS
-    // to our wallet, then transfer the received balance to the burn address.
-    //
+    // KyberSwap delivers swap output to the recipient (our wallet). We must
+    // burn ONLY the freshly-bought tokens — not the entire $THESIS balance —
+    // otherwise we'd torch any $THESIS the bot is currently holding as a
+    // funded position (e.g. when an author pitched $THESIS itself). Approach:
+    // snapshot the balance BEFORE the buy, snapshot AFTER, and the delta is
+    // exactly what we just bought and should burn.
+    const thesisAddress = config.chain.thesisToken as Address;
+    const balanceBefore = (await this.publicClient.readContract({
+      address: thesisAddress,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [this.account.address],
+    })) as bigint;
+
     // Some Clanker v4 hooks revert the buy if we just sold the same token in
     // the previous block (anti-MEV / anti-snipe protection). Retry once after
     // a short delay so the hook's cooldown elapses.
@@ -208,32 +219,37 @@ export class RealChain implements ChainAdapter {
       await new Promise((r) => setTimeout(r, 30_000));
       buy = await this.buy(config.chain.thesisToken, amountInEth);
     }
-    // Wait for the buy tx to be MINED before reading balanceOf — otherwise
-    // we read pre-buy state, see 0 $THESIS in the wallet, and try to burn 0
-    // (which viem rejects with "Missing or invalid parameters"). Also avoids
-    // nonce conflicts on the immediately-following burn tx.
+    // Wait for the buy tx to be MINED before reading balanceOf again — we
+    // need post-buy state to compute the delta.
     await this.publicClient.waitForTransactionReceipt({ hash: buy.txHash as Hex });
-    const balance = await this.publicClient.readContract({
-      address: config.chain.thesisToken as Address,
+    const balanceAfter = (await this.publicClient.readContract({
+      address: thesisAddress,
       abi: ERC20_ABI,
       functionName: "balanceOf",
       args: [this.account.address],
-    });
-    if (balance === 0n) {
+    })) as bigint;
+
+    const bought = balanceAfter > balanceBefore ? balanceAfter - balanceBefore : 0n;
+    if (bought === 0n) {
       throw new Error(
-        `chain: buyback succeeded (tx ${buy.txHash}) but $THESIS balance is 0 — cannot burn`,
+        `chain: buyback tx ${buy.txHash} confirmed but $THESIS balance didn't grow — cannot burn`,
       );
     }
+    // Defensive clamp: never burn more than the current wallet balance.
+    const toBurn = bought > balanceAfter ? balanceAfter : bought;
+
     const { request } = await this.publicClient.simulateContract({
       account: this.account,
-      address: config.chain.thesisToken as Address,
+      address: thesisAddress,
       abi: ERC20_ABI,
       functionName: "transfer",
-      args: [config.chain.burnAddress as Address, balance],
+      args: [config.chain.burnAddress as Address, toBurn],
     });
     const burnTx = await this.walletClient.writeContract(request);
     await this.confirmOrThrow(burnTx, "burn $THESIS");
-    log.info(`chain: burn ${balance.toString()} $THESIS — tx ${burnTx}`);
+    log.info(
+      `chain: burn ${toBurn.toString()} $THESIS (bought this round; wallet still holds ${(balanceAfter - toBurn).toString()}) — tx ${burnTx}`,
+    );
     return { txHash: burnTx, tokensBurned: buy.amountOut };
   }
 

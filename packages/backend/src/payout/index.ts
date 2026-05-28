@@ -32,7 +32,8 @@ const ADDRESS_RE = /\b0x[a-fA-F0-9]{40}\b/;
  * the mentions that should still flow on to triage as theses.
  */
 export async function processWalletReplies(mentions: XPost[]): Promise<XPost[]> {
-  const requests = await getStore().getPayoutRequests();
+  const store = getStore();
+  const requests = await store.getPayoutRequests();
   if (requests.length === 0) return mentions;
 
   const byTweetId = new Map(requests.map((r) => [r.requestTweetId, r]));
@@ -45,6 +46,13 @@ export async function processWalletReplies(mentions: XPost[]): Promise<XPost[]> 
       continue;
     }
     await handleWalletReply(post, req);
+    // Mark the wallet-reply tweet as processed so subsequent polls do NOT
+    // re-feed it into triage. Without this the cleared payout request no
+    // longer matches in byTweetId, the post falls through, triage's
+    // extractContract picks the 0x wallet address as if it were a token CA,
+    // strips it from the text leaving 0 words of analysis, and ships a
+    // "thesis too short" reply on a tweet that was just a wallet answer.
+    await store.markProcessed(post.postId);
   }
   return passthrough;
 }
