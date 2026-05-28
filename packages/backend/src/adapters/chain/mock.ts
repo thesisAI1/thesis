@@ -33,7 +33,11 @@ export class MockChain implements ChainAdapter {
     return { txHash: "0xMOCKbuytx", amountOut: amountInEth / price, priceEth: price };
   }
 
-  async sell(address: string, amountTokens: number): Promise<SwapResult> {
+  async sell(
+    address: string,
+    amountTokens: number,
+    _opts?: { maxAttempts?: number; delayBetweenMs?: number },
+  ): Promise<SwapResult> {
     const price = priceOf(address);
     return { txHash: "0xMOCKselltx", amountOut: amountTokens * price, priceEth: price };
   }

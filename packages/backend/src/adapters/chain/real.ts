@@ -137,45 +137,118 @@ export class RealChain implements ChainAdapter {
     return { txHash, amountOut, priceEth: price };
   }
 
-  async sell(address: string, amountTokens: number): Promise<SwapResult> {
+  async sell(
+    address: string,
+    amountTokens: number,
+    opts?: { maxAttempts?: number; delayBetweenMs?: number },
+  ): Promise<SwapResult> {
     this.ensureArmed();
-    const price = await this.getTokenPriceEth(address);
-    // NOTE: assumes the token uses 18 decimals — read decimals() for others.
-    const requestedAmount = parseEther(amountTokens.toFixed(18));
-    // The Monitor sizes sells off the cost basis (amountInEth / entryPrice),
-    // but slippage on the original buy and transfer-tax tokens both leave the
-    // on-chain balance slightly below that figure. Trying to sell more than we
-    // hold reverts the router with `TransferHelper: TRANSFER_FROM_FAILED`, so
-    // we read the live balance and clamp the input.
-    const actualBalance = await this.publicClient.readContract({
-      address: address as Address,
-      abi: ERC20_ABI,
-      functionName: "balanceOf",
-      args: [this.account.address],
-    });
-    // Many Clanker tokens take a 1-3% transfer tax — by the time the router
-    // pulls our balance, it's slightly less than what balanceOf reported. A
-    // 0.5% safety margin off the live balance absorbs the tax + any precision
-    // drift between balanceOf and the router's transferFrom check.
-    const safeBalance = (actualBalance * 995n) / 1000n;
-    const amountIn = requestedAmount < safeBalance ? requestedAmount : safeBalance;
-    if (amountIn === 0n) {
-      throw new Error(`chain: cannot sell — wallet holds 0 of ${address}`);
+    const maxAttempts = Math.max(1, opts?.maxAttempts ?? 1);
+    const delayBetweenMs = Math.max(0, opts?.delayBetweenMs ?? 0);
+    // Each retry tightens the live-balance clamp to absorb larger transfer
+    // taxes. The default first attempt stays at 99.5% (back-compat with the
+    // single-attempt callers — TP / SL); retries widen the safety margin
+    // toward 7-8% which covers any reasonable Clanker transfer tax.
+    const clampSteps = [995n, 970n, 950n, 920n];
+    const excludedSources = new Set<string>();
+    let lastErr: unknown;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0 && delayBetweenMs > 0) {
+        log.info(
+          `chain: sell retry ${attempt + 1}/${maxAttempts} for ${address} — ` +
+            `waiting ${delayBetweenMs}ms before next try ` +
+            `(clamp ${clampSteps[Math.min(attempt, clampSteps.length - 1)]}/1000, ` +
+            `excluding ${excludedSources.size > 0 ? [...excludedSources].join("+") : "none"})`,
+        );
+        await new Promise((r) => setTimeout(r, delayBetweenMs));
+      }
+
+      const clampBps = clampSteps[Math.min(attempt, clampSteps.length - 1)];
+      const price = await this.getTokenPriceEth(address);
+      // NOTE: assumes the token uses 18 decimals — read decimals() for others.
+      const requestedAmount = parseEther(amountTokens.toFixed(18));
+      // The Monitor sizes sells off the cost basis (amountInEth / entryPrice),
+      // but slippage on the original buy and transfer-tax tokens both leave the
+      // on-chain balance slightly below that figure. Trying to sell more than
+      // we hold reverts the router with `TransferHelper: TRANSFER_FROM_FAILED`,
+      // so we read the live balance and clamp the input. The clamp tightens on
+      // each retry (see clampSteps above) so transient revert → next try.
+      const actualBalance = (await this.publicClient.readContract({
+        address: address as Address,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [this.account.address],
+      })) as bigint;
+      const safeBalance = (actualBalance * clampBps) / 1000n;
+      const amountIn = requestedAmount < safeBalance ? requestedAmount : safeBalance;
+      if (amountIn === 0n) {
+        throw new Error(`chain: cannot sell — wallet holds 0 of ${address}`);
+      }
+      if (amountIn < requestedAmount) {
+        log.warn(
+          `chain: sell amount clamped — requested ${requestedAmount.toString()} but wallet ` +
+            `holds ${actualBalance.toString()} (selling ${clampBps.toString()}/1000: ${amountIn.toString()})`,
+        );
+      }
+
+      // Build a route, excluding any DEXes that reverted on a previous
+      // attempt. If KyberSwap can't find an alternative route (e.g. all the
+      // token's liquidity sits on the excluded pool) it throws — we propagate
+      // immediately because no future retry will help.
+      let route: KyberRouteData;
+      try {
+        route = await this.fetchKyberRoute(
+          address,
+          config.chain.weth,
+          amountIn,
+          [...excludedSources],
+        );
+      } catch (err) {
+        log.warn(
+          `chain: sell route fetch failed on attempt ${attempt + 1}/${maxAttempts} ` +
+            `(excluded: ${excludedSources.size > 0 ? [...excludedSources].join("+") : "none"}): ${String(err)}`,
+        );
+        throw err;
+      }
+      const routeSources = extractRouteSources(route);
+
+      try {
+        const built = await this.buildKyberTx(route);
+        // For ERC20 input we must approve the router once (max approval) before
+        // the first swap. KyberSwap uses one MetaAggregationRouter per chain.
+        await this.ensureRouterAllowance(
+          address as Address,
+          built.routerAddress as Address,
+          amountIn,
+        );
+        const txHash = await this.sendSwap(built, /* hasEthInput */ false);
+        const amountOut = Number(formatEther(BigInt(built.amountOut)));
+        log.info(
+          `chain: sell via KyberSwap — ${describeRoute(route)} — tx ${txHash}` +
+            (attempt > 0 ? ` (on retry ${attempt + 1}/${maxAttempts})` : ""),
+        );
+        return { txHash, amountOut, priceEth: price };
+      } catch (err) {
+        lastErr = err;
+        const msg = String(err);
+        // Only retry the known-transient revert. Anything else (e.g. router
+        // OOG, RPC failure, no-liquidity, allowance race) is unlikely to
+        // resolve by waiting + tightening, so fail fast.
+        const isTransferFail = msg.includes("TRANSFER_FROM_FAILED");
+        if (!isTransferFail || attempt + 1 >= maxAttempts) throw err;
+        // Add this attempt's DEX sources to the exclusion set so the next
+        // route fetch is forced through different pools. Combined with the
+        // tighter clamp on the next attempt, this defeats both the
+        // transfer-tax-too-high and the bad-pool-hook failure modes.
+        for (const src of routeSources) excludedSources.add(src);
+        log.warn(
+          `chain: sell attempt ${attempt + 1}/${maxAttempts} reverted with ` +
+            `TRANSFER_FROM_FAILED — next try will tighten clamp + exclude ${routeSources.join("+") || "(unknown)"}`,
+        );
+      }
     }
-    if (amountIn < requestedAmount) {
-      log.warn(
-        `chain: sell amount clamped — requested ${requestedAmount.toString()} but wallet holds ${actualBalance.toString()} (selling 99.5%: ${amountIn.toString()})`,
-      );
-    }
-    const route = await this.fetchKyberRoute(address, config.chain.weth, amountIn);
-    const built = await this.buildKyberTx(route);
-    // For ERC20 input we must approve the router once (max approval) before
-    // the first swap. KyberSwap uses one MetaAggregationRouter per chain.
-    await this.ensureRouterAllowance(address as Address, built.routerAddress as Address, amountIn);
-    const txHash = await this.sendSwap(built, /* hasEthInput */ false);
-    const amountOut = Number(formatEther(BigInt(built.amountOut)));
-    log.info(`chain: sell via KyberSwap — ${describeRoute(route)} — tx ${txHash}`);
-    return { txHash, amountOut, priceEth: price };
+    throw lastErr;
   }
 
   async sendEth(toAddress: string, amountEth: number): Promise<string> {
@@ -255,11 +328,17 @@ export class RealChain implements ChainAdapter {
 
   // --- KyberSwap Aggregator integration ----------------------------------
 
-  /** Fetch the best route from KyberSwap's aggregator on Base. */
+  /** Fetch the best route from KyberSwap's aggregator on Base.
+   *
+   *  `excludedSources` (optional) is a list of DEX identifiers KyberSwap
+   *  should skip when picking pools — used by the sell-retry loop to avoid
+   *  pools that just reverted with TRANSFER_FROM_FAILED. KyberSwap expects
+   *  the comma-separated form (e.g. "uniswapv4,pumpswap"). */
   private async fetchKyberRoute(
     tokenIn: string,
     tokenOut: string,
     amountIn: bigint,
+    excludedSources?: string[],
   ): Promise<KyberRouteData> {
     const params = new URLSearchParams({
       tokenIn,
@@ -268,6 +347,9 @@ export class RealChain implements ChainAdapter {
       gasInclude: "true",
       saveGas: "0",
     });
+    if (excludedSources && excludedSources.length > 0) {
+      params.set("excludedSources", excludedSources.join(","));
+    }
     const res = await fetch(`${KYBER_API}/routes?${params}`, {
       headers: { "x-client-id": KYBER_CLIENT_ID },
     });
@@ -426,8 +508,21 @@ interface KyberBuildData {
 
 /** Human-readable summary of the DEXes KyberSwap routed through, for logging. */
 function describeRoute(route: KyberRouteData): string {
-  const fills = (route.routeSummary.route ?? []).flat();
-  if (fills.length === 0) return "route unknown";
-  const sources = Array.from(new Set(fills.map((f) => f.exchange ?? f.poolType ?? "?")));
+  const sources = extractRouteSources(route);
+  if (sources.length === 0) return "route unknown";
   return `route ${sources.join(" + ")}`;
+}
+
+/** Distinct DEX/pool source identifiers (e.g. "uniswapv4", "pumpswap") used
+ *  by the route. Returned in the form KyberSwap accepts for `excludedSources`,
+ *  so the sell-retry loop can blacklist a failing source on the next attempt. */
+function extractRouteSources(route: KyberRouteData): string[] {
+  const fills = (route.routeSummary.route ?? []).flat();
+  return Array.from(
+    new Set(
+      fills
+        .map((f) => (f.exchange ?? f.poolType ?? "").trim())
+        .filter((s) => s.length > 0),
+    ),
+  );
 }

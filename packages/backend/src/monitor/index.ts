@@ -175,9 +175,18 @@ async function closeOutWithKind(
 ): Promise<void> {
   const cost = pos.order.amountInEth * pos.remainingFraction;
 
+  // Manual close = author explicitly asked, so we earn the right to be
+  // patient: 3 attempts spaced 30s apart, with progressive clamp + DEX
+  // exclusion baked into the chain adapter. Total worst-case wait ≈90s,
+  // comfortably within the author's expectation of "it's working on it"
+  // and well below the next manual-close cooldown (60s anti-spam).
+  // SL stays single-attempt so a falling price doesn't sit in retry-land
+  // while losing more value — the next monitor tick will pick it up.
+  const sellOpts =
+    kind === "manual" ? { maxAttempts: 3, delayBetweenMs: 30_000 } : undefined;
   let sale: { proceeds: number; profit: number; txHash: string };
   try {
-    sale = await sell(pos, cost, exitPrice);
+    sale = await sell(pos, cost, exitPrice, sellOpts);
   } catch (err) {
     if (kind === "manual") {
       // Surface to the author-actions caller so it can post a "try again" reply.
@@ -277,13 +286,18 @@ async function sell(
   pos: Position,
   costEth: number,
   _exitPrice: number,
+  opts?: { maxAttempts?: number; delayBetweenMs?: number },
 ): Promise<{ proceeds: number; profit: number; txHash: string }> {
   const originalTokens =
     pos.entryPriceEth > 0 ? pos.order.amountInEth / pos.entryPriceEth : 0;
   const tokens =
     pos.order.amountInEth > 0 ? originalTokens * (costEth / pos.order.amountInEth) : 0;
 
-  const result = await createChainAdapter().sell(pos.order.contractAddress, tokens);
+  // opts pass-through is used by the manual-close path: the author asked us
+  // to keep trying through any transient Clanker anti-MEV / transfer-tax
+  // reverts. TP/SL callers leave opts undefined and let the next monitor
+  // tick re-attempt (faster recovery when price is moving).
+  const result = await createChainAdapter().sell(pos.order.contractAddress, tokens, opts);
   // result.amountOut is the ETH the wallet actually received from KyberSwap.
   // exitPrice is kept in the signature only so the call sites stay
   // self-documenting (which tier triggered us); we no longer multiply by it.

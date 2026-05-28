@@ -25,6 +25,13 @@
  *   POST  /admin/rebuy-position       re-open a closed position by buying
  *                                     the token again with the same ETH
  *                                     amount (gated by ADMIN_SECRET header)
+ *   POST  /admin/force-close-position trigger a full close on an open position
+ *                                     using the same retry pipeline as the
+ *                                     author-triggered manual close. For when
+ *                                     the token's anti-MEV hooks are blocking
+ *                                     us and we want to push through from the
+ *                                     admin side without waiting on the author
+ *                                     (gated by ADMIN_SECRET header)
  */
 
 import { existsSync } from "node:fs";
@@ -37,6 +44,7 @@ import { createBaseDataAdapter } from "../adapters/basedata/index.js";
 import { createXAdapter } from "../adapters/x/index.js";
 import { config } from "../config.js";
 import { subscribe, type StreamEvent } from "../events.js";
+import { closeByAuthor } from "../monitor/index.js";
 import { getStore } from "../store/index.js";
 import { log } from "../util/log.js";
 import { payoutSentText } from "../util/replies.js";
@@ -96,6 +104,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (path === "/admin/reset-position-state" && req.method === "POST") return adminResetPositionState(req, res);
   if (path === "/admin/rebuy-position" && req.method === "POST") return adminRebuyPosition(req, res);
   if (path === "/admin/backfill-entry-mc" && req.method === "POST") return adminBackfillEntryMc(req, res);
+  if (path === "/admin/force-close-position" && req.method === "POST") return adminForceClosePosition(req, res);
 
   // Clean URL for the documentation page.
   if (path === "/docs") return serveStatic("/docs.html", res);
@@ -525,6 +534,104 @@ async function adminBackfillEntryMc(
     missingReply: missingReply.length,
     unparsable: unparsable.length,
     details: { updated, missingReply, unparsable },
+  });
+}
+
+/**
+ * POST /admin/force-close-position — manually trigger a full close on an open
+ * position. Wraps closeByAuthor so the close runs through the SAME pipeline
+ * the author-triggered manual close uses: on-chain sell with the retry-aware
+ * chain adapter (3 attempts × 30s gap, progressive clamp, DEX exclusion),
+ * settlement (25/25/25/25 split, buyback+burn), and the same combined X
+ * reply on the original thesis tweet.
+ *
+ * The point of this endpoint vs telling the author to write "close" on X:
+ *   1. Bypasses Twitter's "you can't post the same tweet twice" dedupe wall
+ *      that's blocked the author retrying with the same text.
+ *   2. Bypasses the 60s per-author manual-close cooldown.
+ *   3. Bypasses the +20% net-profit gate (admin override — we're trusting
+ *      the operator to only push closes that make sense).
+ *   4. Surfaces the sell result inline so the operator sees right away
+ *      whether the token's anti-MEV hooks are genuinely blocking us.
+ *
+ * Auth: header `x-admin-secret`.
+ *
+ * Body (JSON): { positionId: "pos-..." }
+ *
+ * Returns:
+ *   200  { ok: true, positionId, exitPriceEth, status: "closed" }
+ *   404  { ok: false, error: "position not found" }
+ *   409  { ok: false, error: "position not open" }   (already closed)
+ *   500  { ok: false, error: "<chain or close error>" } — see logs for retries
+ */
+async function adminForceClosePosition(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const secret = config.server.adminSecret;
+  if (!secret) return sendJson(res, 503, { ok: false, error: "ADMIN_SECRET is not set" });
+  if (req.headers["x-admin-secret"] !== secret) {
+    return sendJson(res, 401, { ok: false, error: "unauthorized" });
+  }
+  let body: { positionId?: string };
+  try {
+    body = JSON.parse(await readBody(req)) as typeof body;
+  } catch {
+    return sendJson(res, 400, { ok: false, error: "invalid JSON body" });
+  }
+  const positionId = body.positionId?.trim();
+  if (!positionId) return sendJson(res, 400, { ok: false, error: "positionId is required" });
+
+  const store = getStore();
+  const positions = await store.getAllPositions();
+  const pos = positions.find((p) => p.id === positionId);
+  if (!pos) return sendJson(res, 404, { ok: false, error: "position not found" });
+  if (pos.status !== "open") {
+    return sendJson(res, 409, { ok: false, error: `position is ${pos.status}, not open` });
+  }
+
+  // Fetch a fresh price so the close uses the same number the
+  // dashboard/leaderboard would show — closeByAuthor does its own state
+  // re-check, so concurrent monitor ticks won't race us.
+  let currentPrice: number;
+  try {
+    currentPrice = await createBaseDataAdapter().getPriceEth(pos.order.contractAddress);
+  } catch (err) {
+    return sendJson(res, 502, { ok: false, error: `price fetch failed: ${String(err)}` });
+  }
+  if (currentPrice <= 0) {
+    return sendJson(res, 502, { ok: false, error: "price provider returned 0" });
+  }
+
+  log.info(
+    `admin: force-close ${positionId} (${pos.authorHandle}) at ${currentPrice} ETH/tok — running closeByAuthor`,
+  );
+  try {
+    await closeByAuthor(pos, currentPrice);
+  } catch (err) {
+    log.error(`admin: force-close ${positionId} failed — ${String(err)}`);
+    return sendJson(res, 500, {
+      ok: false,
+      positionId,
+      error: String(err),
+      message:
+        "Close pipeline exhausted retries — see logs. The token's transfer hooks " +
+        "are likely blocking us across every route. Position remains open.",
+    });
+  }
+
+  // Re-load the position so the response reflects the post-close state.
+  const after = (await store.getAllPositions()).find((p) => p.id === positionId);
+  return sendJson(res, 200, {
+    ok: true,
+    positionId,
+    exitPriceEth: currentPrice,
+    status: after?.status ?? "unknown",
+    realisedPnlEth: after?.realisedPnlEth,
+    lastExitTxHash: after?.lastExitTxHash,
+    basescanUrl: after?.lastExitTxHash
+      ? `https://basescan.org/tx/${after.lastExitTxHash}`
+      : undefined,
   });
 }
 

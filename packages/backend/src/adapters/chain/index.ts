@@ -25,8 +25,22 @@ export interface ChainAdapter {
   getWalletBalanceEth(): Promise<number>;
   /** Buy `amountInEth` worth of a token. */
   buy(address: string, amountInEth: number): Promise<SwapResult>;
-  /** Sell `amountTokens` of a token back to ETH. */
-  sell(address: string, amountTokens: number): Promise<SwapResult>;
+  /** Sell `amountTokens` of a token back to ETH.
+   *
+   *  `opts.maxAttempts` (default 1) and `opts.delayBetweenMs` (default 0)
+   *  control resilience against transient on-chain reverts. When `maxAttempts
+   *  > 1`, the implementation should retry ON `TRANSFER_FROM_FAILED` only
+   *  (the most common failure mode for Clanker v4 anti-MEV / transfer-tax
+   *  tokens), with each retry tightening the balance clamp and asking the
+   *  aggregator to avoid the DEX that just failed. Use this from the manual-
+   *  close path where the author has explicitly asked us to keep trying;
+   *  automatic TP/SL paths should leave it at the default and let the next
+   *  monitor tick re-attempt. */
+  sell(
+    address: string,
+    amountTokens: number,
+    opts?: { maxAttempts?: number; delayBetweenMs?: number },
+  ): Promise<SwapResult>;
   /** Spot price in ETH per token. */
   getTokenPriceEth(address: string): Promise<number>;
   /** Send ETH to an address — author and team payouts. Returns the tx hash. */

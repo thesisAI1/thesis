@@ -174,14 +174,20 @@ async function handleCloseRequest(pos: Position, mention: XPost): Promise<void> 
     log.warn(
       `author-close: close execution failed for ${pos.id}: ${String(err)}`,
     );
-    // Best-effort apology reply so the author isn't left wondering.
+    // Best-effort apology reply so the author isn't left wondering. The
+    // chain adapter has already retried 3× through different DEX routes by
+    // the time we get here (≈90s of work), so this is a genuine "the
+    // token's transfer hooks are blocking us right now" situation — not a
+    // transient blip. The trailing stop keeps watching; the author can also
+    // ask again in a few minutes once any anti-MEV cooldown elapses.
     try {
-      await createXAdapter().replyToPost(
+      const replyId = await createXAdapter().replyToPost(
         mention.postId,
-        "Close attempt failed on-chain (likely a swap revert). Try again in a minute — the position is still open and being monitored.",
+        "Close didn't go through — the token's transfer hooks rejected us across every route we tried. Position is still open and being monitored. Worth trying again in a few minutes.",
       );
-    } catch {
-      /* swallow */
+      log.info(`x: replied to ${mention.postId} explaining close failure (reply ${replyId})`);
+    } catch (replyErr) {
+      log.warn(`x: failure-apology reply also failed for ${mention.postId}: ${String(replyErr)}`);
     }
   }
 }
