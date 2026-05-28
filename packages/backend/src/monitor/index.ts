@@ -19,13 +19,14 @@ import type { Position } from "@thesis/shared";
 import { createBaseDataAdapter } from "../adapters/basedata/index.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter } from "../adapters/x/index.js";
+import type { AuthorPaymentInfo } from "../agents/endowment.js";
 import { renderProfitCardSvg, type ProfitCardData } from "../cards/profit-card.js";
 import { fetchAvatarAsDataUri, rasterise } from "../cards/render.js";
 import { publish } from "../events.js";
 import { settlePosition } from "../pipeline/index.js";
 import { getStore } from "../store/index.js";
 import { log } from "../util/log.js";
-import { exitReplyText } from "../util/replies.js";
+import { exitReplyText, payoutRequestText, payoutSentText } from "../util/replies.js";
 
 /** Check every open position once; act on take-profit tiers and the stop-loss. */
 export async function runMonitorTick(): Promise<void> {
@@ -82,14 +83,10 @@ async function processPosition(pos: Position, price: number): Promise<void> {
   }
   if (!fired) return;
 
-  if (pos.tiersHit >= pos.order.takeProfits.length) {
-    // Every tier cleared — the position is fully sold.
-    pos.status = "closed";
-    pos.closedAt = new Date().toISOString();
-    await getStore().savePosition(pos);
-    log.info(`monitor: ${pos.id} fully closed — all take-profit tiers cleared`);
-    await settle(pos);
-  } else {
+  // The closed state, savePosition, and settlement are now handled inside
+  // takeTier() when the final tier fires — so the reply tweet can include
+  // the author-payment line in the same post.
+  if (pos.status !== "closed") {
     await getStore().savePosition(pos);
   }
 }
@@ -126,16 +123,33 @@ async function takeTier(pos: Position): Promise<boolean> {
       `${Math.round(tier.sellFraction * 100)}%, ${sale.proceeds.toFixed(4)} ETH back ` +
       `(+${sale.profit.toFixed(4)} profit)`,
   );
-  await reply(pos, {
-    kind: "tp",
-    tier: tierNum,
-    gainPct,
-    sellPct: Math.round(tier.sellFraction * 100),
-    proceedsEth: sale.proceeds,
-    profitEth: sale.profit,
-    final,
-    txHash: sale.txHash,
-  });
+
+  // Final tier closes the position. Mark + persist + settle BEFORE the reply
+  // so the author-payment line can be folded into the close-announcement
+  // tweet (single combined reply, not two separate ones).
+  let authorPayment: AuthorPaymentInfo | null = null;
+  if (final) {
+    pos.status = "closed";
+    pos.closedAt = new Date().toISOString();
+    await getStore().savePosition(pos);
+    log.info(`monitor: ${pos.id} fully closed — all take-profit tiers cleared`);
+    authorPayment = await settle(pos);
+  }
+
+  await reply(
+    pos,
+    {
+      kind: "tp",
+      tier: tierNum,
+      gainPct,
+      sellPct: Math.round(tier.sellFraction * 100),
+      proceedsEth: sale.proceeds,
+      profitEth: sale.profit,
+      final,
+      txHash: sale.txHash,
+    },
+    authorPayment,
+  );
   return true;
 }
 
@@ -189,8 +203,15 @@ async function closeOutWithKind(
     `monitor: ${pos.id} ${kind === "manual" ? "manually closed by author" : "stopped out"} — ` +
       `net result ${total >= 0 ? "+" : ""}${total.toFixed(4)} ETH`,
   );
-  await settle(pos); // split only if the trade is net positive overall
-  await reply(pos, { kind, netPnlEth: total, tiersHit: pos.tiersHit, txHash: sale.txHash });
+  // Settle first so we know how the author was paid (direct vs escrow vs
+  // failed) — this gets folded into the close-announcement tweet so the
+  // whole story lands as ONE reply.
+  const authorPayment = await settle(pos);
+  await reply(
+    pos,
+    { kind, netPnlEth: total, tiersHit: pos.tiersHit, txHash: sale.txHash },
+    authorPayment,
+  );
 }
 
 /**
@@ -215,21 +236,25 @@ export async function closeByAuthor(pos: Position, currentPrice: number): Promis
   await closeOutWithKind(fresh, currentPrice, "manual");
 }
 
-/** Split the position's total realised profit 25/25/25/25 (once, at close). */
-async function settle(pos: Position): Promise<void> {
-  if (pos.realisedPnlEth <= 0) return;
-  const dist = await settlePosition(pos, pos.realisedPnlEth);
-  if (!dist) return;
-  await getStore().saveDistribution(dist);
+/** Split the position's total realised profit 25/25/25/25 (once, at close).
+ *  Returns the author payment outcome so the caller can fold it into the
+ *  close-announcement tweet (one combined reply instead of two). Returns
+ *  null when not in profit (no settlement runs). */
+async function settle(pos: Position): Promise<AuthorPaymentInfo | null> {
+  if (pos.realisedPnlEth <= 0) return null;
+  const result = await settlePosition(pos, pos.realisedPnlEth);
+  if (!result) return null;
+  await getStore().saveDistribution(result.distribution);
   publish({
     type: "endowment",
-    positionId: dist.positionId,
+    positionId: result.distribution.positionId,
     authorHandle: pos.authorHandle,
-    totalProfitEth: dist.totalProfitEth,
-    toAuthorEth: dist.toAuthorEth,
-    toBuybackEth: dist.toBuybackEth,
-    authorWallet: dist.authorWallet,
+    totalProfitEth: result.distribution.totalProfitEth,
+    toAuthorEth: result.distribution.toAuthorEth,
+    toBuybackEth: result.distribution.toBuybackEth,
+    authorWallet: result.distribution.authorWallet,
   });
+  return result.authorPayment;
 }
 
 /**
@@ -268,7 +293,11 @@ async function sell(
 
 /** Announce an exit on the original X post. Profitable exits also attach a
  *  generated share card image (V3 design). Pure-loss stop-outs stay text-only
- *  — no card to celebrate a loss. */
+ *  — no card to celebrate a loss.
+ *
+ *  When `authorPayment` is provided (full close in profit), the payment line
+ *  is folded into the same tweet — so the author sees one combined reply
+ *  with the close summary + card + their payment status, not two posts. */
 async function reply(
   pos: Position,
   o:
@@ -284,9 +313,10 @@ async function reply(
       }
     | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string }
     | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string },
+  authorPayment: AuthorPaymentInfo | null = null,
 ): Promise<void> {
   const x = createXAdapter();
-  const text = exitReplyText(o);
+  const text = buildClosingText(pos, o, authorPayment);
   // The card represents the FULL settlement story — author share, $THESIS
   // burn, the lot. Real settlement only runs at full close (TP4 final, or any
   // stop-out). Per-tier intermediate exits don't settle anything yet, so we
@@ -308,8 +338,9 @@ async function reply(
     }
   }
 
+  let replyId = "";
   try {
-    const replyId = mediaPng
+    replyId = mediaPng
       ? await x.replyToPostWithMedia(pos.postId, text, mediaPng)
       : await x.replyToPost(pos.postId, text);
     log.info(
@@ -318,6 +349,75 @@ async function reply(
   } catch (err) {
     log.warn(`x: exit reply failed for ${pos.postId}: ${String(err)}`);
   }
+
+  // If the author share is escrowed (no wallet on file), the close-
+  // announcement reply IS the payout request. Register its id so the
+  // wallet-reply handler will match a future "@thesis_agent 0x…"
+  // reply against it.
+  if (replyId && authorPayment && authorPayment.kind === "escrowed") {
+    await getStore().addPayoutRequest({
+      requestTweetId: replyId,
+      xUserId: pos.authorXId,
+      handle: pos.authorHandle,
+      threadPostId: pos.postId,
+      requestedAt: new Date().toISOString(),
+    });
+    log.info(
+      `endowment: ${pos.authorHandle} payout request bound to close tweet ${replyId} — escrow ${authorPayment.amountEth.toFixed(4)} ETH`,
+    );
+  }
+}
+
+/** Compose the close-announcement text by combining the standard exit
+ *  reply with the author-payment line. Keeps both halves of the story
+ *  in one tweet so the author doesn't see two notifications. */
+function buildClosingText(
+  pos: Position,
+  o:
+    | {
+        kind: "tp";
+        tier: number;
+        gainPct: number;
+        sellPct: number;
+        proceedsEth: number;
+        profitEth: number;
+        final: boolean;
+        txHash: string;
+      }
+    | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string }
+    | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string },
+  authorPayment: AuthorPaymentInfo | null,
+): string {
+  const base = exitReplyText(o);
+  if (!authorPayment) return base;
+  if (authorPayment.kind === "direct") {
+    return [
+      base,
+      "",
+      payoutSentText({
+        handle: pos.authorHandle,
+        amountEth: authorPayment.amountEth,
+        wallet: authorPayment.wallet,
+        txHash: authorPayment.txHash,
+      }),
+    ].join("\n");
+  }
+  if (authorPayment.kind === "escrowed") {
+    return [
+      base,
+      "",
+      payoutRequestText({
+        handle: pos.authorHandle,
+        amountEth: authorPayment.amountEth,
+      }),
+    ].join("\n");
+  }
+  // Failed leg — surface it briefly so the author knows to ping us.
+  return [
+    base,
+    "",
+    `Heads up: the author payout leg hit a snag (${authorPayment.reason}). Will retry — you're not losing anything.`,
+  ].join("\n");
 }
 
 /** Build the profit-close share card PNG for this exit. Pulls the position's
@@ -338,18 +438,35 @@ async function buildProfitCardPng(
     | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string }
     | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string },
 ): Promise<Buffer> {
-  const symbol = await createBaseDataAdapter()
-    .getTokenSymbol(pos.order.contractAddress)
-    .catch(() => "");
+  const adapter = createBaseDataAdapter();
+  const symbol = await adapter.getTokenSymbol(pos.order.contractAddress).catch(() => "");
 
-  // Exit market cap is derived from the entry MC and the price ratio at exit.
-  // pos.lastExitPriceEth was set by the caller right before reply().
-  const exitMarketCapUsd =
-    pos.marketCapAtEntryUsd != null &&
-    pos.entryPriceEth > 0 &&
-    pos.lastExitPriceEth != null
-      ? pos.marketCapAtEntryUsd * (pos.lastExitPriceEth / pos.entryPriceEth)
-      : null;
+  // We need an entry MC + an exit MC. The position stores entry MC at buy
+  // time; exit MC is derived from the entry MC × (exit price / entry price).
+  //
+  // For positions opened BEFORE marketCapAtEntryUsd existed, entry MC is
+  // null — we then fall back to querying the live token snapshot from
+  // Birdeye/DexScreener, which gives us the CURRENT MC. That current MC
+  // is the natural "exit" MC (the price right after we sold), and we then
+  // derive the entry MC by reversing the same price ratio.
+  let entryMarketCapUsd = pos.marketCapAtEntryUsd ?? null;
+  let exitMarketCapUsd: number | null = null;
+
+  if (entryMarketCapUsd !== null && pos.entryPriceEth > 0 && pos.lastExitPriceEth != null) {
+    exitMarketCapUsd = entryMarketCapUsd * (pos.lastExitPriceEth / pos.entryPriceEth);
+  } else if (pos.entryPriceEth > 0 && pos.lastExitPriceEth != null) {
+    // Fallback for pre-redesign positions — pull live MC, treat it as exit MC,
+    // back-derive entry MC from the price ratio.
+    try {
+      const live = await adapter.getToken(pos.order.contractAddress);
+      if (live.marketCapUsd > 0) {
+        exitMarketCapUsd = live.marketCapUsd;
+        entryMarketCapUsd = live.marketCapUsd * (pos.entryPriceEth / pos.lastExitPriceEth);
+      }
+    } catch (err) {
+      log.warn(`card: live MC fallback failed for ${pos.id}: ${String(err)}`);
+    }
+  }
 
   // Card always surfaces the FULL realised PnL across all tiers (not just
   // the last exit's slice). This is only called at full-close, where
@@ -360,10 +477,17 @@ async function buildProfitCardPng(
   const pnlPct =
     pos.order.amountInEth > 0 ? (totalProfitEth / pos.order.amountInEth) * 100 : 0;
 
-  const exit: ProfitCardData["exit"] =
-    o.kind === "tp"
-      ? { kind: "tp", tier: o.tier, gainPct: o.gainPct, final: o.final }
-      : { kind: "trail", tiersHit: o.tiersHit };
+  // Map the monitor's exit-event union onto the card's exit type so the
+  // headline copy matches the actual trigger (TP / trailing stop / author
+  // manual close).
+  let exit: ProfitCardData["exit"];
+  if (o.kind === "tp") {
+    exit = { kind: "tp", tier: o.tier, gainPct: o.gainPct, final: o.final };
+  } else if (o.kind === "manual") {
+    exit = { kind: "manual", tiersHit: o.tiersHit };
+  } else {
+    exit = { kind: "trail", tiersHit: o.tiersHit };
+  }
 
   const data: ProfitCardData = {
     tokenSymbol: symbol,

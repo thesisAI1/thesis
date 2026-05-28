@@ -12,12 +12,12 @@
  * separately by the monitor via settlePosition().
  */
 
-import type { Distribution, Position, Submission, Verdict } from "@thesis/shared";
+import type { Position, Submission, Verdict } from "@thesis/shared";
 import { runRegistrar } from "../agents/registrar.js";
 import { runAuditor } from "../agents/auditor.js";
 import { runDean } from "../agents/dean.js";
 import { runBursar } from "../agents/bursar.js";
-import { runEndowment } from "../agents/endowment.js";
+import { runEndowment, type EndowmentResult } from "../agents/endowment.js";
 import { publish } from "../events.js";
 
 export interface ReviewResult {
@@ -94,10 +94,12 @@ export async function reviewSubmission(submission: Submission): Promise<ReviewRe
   return { verdict, position: bursar.position, skippedReason: bursar.skippedReason };
 }
 
-/** Settle one realised profit tranche — split it 25/25/25/25. */
+/** Settle one realised profit tranche — split it 25/25/25/25. The monitor
+ *  passes `silentAuthorTweet: true` so the author payment line lands in the
+ *  combined close-announcement tweet instead of a separate reply. */
 export async function settlePosition(
   position: Position,
   profitEth: number,
-): Promise<Distribution | null> {
-  return runEndowment(position, profitEth);
+): Promise<EndowmentResult | null> {
+  return runEndowment(position, profitEth, { silentAuthorTweet: true });
 }

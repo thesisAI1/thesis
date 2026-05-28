@@ -27,11 +27,38 @@ import { getStore } from "../store/index.js";
 import { log } from "../util/log.js";
 import { payoutRequestText, payoutSentText } from "../util/replies.js";
 
-/** Split and pay out a position's total realised profit. Returns null if not in profit. */
+/** Outcome of the author leg, returned to the caller so it can fold the
+ *  payment line into the close-announcement tweet (one combined reply
+ *  instead of two separate ones). */
+export type AuthorPaymentInfo =
+  | { kind: "direct"; wallet: string; txHash: string; amountEth: number }
+  | { kind: "escrowed"; amountEth: number; handle: string }
+  | { kind: "failed"; reason: string; amountEth: number };
+
+export interface EndowmentResult {
+  distribution: Distribution;
+  authorPayment: AuthorPaymentInfo;
+}
+
+/**
+ * Split and pay out a position's total realised profit. Returns null if
+ * not in profit.
+ *
+ * When `silentAuthorTweet` is true, the author leg runs (on-chain send
+ * or escrow), but the corresponding X reply is NOT posted from here —
+ * the caller (monitor.reply) folds the payment status into the close
+ * announcement so the whole settlement lands as ONE tweet with the card
+ * and the payment line together.
+ *
+ * When `silentAuthorTweet` is false / unset, behaviour is unchanged
+ * (legacy path posts the author tweet inline). All current callers pass
+ * true; the option is kept for backwards compat / future flexibility.
+ */
 export async function runEndowment(
   position: Position,
   profitEth: number,
-): Promise<Distribution | null> {
+  options: { silentAuthorTweet?: boolean } = {},
+): Promise<EndowmentResult | null> {
   if (profitEth <= 0) return null;
 
   const quarter = profitEth / 4;
@@ -40,11 +67,29 @@ export async function runEndowment(
   const entry = await store.getRegistryEntry(position.authorXId);
 
   // 25% — the author. Pay a known wallet directly, or escrow + ask on X.
+  let authorPayment: AuthorPaymentInfo;
   if (entry) {
-    await payAuthorDirect(position, entry, quarter);
+    authorPayment = await payAuthorDirect(
+      position,
+      entry,
+      quarter,
+      options.silentAuthorTweet === true,
+    );
   } else {
     await store.addEscrow(position.authorXId, position.authorHandle, quarter);
-    await requestAuthorPayout(position);
+    if (!options.silentAuthorTweet) {
+      await requestAuthorPayout(position);
+    }
+    // The escrow amount in the payout-request copy is the CUMULATIVE total
+    // (this close + any prior unanswered closes) — that's what the author
+    // actually has waiting, not just the latest tranche.
+    const updated = await store.getEscrow(position.authorXId);
+    const totalOwed = updated?.amountEth ?? quarter;
+    authorPayment = {
+      kind: "escrowed",
+      amountEth: totalOwed,
+      handle: position.authorHandle,
+    };
   }
 
   // 25% — the team / maintenance wallet.
@@ -62,41 +107,53 @@ export async function runEndowment(
   // 25% — the trading portfolio: the profit already sits in the wallet.
 
   return {
-    positionId: position.id,
-    totalProfitEth: profitEth,
-    toAuthorEth: quarter,
-    toPortfolioEth: quarter,
-    toTeamEth: quarter,
-    toBuybackEth: quarter,
-    authorWallet: entry ? entry.wallet : null,
+    distribution: {
+      positionId: position.id,
+      totalProfitEth: profitEth,
+      toAuthorEth: quarter,
+      toPortfolioEth: quarter,
+      toTeamEth: quarter,
+      toBuybackEth: quarter,
+      authorWallet: entry ? entry.wallet : null,
+    },
+    authorPayment,
   };
 }
 
-/** Pay an author whose payout wallet is already on file, and confirm on X. */
+/** Pay an author whose payout wallet is already on file. Returns the
+ *  outcome so the caller can include it in the close announcement. When
+ *  `silent` is false, a standalone "payout sent" tweet is posted in-thread
+ *  (legacy behaviour). When true, the caller takes responsibility for
+ *  announcing the payment. */
 async function payAuthorDirect(
   position: Position,
   entry: RegistryEntry,
   amountEth: number,
-): Promise<void> {
+  silent: boolean,
+): Promise<AuthorPaymentInfo> {
   let txHash: string;
   try {
     txHash = await createChainAdapter().sendEth(entry.wallet, amountEth);
   } catch (err) {
-    log.error(`endowment: author payout failed for ${entry.handle} — ${String(err)}`);
-    return;
+    const reason = String(err);
+    log.error(`endowment: author payout failed for ${entry.handle} — ${reason}`);
+    return { kind: "failed", reason, amountEth };
   }
   log.info(
     `endowment: paid author ${entry.handle} ${amountEth.toFixed(4)} ETH — tx ${txHash}`,
   );
-  try {
-    const replyId = await createXAdapter().replyToPost(
-      position.postId,
-      payoutSentText({ handle: position.authorHandle, amountEth, wallet: entry.wallet, txHash }),
-    );
-    log.info(`x: replied to ${position.postId} confirming author payout (reply ${replyId})`);
-  } catch (err) {
-    log.warn(`x: payout-sent reply failed for ${position.postId}: ${String(err)}`);
+  if (!silent) {
+    try {
+      const replyId = await createXAdapter().replyToPost(
+        position.postId,
+        payoutSentText({ handle: position.authorHandle, amountEth, wallet: entry.wallet, txHash }),
+      );
+      log.info(`x: replied to ${position.postId} confirming author payout (reply ${replyId})`);
+    } catch (err) {
+      log.warn(`x: payout-sent reply failed for ${position.postId}: ${String(err)}`);
+    }
   }
+  return { kind: "direct", wallet: entry.wallet, txHash, amountEth };
 }
 
 /**

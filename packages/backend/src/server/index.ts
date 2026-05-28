@@ -698,7 +698,11 @@ async function apiDashboard(res: ServerResponse): Promise<void> {
       entryTxHash: p.entryTxHash,
       exitTxHash: p.lastExitTxHash ?? "",
     }))
-    .reverse();
+    // Sort by close time (most recent first), not by creation order —
+    // the dashboard surfaces "what just closed" not "what was opened
+    // earliest". Without this an old position that just closed manually
+    // can be buried deep in the list.
+    .sort((a, b) => (b.closedAt || "").localeCompare(a.closedAt || ""));
 
   // Realised PnL accrues on partial exits too — sum across every position.
   const realizedPnlEth = positions.reduce((s, p) => s + p.realisedPnlEth, 0);
