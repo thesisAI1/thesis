@@ -1,0 +1,9 @@
+# Next.js
+/.next/
+/out/
+/build
+next-env.d.ts
+
+# misc
+*.tsbuildinfo
+.vercel

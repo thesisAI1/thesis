@@ -1,0 +1,108 @@
+/* ============================================================================
+   THESIS — Design Tokens (colors + type)
+   ----------------------------------------------------------------------------
+   Ported from the THESIS design system. The brand reads like a trading terminal
+   crossed with an academic seal: a near-black "void", a single amber accent,
+   five faculty colours, a heavy grotesque for headlines and a monospace for
+   every number, label and on-chain address.
+
+   FONTS — the design system substitutes Geist (display/sans) + JetBrains Mono
+   (mono) for the product's OS stack. Here they are loaded via next/font (see
+   app/layout.tsx), which self-hosts them and exposes the CSS vars
+   --font-geist-sans and --font-jbmono. No Google Fonts @import — next/font
+   eliminates the render-blocking request and layout shift.
+   ============================================================================ */
+
+:root {
+  /* ---- Core surfaces (dark, near-black) -------------------------------- */
+  --void:      #080A10;   /* page background — "the void" */
+  --bg:        #080A10;   /* alias */
+  --panel:     #11151F;   /* default card / panel */
+  --panel-2:   #161C28;   /* raised panel, inputs, chips */
+  --border:    #232B3A;   /* hairline borders */
+  --border-2:  #2E3848;   /* stronger borders, button outlines */
+  --border-hi: #45526B;   /* hover border */
+
+  /* ---- Text ------------------------------------------------------------ */
+  --text:      #EAEEF6;   /* primary foreground */
+  --muted:     #8B97AC;   /* secondary / body prose */
+  --dim:       #5C6678;   /* tertiary / captions / mono labels */
+
+  /* ---- Accent + the Faculty colours ------------------------------------ */
+  --accent:    #E6A33E;   /* amber — THE accent. Auditor's colour too. */
+  --blue:      #4F9DDE;   /* The Registrar — vets the author */
+  --green:     #3FB984;   /* The Bursar — executes the trade · also "up"/win */
+  --purple:    #9B6BDF;   /* The Dean — delivers the verdict */
+  --red:       #E0653E;   /* The Endowment — splits the profit · also "down"/loss */
+
+  /* Semantic trading colours (alias the palette) */
+  --up:        var(--green);
+  --down:      var(--red);
+
+  /* ---- Type families --------------------------------------------------- */
+  /* next/font sets --font-geist-sans (geist pkg) and --font-jbmono (Google). */
+  --sans: var(--font-geist-sans), 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif;
+  --mono: var(--font-jbmono), 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --serif: Georgia, 'Times New Roman', serif; /* used only for the Θ brand-mark glyph */
+
+  /* ---- Radii ----------------------------------------------------------- */
+  --r-xs: 6px;    /* badges, tiny chips, copy buttons */
+  --r-sm: 8px;    /* inline links, row icons */
+  --r-md: 11px;   /* buttons, feed items, mini stats */
+  --r-lg: 14px;   /* cards, panels, stat cards */
+  --r-pill: 999px;
+
+  /* ---- Elevation / shadows --------------------------------------------- */
+  --shadow-card:    0 14px 44px -20px rgba(0,0,0,0.7);
+  --shadow-primary: 0 8px 26px -12px rgba(230,163,62,0.8); /* amber button glow */
+  --glow-mark:      0 0 24px -10px rgba(230,163,62,0.6);   /* brand-mark halo */
+
+  /* ---- Background field gradients (compose on --void) ------------------ */
+  --bg-glow:
+    radial-gradient(700px 380px at 78% 4%,  rgba(230,163,62,0.10), transparent 70%),
+    radial-gradient(620px 420px at 12% 22%, rgba(79,157,222,0.08), transparent 70%);
+  --grid-line: rgba(120,140,180,0.05);
+
+  /* ---- Motion ---------------------------------------------------------- */
+  --ease: cubic-bezier(0.2, 0.9, 0.3, 1.0);
+  --ease-pop: cubic-bezier(0.2, 0.9, 0.3, 1.3);
+  --t-fast: 0.12s;
+  --t-base: 0.2s;
+  --t-slow: 0.25s;
+}
+
+/* ============================================================================
+   BASE TYPE STYLES — if it's data, it's mono; if it's prose, it's sans.
+   ============================================================================ */
+
+.t-hero    { font-size: 38px; font-weight: 700; line-height: 1.15; letter-spacing: -0.6px; }
+.t-h1      { font-size: 44px; font-weight: 800; line-height: 1.12; letter-spacing: -1px; }
+.t-h2      { font-size: 25px; font-weight: 800; line-height: 1.2;  letter-spacing: -0.4px; }
+.t-h3      { font-size: 16px; font-weight: 700; line-height: 1.4; }
+.t-block-title { font-size: 17px; font-weight: 600; }
+
+.t-lede    { font-size: 15.5px; line-height: 1.55; color: var(--muted); }
+.t-body    { font-size: 14px;   line-height: 1.6;  color: var(--muted); }
+.t-small   { font-size: 13px;   line-height: 1.55; color: var(--muted); }
+
+.t-section-tag {
+  font-family: var(--mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 2px; text-transform: uppercase; color: var(--accent);
+}
+.t-label   { font-family: var(--mono); font-size: 10px; font-weight: 500;
+             letter-spacing: 1.6px; text-transform: uppercase; color: var(--dim); }
+.t-data    { font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; color: var(--text); }
+.t-stat    { font-family: var(--sans); font-size: 21px; font-weight: 700;
+             letter-spacing: -0.3px; font-variant-numeric: tabular-nums; }
+.t-stat-hero { font-family: var(--sans); font-size: 34px; font-weight: 700;
+             letter-spacing: -0.7px; font-variant-numeric: tabular-nums; }
+.t-mono    { font-family: var(--mono); }
+
+.t-wordmark { font-weight: 800; letter-spacing: 2px; }
+
+/* Semantic colour helpers */
+.c-accent { color: var(--accent); }
+.c-up, .pos { color: var(--green); }
+.c-down, .neg { color: var(--red); }
+.c-muted  { color: var(--muted); }
+.c-dim    { color: var(--dim); }
