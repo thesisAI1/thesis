@@ -650,7 +650,7 @@ function formatLotteryLine(info: LotteryPaymentInfo | null): string {
   if (!info || info.paid.length === 0) return "";
   const per = info.paid[0].amountEth; // equal split, all the same
   return [
-    `🎲 Holder lottery: ${info.paid.length} random $THESIS holders won ${per.toFixed(4)} Ξ each (pool of ${info.eligibleCount} eligibles).`,
+    `🎲 Holder lottery: ${info.paid.length} random $THESIS holders won ${per.toFixed(4)} ETH each (pool of ${info.eligibleCount} eligibles).`,
     `Winners visible on the trading wallet's recent BaseScan transfers.`,
   ].join("\n");
 }

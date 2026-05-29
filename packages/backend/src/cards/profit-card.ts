@@ -100,12 +100,12 @@ export function renderProfitCardSvg(data: ProfitCardData, avatarDataUri?: string
 
   <rect x="370" y="0" width="350" height="120" rx="14" fill="#11151F" stroke="#232B3A" stroke-width="1"/>
   <text x="392" y="32" class="dim" font-size="11" letter-spacing="2">AUTHOR EARNED</text>
-  <text x="392" y="78" class="green mono" font-size="26" font-weight="700">${escapeText(authorShare)} &#926;</text>
+  <text x="392" y="78" class="green mono" font-size="26" font-weight="700">${escapeText(authorShare)} ETH</text>
   <text x="392" y="102" class="muted mono" font-size="14">25% of trade profit</text>
 
   <rect x="740" y="0" width="365" height="120" rx="14" fill="#11151F" stroke="#232B3A" stroke-width="1"/>
   <text x="762" y="32" class="dim" font-size="11" letter-spacing="2">$THESIS BURNED</text>
-  <text x="762" y="78" class="accent mono" font-size="26" font-weight="700">${escapeText(buyback)} &#926;</text>
+  <text x="762" y="78" class="accent mono" font-size="26" font-weight="700">${escapeText(buyback)} ETH</text>
   <text x="762" y="102" class="muted mono" font-size="14">25% buyback &amp; burn</text>
 </g>
 
@@ -126,24 +126,24 @@ function buildHeadline(d: ProfitCardData, pnlEth: string): {
   if (d.exit.kind === "trail") {
     return {
       line1: "Trailing stop hit.",
-      line2Svg: `<tspan class="green">${escapeText(pnlEth)} &#926;</tspan> banked.`,
+      line2Svg: `<tspan class="green">${escapeText(pnlEth)} ETH</tspan> banked.`,
     };
   }
   if (d.exit.kind === "manual") {
     return {
       line1: "Closed at author's call.",
-      line2Svg: `<tspan class="green">${escapeText(pnlEth)} &#926;</tspan> banked.`,
+      line2Svg: `<tspan class="green">${escapeText(pnlEth)} ETH</tspan> banked.`,
     };
   }
   if (d.exit.final) {
     return {
       line1: "Full ladder cleared.",
-      line2Svg: `<tspan class="green">${escapeText(pnlEth)} &#926;</tspan> total.`,
+      line2Svg: `<tspan class="green">${escapeText(pnlEth)} ETH</tspan> total.`,
     };
   }
   return {
     line1: `Take-profit TP${d.exit.tier} hit.`,
-    line2Svg: `<tspan class="green">${escapeText(pnlEth)} &#926;</tspan> shared.`,
+    line2Svg: `<tspan class="green">${escapeText(pnlEth)} ETH</tspan> shared.`,
   };
 }
 

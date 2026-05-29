@@ -439,7 +439,7 @@ code { font-family: var(--mono); }
   50%      { box-shadow: 0 0 0 5px rgba(63,185,132,0); }
 }
 
-/* "Just now · Closed $TICKER +X Ξ for @author →" strip that sits below the
+/* "Just now · Closed $TICKER +X ETH for @author →" strip that sits below the
  * stat cards and surfaces the most recent profit close. Acts as a one-line
  * recap of what just happened and links to the close tweet on X. */
 .activity-strip {
