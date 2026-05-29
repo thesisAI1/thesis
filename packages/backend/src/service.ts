@@ -225,27 +225,29 @@ export function startService(): () => void {
   let stopped = false;
   // Mock mode polls fast for a lively local demo; live mode uses the config.
   const pollMs = useMock() ? 25_000 : config.service.pollIntervalSec * 1000;
+  const reviewMs = config.service.reviewIntervalSec * 1000;
+  const monitorMs = config.service.monitorIntervalSec * 1000;
 
-  const pollLoop = async (): Promise<void> => {
-    if (stopped) return;
-    try {
-      await pollCycle();
-    } catch (err) {
-      log.error(`poll loop: ${String(err)}`);
-    }
-    if (!stopped) setTimeout(() => void pollLoop(), pollMs);
+  // Self-rescheduling loop: the next tick is scheduled only AFTER the current
+  // one settles, so a slow tick can never overlap itself. (A bare setInterval
+  // fires on a fixed clock regardless of whether the previous tick finished —
+  // that overlap is what let two monitor ticks double-settle a position.)
+  const loop = (label: string, fn: () => Promise<void>, intervalMs: number): void => {
+    const tick = async (): Promise<void> => {
+      if (stopped) return;
+      try {
+        await fn();
+      } catch (err) {
+        log.error(`${label} loop: ${String(err)}`);
+      }
+      if (!stopped) setTimeout(() => void tick(), intervalMs);
+    };
+    void tick();
   };
-  void pollLoop();
 
-  const review = setInterval(
-    () => void reviewTick(),
-    config.service.reviewIntervalSec * 1000,
-  );
-  void runMonitorTick();
-  const monitor = setInterval(
-    () => void runMonitorTick(),
-    config.service.monitorIntervalSec * 1000,
-  );
+  loop("poll", pollCycle, pollMs);
+  loop("review", reviewTick, reviewMs);
+  loop("monitor", runMonitorTick, monitorMs);
 
   log.info(
     `service: poll ${Math.round(pollMs / 1000)}s · review ${config.service.reviewIntervalSec}s · ` +
@@ -253,8 +255,6 @@ export function startService(): () => void {
   );
   return () => {
     stopped = true;
-    clearInterval(review);
-    clearInterval(monitor);
   };
 }
 

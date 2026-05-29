@@ -25,11 +25,18 @@ import { fetchAvatarAsDataUri, rasterise } from "../cards/render.js";
 import { publish } from "../events.js";
 import { settlePosition } from "../pipeline/index.js";
 import { getStore } from "../store/index.js";
+import { withLock } from "../store/lock.js";
 import { log } from "../util/log.js";
 import { exitReplyText, payoutRequestText, payoutSentText } from "../util/replies.js";
 
-/** Check every open position once; act on take-profit tiers and the stop-loss. */
+/** Check every open position once; act on take-profit tiers and the stop-loss.
+ *  Serialized via withLock so two ticks (or a tick racing an author/admin
+ *  close) can't both run the same position to close and settle it twice. */
 export async function runMonitorTick(): Promise<void> {
+  return withLock(monitorTickInner);
+}
+
+async function monitorTickInner(): Promise<void> {
   const store = getStore();
   const open = await store.getOpenPositions();
   if (open.length === 0) return;
@@ -297,16 +304,19 @@ async function closeOutWithKind(
  * On revert, throws — the caller will post a "try again" reply to the author.
  */
 export async function closeByAuthor(pos: Position, currentPrice: number): Promise<void> {
-  // Re-fetch from the store to defeat the in-memory race where another
-  // close (TP4, SL, or a second close request) ran between validation
-  // and this call.
-  const all = await getStore().getAllPositions();
-  const fresh = all.find((p) => p.id === pos.id);
-  if (!fresh || fresh.status !== "open") {
-    log.info(`monitor: closeByAuthor skipped — ${pos.id} no longer open`);
-    return;
-  }
-  await closeOutWithKind(fresh, currentPrice, "manual");
+  // Serialized via the same lock as the monitor tick, so a manual close and a
+  // TP/SL tick can never both settle this position. The re-fetch + status
+  // check inside the lock is the idempotency guard: whichever path wins the
+  // lock closes it; the loser sees status !== "open" and no-ops.
+  return withLock(async () => {
+    const all = await getStore().getAllPositions();
+    const fresh = all.find((p) => p.id === pos.id);
+    if (!fresh || fresh.status !== "open") {
+      log.info(`monitor: closeByAuthor skipped — ${pos.id} no longer open`);
+      return;
+    }
+    await closeOutWithKind(fresh, currentPrice, "manual");
+  });
 }
 
 /** Settlement outcome bundled for the caller. Both legs live in the same
