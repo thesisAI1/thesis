@@ -315,8 +315,12 @@ function renderOpen(rows) {
   $("#open-count").textContent = rows.length;
   $("#open-empty").hidden = rows.length > 0;
   $("#open-rows").innerHTML = rows
-    .map((o) => {
-      return `<tr>
+    .map((o, i) => {
+      // First row gets the featured treatment (gold left-edge + tint) so the
+      // freshest / topmost position visually anchors the table. Index-based
+      // rather than data-based so the highlight survives when rows shuffle.
+      const cls = i === 0 ? "featured-row" : "";
+      return `<tr class="${cls}">
     <td>${tokenCell(o.tokenSymbol, o.contractAddress)}</td>
     <td>${authorCell(o)}</td>
     <td>${gradeBadge(o.grade)}</td>
