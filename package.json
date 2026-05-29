@@ -13,7 +13,8 @@
     "start": "npm start --workspace @thesis/backend",
     "demo": "npm run demo --workspace @thesis/backend",
     "dev": "npm run dev --workspace @thesis/backend",
-    "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/backend"
+    "typecheck": "tsc --noEmit -p packages/shared && tsc --noEmit -p packages/backend",
+    "test": "node --import tsx --test packages/backend/test/*.test.ts"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
