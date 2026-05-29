@@ -170,11 +170,12 @@
           <a href="#committee"><span>04</span> The committee</a>
           <a href="#trading"><span>05</span> Trade mechanics</a>
           <a href="#split"><span>06</span> The profit split</a>
-          <a href="#payouts"><span>07</span> Author payouts</a>
-          <a href="#token"><span>08</span> The $THESIS token</a>
-          <a href="#stack"><span>09</span> Tech &amp; architecture</a>
-          <a href="#transparency"><span>10</span> Transparency</a>
-          <a href="#risk"><span>11</span> Risk</a>
+          <a href="#lottery"><span>07</span> The holder lottery</a>
+          <a href="#payouts"><span>08</span> Author payouts</a>
+          <a href="#token"><span>09</span> The $THESIS token</a>
+          <a href="#stack"><span>10</span> Tech &amp; architecture</a>
+          <a href="#transparency"><span>11</span> Transparency</a>
+          <a href="#risk"><span>12</span> Risk</a>
         </nav>
       </aside>
 
@@ -492,8 +493,8 @@
           <p>
             On approval, the bot sells the remaining tokens at the current
             price, runs the full settlement (author 25% / portfolio 25% /
-            team 25% / buyback &amp; burn 25%), and posts the standard close
-            announcement with the PnL card.
+            holder lottery 25% / buyback &amp; burn 25%), and posts the
+            standard close announcement with the PnL card.
           </p>
         </section>
 
@@ -516,14 +517,20 @@
               <div class="p">25%</div><div class="t">Portfolio</div>
               <div class="d">Compounded back into the trading wallet.</div>
             </div>
-            <div class="split-card" style="--c:#8593AA">
-              <div class="p">25%</div><div class="t">Team</div>
-              <div class="d">Running costs and maintenance.</div>
+            <div class="split-card" style="--c:#9B6BDF">
+              <div class="p">25%</div><div class="t">Holder lottery</div>
+              <div class="d">Split equally between 5 random $THESIS holders per trade.</div>
             </div>
             <div class="split-card" style="--c:#E0653E">
               <div class="p">25%</div><div class="t">Buyback &amp; burn</div>
               <div class="d">Buys $THESIS on the market and burns it.</div>
             </div>
+          </div>
+          <div class="callout">
+            <span class="ctag">TEAM TAKES ZERO FROM TRADES</span>
+            The committee does not skim from winning trades. The slice that
+            used to fund &ldquo;team / maintenance&rdquo; now goes entirely to
+            $THESIS holders via the lottery below.
           </div>
           <div class="callout warn">
             <span class="ctag">NO PROFIT, NO SPLIT</span>
@@ -533,9 +540,53 @@
           </div>
         </section>
 
+        <!-- 07 HOLDER LOTTERY -->
+        <section class="doc-section" id="lottery">
+          <div class="doc-num">07</div>
+          <h2>The holder lottery</h2>
+          <p>
+            Every winning trade picks <strong>5 random $THESIS holders</strong>
+            and pays each one <strong>5% of the realised profit</strong> in
+            ETH. That&rsquo;s the entire 25% slice that used to go to the
+            team &mdash; redirected to the people who chose to hold the token.
+          </p>
+
+          <h3>How a wallet becomes eligible</h3>
+          <ul>
+            <li>Holds <strong>at least 10,000,000 $THESIS</strong> at the moment of the close.</li>
+            <li>Is <strong>not</strong> a liquidity-pool contract, the burn address, the trading wallet, the $THESIS contract itself, the launchpad that deployed the token, or any address the operator has explicitly excluded.</li>
+            <li>That&rsquo;s it &mdash; no signup, no claim, no wallet connection. If you hold, you&rsquo;re in.</li>
+          </ul>
+
+          <h3>How the 5 winners are picked</h3>
+          <p>
+            Uniform random across every eligible wallet &mdash; a 10M-bag
+            holder and a 1B-bag holder have <em>identical</em> odds in any
+            given draw. The randomness is seeded by the <strong>close
+            transaction hash</strong>, which is published in the close tweet
+            and on BaseScan. Anyone can re-run the same modulo math against
+            the holder snapshot + tx hash and confirm the picks weren&rsquo;t
+            tampered with.
+          </p>
+
+          <h3>Edge cases</h3>
+          <ul>
+            <li>If fewer than 5 eligible wallets exist, the available pool is paid the slice equally and the remainder rolls into the buyback&nbsp;&amp;&nbsp;burn for that close.</li>
+            <li>If an individual transfer reverts (RPC issue, contract refusing ETH), that winner&rsquo;s share rolls into buyback too &mdash; ETH is never left sitting in the wallet.</li>
+            <li>The holder snapshot is refreshed hourly via GoldRush; the LP exclusion list refreshes the same way via DexScreener. New pools are picked up automatically.</li>
+          </ul>
+
+          <div class="callout">
+            <span class="ctag">WHY 10M MINIMUM</span>
+            10M $THESIS is roughly $20 at the current price &mdash; low enough
+            to be inclusive, high enough to filter dust wallets. As the token
+            appreciates, the bar rises in dollar terms organically.
+          </div>
+        </section>
+
         <!-- 07 PAYOUTS -->
         <section class="doc-section" id="payouts">
-          <div class="doc-num">07</div>
+          <div class="doc-num">08</div>
           <h2>Author payouts</h2>
           <p>
             The author's 25% is handled <strong>entirely on X</strong>. There
@@ -566,7 +617,7 @@
 
         <!-- 08 TOKEN -->
         <section class="doc-section" id="token">
-          <div class="doc-num">08</div>
+          <div class="doc-num">09</div>
           <h2>The $THESIS token</h2>
           <p>
             $THESIS is the project's own token, launched on Base via Bankr.
@@ -597,7 +648,7 @@
 
         <!-- 09 STACK -->
         <section class="doc-section" id="stack">
-          <div class="doc-num">09</div>
+          <div class="doc-num">10</div>
           <h2>Tech &amp; architecture</h2>
           <p>
             THESIS is a TypeScript monorepo — a shared domain model, a backend
@@ -640,7 +691,7 @@
 
         <!-- 10 TRANSPARENCY -->
         <section class="doc-section" id="transparency">
-          <div class="doc-num">10</div>
+          <div class="doc-num">11</div>
           <h2>Transparency</h2>
           <p>
             The committee's reasoning is not hidden. Two surfaces make every
@@ -660,7 +711,7 @@
 
         <!-- 11 RISK -->
         <section class="doc-section" id="risk">
-          <div class="doc-num">11</div>
+          <div class="doc-num">12</div>
           <h2>Risk</h2>
           <p>
             THESIS trades volatile early-stage tokens. The committee's gates

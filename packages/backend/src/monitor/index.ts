@@ -19,7 +19,7 @@ import type { Position } from "@thesis/shared";
 import { createBaseDataAdapter } from "../adapters/basedata/index.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter } from "../adapters/x/index.js";
-import type { AuthorPaymentInfo } from "../agents/endowment.js";
+import type { AuthorPaymentInfo, LotteryPaymentInfo } from "../agents/endowment.js";
 import { renderProfitCardSvg, type ProfitCardData } from "../cards/profit-card.js";
 import { fetchAvatarAsDataUri, rasterise } from "../cards/render.js";
 import { publish } from "../events.js";
@@ -125,15 +125,15 @@ async function takeTier(pos: Position): Promise<boolean> {
   );
 
   // Final tier closes the position. Mark + persist + settle BEFORE the reply
-  // so the author-payment line can be folded into the close-announcement
-  // tweet (single combined reply, not two separate ones).
-  let authorPayment: AuthorPaymentInfo | null = null;
+  // so the author-payment + holder-lottery lines can be folded into the
+  // close-announcement tweet (single combined reply, not three separate ones).
+  let settled: SettleResult | null = null;
   if (final) {
     pos.status = "closed";
     pos.closedAt = new Date().toISOString();
     await getStore().savePosition(pos);
     log.info(`monitor: ${pos.id} fully closed — all take-profit tiers cleared`);
-    authorPayment = await settle(pos);
+    settled = await settle(pos);
   }
 
   await reply(
@@ -148,7 +148,8 @@ async function takeTier(pos: Position): Promise<boolean> {
       final,
       txHash: sale.txHash,
     },
-    authorPayment,
+    settled?.authorPayment ?? null,
+    settled?.lotteryPayment ?? null,
   );
   return true;
 }
@@ -213,13 +214,14 @@ async function closeOutWithKind(
       `net result ${total >= 0 ? "+" : ""}${total.toFixed(4)} ETH`,
   );
   // Settle first so we know how the author was paid (direct vs escrow vs
-  // failed) — this gets folded into the close-announcement tweet so the
-  // whole story lands as ONE reply.
-  const authorPayment = await settle(pos);
+  // failed) AND who won the holder lottery — this gets folded into the
+  // close-announcement tweet so the whole story lands as ONE reply.
+  const settled = await settle(pos);
   await reply(
     pos,
     { kind, netPnlEth: total, tiersHit: pos.tiersHit, txHash: sale.txHash },
-    authorPayment,
+    settled?.authorPayment ?? null,
+    settled?.lotteryPayment ?? null,
   );
 }
 
@@ -245,11 +247,18 @@ export async function closeByAuthor(pos: Position, currentPrice: number): Promis
   await closeOutWithKind(fresh, currentPrice, "manual");
 }
 
+/** Settlement outcome bundled for the caller. Both legs live in the same
+ *  envelope so the close-announcement tweet can fold both into one reply. */
+interface SettleResult {
+  authorPayment: AuthorPaymentInfo;
+  lotteryPayment: LotteryPaymentInfo | null;
+}
+
 /** Split the position's total realised profit 25/25/25/25 (once, at close).
- *  Returns the author payment outcome so the caller can fold it into the
- *  close-announcement tweet (one combined reply instead of two). Returns
+ *  Returns the author + lottery payment outcomes so the caller can fold
+ *  both into the close-announcement tweet (one combined reply). Returns
  *  null when not in profit (no settlement runs). */
-async function settle(pos: Position): Promise<AuthorPaymentInfo | null> {
+async function settle(pos: Position): Promise<SettleResult | null> {
   if (pos.realisedPnlEth <= 0) return null;
   const result = await settlePosition(pos, pos.realisedPnlEth);
   if (!result) return null;
@@ -263,7 +272,7 @@ async function settle(pos: Position): Promise<AuthorPaymentInfo | null> {
     toBuybackEth: result.distribution.toBuybackEth,
     authorWallet: result.distribution.authorWallet,
   });
-  return result.authorPayment;
+  return { authorPayment: result.authorPayment, lotteryPayment: result.lotteryPayment };
 }
 
 /**
@@ -328,9 +337,10 @@ async function reply(
     | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string }
     | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string },
   authorPayment: AuthorPaymentInfo | null = null,
+  lotteryPayment: LotteryPaymentInfo | null = null,
 ): Promise<void> {
   const x = createXAdapter();
-  const text = buildClosingText(pos, o, authorPayment);
+  const text = buildClosingText(pos, o, authorPayment, lotteryPayment);
   // The card represents the FULL settlement story — author share, $THESIS
   // burn, the lot. Real settlement only runs at full close (TP4 final, or any
   // stop-out). Per-tier intermediate exits don't settle anything yet, so we
@@ -401,36 +411,60 @@ function buildClosingText(
     | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string }
     | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string },
   authorPayment: AuthorPaymentInfo | null,
+  lotteryPayment: LotteryPaymentInfo | null,
 ): string {
   const base = exitReplyText(o);
-  if (!authorPayment) return base;
-  if (authorPayment.kind === "direct") {
-    return [
-      base,
-      "",
-      payoutSentText({
-        handle: pos.authorHandle,
-        amountEth: authorPayment.amountEth,
-        wallet: authorPayment.wallet,
-        txHash: authorPayment.txHash,
-      }),
-    ].join("\n");
+  const parts: string[] = [base];
+
+  if (authorPayment) {
+    parts.push("");
+    if (authorPayment.kind === "direct") {
+      parts.push(
+        payoutSentText({
+          handle: pos.authorHandle,
+          amountEth: authorPayment.amountEth,
+          wallet: authorPayment.wallet,
+          txHash: authorPayment.txHash,
+        }),
+      );
+    } else if (authorPayment.kind === "escrowed") {
+      parts.push(
+        payoutRequestText({
+          handle: pos.authorHandle,
+          amountEth: authorPayment.amountEth,
+        }),
+      );
+    } else {
+      parts.push(
+        `Heads up: the author payout leg hit a snag (${authorPayment.reason}). Will retry — you're not losing anything.`,
+      );
+    }
   }
-  if (authorPayment.kind === "escrowed") {
-    return [
-      base,
-      "",
-      payoutRequestText({
-        handle: pos.authorHandle,
-        amountEth: authorPayment.amountEth,
-      }),
-    ].join("\n");
+
+  // Lottery winners line — surfaces the 5 random holders who just earned a
+  // share. We append it as a separate stanza so the tweet reads as three
+  // clean sections (close summary, author payment, holder lottery).
+  const lotteryLine = formatLotteryLine(lotteryPayment);
+  if (lotteryLine) {
+    parts.push("");
+    parts.push(lotteryLine);
   }
-  // Failed leg — surface it briefly so the author knows to ping us.
+
+  return parts.join("\n");
+}
+
+/** Format the lottery payment as a single multi-line block for the close
+ *  tweet. Returns "" when no lottery info is present or nobody actually
+ *  won (so the caller can decide whether to append at all). */
+function formatLotteryLine(info: LotteryPaymentInfo | null): string {
+  if (!info || info.paid.length === 0) return "";
+  const per = info.paid[0].amountEth; // equal split, all the same
+  const winnersList = info.paid
+    .map((p) => `${p.wallet.slice(0, 6)}…${p.wallet.slice(-4)}`)
+    .join(", ");
   return [
-    base,
-    "",
-    `Heads up: the author payout leg hit a snag (${authorPayment.reason}). Will retry — you're not losing anything.`,
+    `🎲 Holder lottery: ${info.paid.length} random $THESIS holders just earned ${per.toFixed(4)} Ξ each (pool of ${info.eligibleCount} eligibles).`,
+    `Winners: ${winnersList}`,
   ].join("\n");
 }
 

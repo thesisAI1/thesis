@@ -515,7 +515,7 @@ function renderDist(di) {
   const cards = [
     ["25%", "#4F9DDE", fmtEth(di.toAuthors), "To authors"],
     ["25%", "#3FB984", fmtEth(di.toPortfolio), "To trading portfolio"],
-    ["25%", "#8593AA", fmtEth(di.toTeam), "To team / running costs"],
+    ["25%", "#9B6BDF", fmtEth(di.toTeam), "Holder lottery — 5 winners"],
     ["25%", "#E0653E", fmtEth(di.toBuyback), "$THESIS buyback & burn"],
   ];
   $("#dist-grid").innerHTML = cards.map(([pct, c, val, label]) => `<div class="dist-card" style="--c:${c}">

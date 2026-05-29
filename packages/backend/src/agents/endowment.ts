@@ -23,6 +23,7 @@ import type { Distribution, Position, RegistryEntry } from "@thesis/shared";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter } from "../adapters/x/index.js";
 import { config, useMock } from "../config.js";
+import { drawLottery } from "../holders/index.js";
 import { getStore } from "../store/index.js";
 import { log } from "../util/log.js";
 import { payoutRequestText, payoutSentText } from "../util/replies.js";
@@ -35,9 +36,29 @@ export type AuthorPaymentInfo =
   | { kind: "escrowed"; amountEth: number; handle: string }
   | { kind: "failed"; reason: string; amountEth: number };
 
+/** Outcome of the holder lottery — who won, how much each, plus the size
+ *  of the eligible pool at draw time. Folded into the close tweet so the
+ *  announcement reads "5 random holders won X each from a pool of Y". */
+export interface LotteryPaymentInfo {
+  /** Individual winner payouts that actually went through on-chain. */
+  paid: Array<{ wallet: string; amountEth: number; txHash: string }>;
+  /** Winner picks that reverted on the send (RPC failure etc.). Carried
+   *  back so the close tweet can mention the affected count if any. */
+  failed: Array<{ wallet: string; amountEth: number; reason: string }>;
+  /** How many wallets were eligible at draw time — useful copy fodder. */
+  eligibleCount: number;
+  /** ETH that couldn't be distributed (lottery disabled, no eligibles,
+   *  or every send reverted). Added to the buyback budget so it never
+   *  sits idle. */
+  undistributedEth: number;
+}
+
 export interface EndowmentResult {
   distribution: Distribution;
   authorPayment: AuthorPaymentInfo;
+  /** Null when the lottery is disabled in config OR the trade fell back to
+   *  the classic team payout (e.g. no eligibles at all). */
+  lotteryPayment: LotteryPaymentInfo | null;
 }
 
 /**
@@ -92,15 +113,32 @@ export async function runEndowment(
     };
   }
 
-  // 25% — the team / maintenance wallet.
-  if (useMock() || config.chain.teamWallet) {
+  // 25% — holder lottery (or classic team payout, depending on config).
+  //
+  // With HOLDER_LOTTERY_ENABLED, the team slice splits across N=5 random
+  // eligible $THESIS holders, 5% each. Any ETH we can't distribute (lottery
+  // off, no eligibles, sends revert) is folded into the buyback budget for
+  // THIS close — never left sitting in the wallet. With the lottery off,
+  // behaviour falls back to the legacy single transfer to TEAM_WALLET.
+  let lotteryPayment: LotteryPaymentInfo | null = null;
+  let teamPaidEth = 0;
+  let buybackBudget = quarter; // base buyback slice; may be topped up below
+  if (config.holderLottery.enabled) {
+    const result = await runHolderLottery(position, quarter, chain);
+    lotteryPayment = result;
+    teamPaidEth = result.paid.reduce((s, p) => s + p.amountEth, 0);
+    // Any winner who failed OR any leftover (lottery off / no eligibles)
+    // gets rolled into the buyback so the full 25% still pulls weight.
+    buybackBudget += result.undistributedEth;
+  } else if (useMock() || config.chain.teamWallet) {
     await runLeg("pay team", () => chain.sendEth(config.chain.teamWallet, quarter));
+    teamPaidEth = quarter;
   }
 
-  // 25% — buy back $THESIS and burn it.
+  // 25% (+ any undistributed lottery ETH) — buy back $THESIS and burn it.
   if (useMock() || config.chain.thesisToken) {
     await runLeg("buyback & burn $THESIS", () =>
-      chain.buybackAndBurn(quarter).then((r) => r.txHash),
+      chain.buybackAndBurn(buybackBudget).then((r) => r.txHash),
     );
   }
 
@@ -112,12 +150,78 @@ export async function runEndowment(
       totalProfitEth: profitEth,
       toAuthorEth: quarter,
       toPortfolioEth: quarter,
-      toTeamEth: quarter,
-      toBuybackEth: quarter,
+      toTeamEth: teamPaidEth,
+      toBuybackEth: buybackBudget,
       authorWallet: entry ? entry.wallet : null,
     },
     authorPayment,
+    lotteryPayment,
   };
+}
+
+/**
+ * Run the holder lottery for one settlement. Draws N random eligible $THESIS
+ * holders (uniform, seeded by the close tx hash), splits the team slice
+ * equally between them, and dispatches the on-chain sends sequentially so a
+ * single revert doesn't abort the rest. Returns a tally the caller folds
+ * into the close announcement tweet.
+ */
+async function runHolderLottery(
+  position: Position,
+  slice: number,
+  chain: ReturnType<typeof createChainAdapter>,
+): Promise<LotteryPaymentInfo> {
+  const winnersWanted = Math.max(1, config.holderLottery.winnersPerTrade);
+  // Seed needs to be a 0x-hex string. The close tx hash is the natural
+  // choice — published in the tweet and on BaseScan, so anyone can verify.
+  const seed = position.lastExitTxHash;
+  if (!seed) {
+    log.warn(
+      `endowment: lottery skipped for ${position.id} — no lastExitTxHash to seed the random pick`,
+    );
+    return { paid: [], failed: [], eligibleCount: 0, undistributedEth: slice };
+  }
+  // Skip our own trading wallet in case it qualifies (we'd be paying
+  // ourselves). The address comes from the chain adapter at runtime.
+  let ourWallet = "";
+  try {
+    ourWallet = chain.getWalletAddress();
+  } catch {
+    /* mock or misconfigured — pass empty exclude */
+  }
+  const draw = await drawLottery(winnersWanted, seed, ourWallet);
+  if (draw.winners.length === 0) {
+    log.warn(
+      `endowment: lottery for ${position.id} — no eligible holders (pool 0). ` +
+        `Slice (${slice.toFixed(4)} ETH) goes to buyback.`,
+    );
+    return { paid: [], failed: [], eligibleCount: 0, undistributedEth: slice };
+  }
+  // Equal split across actual winners — if we asked for 5 but only got 3
+  // eligibles, each of the 3 gets a third of the slice (not a fifth).
+  const perWinner = slice / draw.winners.length;
+  const paid: LotteryPaymentInfo["paid"] = [];
+  const failed: LotteryPaymentInfo["failed"] = [];
+  for (const winner of draw.winners) {
+    try {
+      const txHash = await chain.sendEth(winner, perWinner);
+      paid.push({ wallet: winner, amountEth: perWinner, txHash });
+      log.info(
+        `endowment: lottery paid ${winner} ${perWinner.toFixed(4)} ETH — tx ${txHash}`,
+      );
+    } catch (err) {
+      const reason = String(err);
+      failed.push({ wallet: winner, amountEth: perWinner, reason });
+      log.error(`endowment: lottery send to ${winner} failed — ${reason}`);
+    }
+  }
+  const undistributedEth = failed.reduce((s, f) => s + f.amountEth, 0);
+  log.info(
+    `endowment: lottery for ${position.id} — paid ${paid.length}/${draw.winners.length} winners ` +
+      `(${perWinner.toFixed(4)} ETH each, pool ${draw.eligibleCount} eligibles)` +
+      (undistributedEth > 0 ? `, ${undistributedEth.toFixed(4)} ETH rolled to buyback` : ""),
+  );
+  return { paid, failed, eligibleCount: draw.eligibleCount, undistributedEth };
 }
 
 /** Pay an author whose payout wallet is already on file. Returns the
