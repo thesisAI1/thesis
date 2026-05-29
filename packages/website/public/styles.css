@@ -351,6 +351,34 @@ code { font-family: var(--mono); }
 .tp-caption .tp-dim { color: var(--muted); }
 .tp-fallback { font-family: var(--mono); font-size: 12px; color: var(--muted); }
 
+/* Scroll-capped containers used by the Closed trades table and the
+ * Decision log feed on the homepage. We render every row to the DOM
+ * (so anyone can scroll to it) but cap the visible window at roughly
+ * 3 rows / items so neither section dominates the page. Custom
+ * scrollbar styling so the bar reads as part of the dark UI, not as
+ * the OS default. */
+.scroll-cap { overflow-y: auto; }
+.scroll-cap-table { max-height: 240px; }
+.scroll-cap-feed { max-height: 340px; }
+/* Sticky table header so the column labels stay visible while the body
+ * scrolls. Without the background, body rows would bleed through. */
+.scroll-cap-table thead th {
+  position: sticky; top: 0;
+  background: var(--panel);
+  z-index: 1;
+}
+/* Webkit / Blink (Chrome, Safari, Edge) — thin, themed scrollbar. */
+.scroll-cap::-webkit-scrollbar { width: 8px; }
+.scroll-cap::-webkit-scrollbar-track { background: transparent; }
+.scroll-cap::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 4px;
+  border: 2px solid var(--bg);
+}
+.scroll-cap::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+/* Firefox — fewer knobs but still themable. */
+.scroll-cap { scrollbar-width: thin; scrollbar-color: var(--border-2) transparent; }
+
 .pos { color: var(--green); }
 .neg { color: var(--red); }
 .badge { display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }
