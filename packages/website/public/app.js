@@ -322,14 +322,16 @@ function renderOpen(rows) {
   $("#open-empty").hidden = rows.length > 0;
   $("#open-rows").innerHTML = rows
     .map((o) => {
+      // data-label is consumed by the mobile card-view CSS (@media ≤600px)
+      // to prefix each value with its column name. Desktop ignores it.
       return `<tr>
-    <td>${tokenCell(o.tokenSymbol, o.contractAddress)}</td>
-    <td>${authorCell(o)}</td>
-    <td>${gradeBadge(o.grade)}</td>
-    <td>${tierProgressCell(o)}</td>
-    <td class="num">${fmtEth(o.amountInEth)}</td>
-    <td class="num">${mcapCell(o.marketCapAtEntryUsd, o.marketCapNowUsd)}</td>
-    <td class="num ${pnlClass(o.unrealizedPnlEth)}">${fmtEth(o.unrealizedPnlEth)} (${fmtPct(o.unrealizedPct)})</td></tr>`;
+    <td data-label="Token">${tokenCell(o.tokenSymbol, o.contractAddress)}</td>
+    <td data-label="Author">${authorCell(o)}</td>
+    <td data-label="Grade">${gradeBadge(o.grade)}</td>
+    <td data-label="Stage">${tierProgressCell(o)}</td>
+    <td class="num" data-label="Size">${fmtEth(o.amountInEth)}</td>
+    <td class="num" data-label="Market cap">${mcapCell(o.marketCapAtEntryUsd, o.marketCapNowUsd)}</td>
+    <td class="num ${pnlClass(o.unrealizedPnlEth)}" data-label="Unrealised">${fmtEth(o.unrealizedPnlEth)} (${fmtPct(o.unrealizedPct)})</td></tr>`;
     })
     .join("");
 }
@@ -488,13 +490,13 @@ function renderClosed(rows) {
   $("#closed-count").textContent = rows.length;
   $("#closed-empty").hidden = rows.length > 0;
   $("#closed-rows").innerHTML = rows.map((c) => `<tr>
-    <td>${tokenCell(c.tokenSymbol, c.contractAddress)}</td>
-    <td>${esc(c.authorHandle)}</td>
-    <td class="num">${fmtEth(c.amountInEth)}</td>
-    <td class="num">${esc(fmtPrice(c.entryPriceEth))}</td>
-    <td class="num">${esc(fmtPrice(c.exitPriceEth))}</td>
-    <td class="num ${pnlClass(c.realisedPnlEth)}">${fmtEth(c.realisedPnlEth)} (${fmtPct(c.realisedPct)})</td>
-    <td>${esc(timeAgo(c.closedAt))}</td></tr>`).join("");
+    <td data-label="Token">${tokenCell(c.tokenSymbol, c.contractAddress)}</td>
+    <td data-label="Author">${esc(c.authorHandle)}</td>
+    <td class="num" data-label="Size">${fmtEth(c.amountInEth)}</td>
+    <td class="num" data-label="Entry">${esc(fmtPrice(c.entryPriceEth))}</td>
+    <td class="num" data-label="Exit">${esc(fmtPrice(c.exitPriceEth))}</td>
+    <td class="num ${pnlClass(c.realisedPnlEth)}" data-label="Realised PnL">${fmtEth(c.realisedPnlEth)} (${fmtPct(c.realisedPct)})</td>
+    <td data-label="Closed">${esc(timeAgo(c.closedAt))}</td></tr>`).join("");
 }
 function renderFeed(rows) {
   $("#feed-empty").hidden = rows.length > 0;

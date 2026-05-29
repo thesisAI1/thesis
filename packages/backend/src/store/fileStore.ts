@@ -1,4 +1,11 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import type { Distribution, Position, RegistryEntry, ReviewRecord } from "@thesis/shared";
 import type { EscrowEntry, Funnel, PayoutRequest, QueueItem, Store } from "./index.js";
@@ -33,23 +40,81 @@ const EMPTY: Data = {
  * A JSON-file-backed Store. Loads once into memory, persists on every write.
  * Fine for local development volumes; production should implement the Store
  * interface against Postgres instead.
+ *
+ * Crash-safety:
+ *   - persist() writes to `<file>.tmp` first, then POSIX-renames it over the
+ *     real file. The rename is atomic — even mid-disaster the on-disk file is
+ *     either the full previous version or the full new version, never a torn
+ *     half-write that would crash the process on next boot.
+ *   - Before the rename swap, the previous good file is copied to `<file>.bak`
+ *     so a corrupt main file (e.g. disk full mid-rename) can still be
+ *     recovered. Backup writes are best-effort: a failure here doesn't abort
+ *     the persist — the new file still lands atomically.
+ *   - On construction, loadOrRecover() tries the main file first; on parse
+ *     failure it falls back to .bak; on double failure it starts EMPTY rather
+ *     than crashing on boot.
  */
 export class FileStore implements Store {
   private readonly file: string;
+  private readonly tmpFile: string;
+  private readonly bakFile: string;
   private data: Data;
 
   constructor(dataDir: string) {
     const dir = resolve(dataDir);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     this.file = join(dir, "thesis-data.json");
-    this.data = existsSync(this.file)
-      ? { ...EMPTY, ...(JSON.parse(readFileSync(this.file, "utf8")) as Partial<Data>) }
-      : { ...EMPTY };
+    this.tmpFile = this.file + ".tmp";
+    this.bakFile = this.file + ".bak";
+    this.data = this.loadOrRecover();
     this.persist();
   }
 
+  /** Try the main file, then the .bak fallback, then EMPTY. Logs which path
+   *  was used so an operator scanning startup output sees corruption events. */
+  private loadOrRecover(): Data {
+    if (existsSync(this.file)) {
+      try {
+        const json = readFileSync(this.file, "utf8");
+        return { ...EMPTY, ...(JSON.parse(json) as Partial<Data>) };
+      } catch (err) {
+        console.warn(
+          `[FileStore] main file is corrupt (${String(err)}) — trying backup`,
+        );
+      }
+    }
+    if (existsSync(this.bakFile)) {
+      try {
+        const json = readFileSync(this.bakFile, "utf8");
+        console.warn(`[FileStore] recovered from backup ${this.bakFile}`);
+        return { ...EMPTY, ...(JSON.parse(json) as Partial<Data>) };
+      } catch (err) {
+        console.error(
+          `[FileStore] backup also corrupt (${String(err)}) — starting EMPTY`,
+        );
+      }
+    }
+    return { ...EMPTY };
+  }
+
+  /** Atomic write: stage to .tmp, copy current to .bak (best-effort), swap. */
   private persist(): void {
-    writeFileSync(this.file, JSON.stringify(this.data, null, 2));
+    const json = JSON.stringify(this.data, null, 2);
+    // (1) Stage the new content in a sibling .tmp file. If we crash here, the
+    // real file is untouched and the half-written .tmp is harmless.
+    writeFileSync(this.tmpFile, json);
+    // (2) Roll the current good file into .bak. Best-effort: if copy fails we
+    // still proceed — losing a backup is better than losing the persist.
+    if (existsSync(this.file)) {
+      try {
+        copyFileSync(this.file, this.bakFile);
+      } catch (err) {
+        console.warn(`[FileStore] backup copy failed (${String(err)}) — proceeding without`);
+      }
+    }
+    // (3) Atomic rename — POSIX guarantees this is a single inode swap, so a
+    // crash here leaves the file either fully old or fully new. Never torn.
+    renameSync(this.tmpFile, this.file);
   }
 
   async linkWallet(entry: RegistryEntry): Promise<void> {

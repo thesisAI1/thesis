@@ -513,12 +513,19 @@ code { font-family: var(--mono); }
  * cleanly on top because both extend from the same base. */
 .table-wrap {
   position: relative;
-  overflow: hidden auto;
+  /* X-axis MUST be auto so mobile viewers can swipe to reach off-screen
+   * columns (the data-table itself has min-width 640px so on narrow screens
+   * the rightmost columns spill past the wrapper). Y-axis is auto for the
+   * scroll-cap variants that bound height. */
+  overflow-x: auto;
+  overflow-y: auto;
   margin-top: 12px;
   background: linear-gradient(180deg, #11172480 0%, #0a0e16 100%);
   border: 1px solid #1f2638;
   border-radius: 12px;
   box-shadow: 0 1px 0 0 rgba(255,255,255,0.03) inset;
+  /* iOS-style smooth momentum scrolling on touch devices. */
+  -webkit-overflow-scrolling: touch;
 }
 .table-wrap::before {
   content: "";
@@ -764,4 +771,104 @@ footer p { color: var(--dim); font-size: 12.5px; max-width: 640px; margin: 0 aut
   h1 { font-size: 33px; }
   .agent-row { grid-template-columns: 1fr; }
   .stat-value { font-size: 24px; }
+}
+
+/* ===================== MOBILE PASS (≤600px) =====================
+ * Comprehensive mobile improvements for the homepage. Tables transform
+ * into stacked "row cards" since horizontal scrolling for 7-column data
+ * tables on a 375px viewport is awful UX. Padding, font sizes, and the
+ * topbar all tighten so vertical space is the only thing you scroll. */
+@media (max-width: 600px) {
+  main { padding: 0 14px 60px; }
+  .topbar { padding: 12px 14px; flex-wrap: wrap; gap: 8px; }
+  .topbar-right { gap: 12px; flex-wrap: wrap; }
+  .topbar-link { font-size: 12px; }
+
+  /* Hero — drop padding, tighten headline, banner stacks vertically. */
+  .hero { padding-top: 18px; }
+  .hero-h1 { font-size: 24px; line-height: 1.2; }
+  .lede { font-size: 14px; }
+  .hero-stats {
+    flex-direction: column; align-items: flex-start; gap: 8px; padding: 12px;
+  }
+  .hero-stat-time { margin-left: 0; }
+
+  /* Dashboard section — compact section header + smaller heading. */
+  .dash-head h2 { font-size: 22px; }
+  .dash-sub { font-size: 13px; }
+  .live-status { font-size: 10px; padding: 3px 8px; }
+
+  /* Stat cards — single column (instead of 2-up) so each is fully readable. */
+  .stat-grid { grid-template-columns: 1fr; }
+  .stat-card.is-hero { grid-column: 1; }
+  .stat-card.is-hero .stat-value { font-size: 28px; }
+
+  /* Activity strip — wrap pieces vertically so nothing gets squeezed. */
+  .activity-strip {
+    flex-wrap: wrap; gap: 6px; padding: 10px 12px; font-size: 12px;
+  }
+  .activity-strip .act-arrow { margin-left: auto; }
+
+  /* Section titles — slightly smaller. */
+  .block-title { font-size: 15px; margin-top: 28px; }
+  .block-sub { font-size: 13px; }
+
+  /* === TABLE → CARD LAYOUT === */
+  /* Each row becomes a stacked card. Cells stack vertically with a
+   * lightweight label prefix sourced from the matching thead cell via
+   * a data-label JS attribute (added in app.js renderOpen/renderClosed).
+   * No more horizontal scroll; every field of every row is visible
+   * without panning. */
+  .table-wrap {
+    /* Remove min-width pressure so the wrapper fits the viewport. */
+    overflow: visible;
+    background: transparent;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .table-wrap::before { display: none; }
+  .data-table { min-width: 0; font-size: 13px; }
+  .data-table thead { display: none; }
+  .data-table tbody tr {
+    display: block;
+    margin-bottom: 10px;
+    padding: 12px 14px;
+    background: linear-gradient(180deg, #131825 0%, #0e1219 100%);
+    border: 1px solid #1d2433;
+    border-radius: 12px;
+  }
+  /* Kill the zebra striping in card mode — each card already stands out. */
+  .data-table tbody tr:nth-child(even) { background: linear-gradient(180deg, #131825 0%, #0e1219 100%); }
+  .data-table tbody tr:hover { background: linear-gradient(180deg, #1a2030 0%, #11151f 100%); }
+  .data-table td {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; padding: 6px 0; border: none; text-align: left;
+  }
+  .data-table td.num { text-align: right; }
+  /* Inject the column label before each cell value via the data-label
+   * attribute the JS sets. Falls back invisibly if not set. */
+  .data-table td[data-label]::before {
+    content: attr(data-label);
+    font-family: var(--mono); font-size: 10px; letter-spacing: 1.2px;
+    color: var(--dim); text-transform: uppercase; flex-shrink: 0;
+  }
+  /* The first cell (token) and second cell (author) are special — they
+   * already render rich blocks, so we hide the label there and let them
+   * take full width. */
+  .data-table tr td:first-child[data-label]::before,
+  .data-table tr td:nth-child(2)[data-label]::before { display: none; }
+  .data-table tr td:first-child { padding-top: 0; }
+  .data-table tr td:last-child { padding-bottom: 0; }
+  /* Tier progress bar — give it more room in card mode. */
+  .tp-cell { min-width: 0; flex: 1; }
+  .tp-bar { gap: 4px; }
+
+  /* Profit distribution — 2x2 grid on mobile. */
+  .dist-grid { grid-template-columns: 1fr 1fr; }
+
+  /* $THESIS strip — tighter, stack actions below. */
+  .token-strip-row { gap: 12px; }
+  .token-strip-actions { width: 100%; gap: 8px; }
+  .token-strip-ca-value { font-size: 11px; }
 }
