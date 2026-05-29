@@ -14,6 +14,7 @@ import type {
 } from "@thesis/shared";
 import { config } from "../config.js";
 import { FileStore } from "./fileStore.js";
+import { PrismaStore } from "./prismaStore.js";
 
 /** A profit share owed to an author who has not linked a wallet yet.
  *  Escrow is per (author, chain) — a Solana win owes SOL, a Base win owes ETH,
@@ -167,8 +168,14 @@ export interface Store {
 
 let singleton: Store | null = null;
 
-/** The process-wide store. File-backed locally; swap for Postgres in production. */
+/** The process-wide store. SQLite/Prisma by default; set THESIS_STORE=file to
+ *  fall back to the legacy JSON file store. Both implement the same interface. */
 export function getStore(): Store {
-  if (!singleton) singleton = new FileStore(config.service.dataDir);
+  if (!singleton) {
+    singleton =
+      config.service.store === "file"
+        ? new FileStore(config.service.dataDir)
+        : new PrismaStore(config.service.dataDir);
+  }
   return singleton;
 }

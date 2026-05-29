@@ -134,8 +134,11 @@ export const config = {
     reviewIntervalSec: num("REVIEW_INTERVAL_SEC", 20),
     /** How often to check open positions for TP / SL. */
     monitorIntervalSec: num("MONITOR_INTERVAL_SEC", 15),
-    /** Where the file-backed store keeps its JSON data. */
+    /** Where the store keeps its data (JSON file or SQLite db). */
     dataDir: str("DATA_DIR", "./data"),
+    /** Which persistence backend getStore() builds. "sqlite" (default) uses the
+     *  Prisma/SQLite store; "file" keeps the legacy JSON file store. */
+    store: str("THESIS_STORE", "sqlite"),
   },
 
   auditor: {

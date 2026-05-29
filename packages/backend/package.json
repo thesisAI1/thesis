@@ -5,17 +5,30 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
+    "predev": ": \"${DATABASE_URL:=file:../data/thesis.db}\"; export DATABASE_URL; prisma generate && prisma migrate deploy",
+    "dev": "tsx watch src/index.ts",
+    "prestart": ": \"${DATABASE_URL:=file:../data/thesis.db}\"; export DATABASE_URL; prisma generate && prisma migrate deploy",
     "start": "tsx --env-file-if-exists=../../.env src/index.ts",
     "demo": "tsx src/index.ts --demo",
-    "dev": "tsx watch src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "db:generate": ": \"${DATABASE_URL:=file:../data/thesis.db}\"; export DATABASE_URL; prisma generate",
+    "db:push": ": \"${DATABASE_URL:=file:../data/thesis.db}\"; export DATABASE_URL; prisma db push",
+    "db:migrate": ": \"${DATABASE_URL:=file:../data/thesis.db}\"; export DATABASE_URL; prisma migrate dev",
+    "migrate:json": "tsx scripts/migrate-json-to-sqlite.ts"
   },
   "dependencies": {
+    "@prisma/client": "^6.19.3",
     "@resvg/resvg-js": "^2.6.2",
     "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.95.4",
     "@thesis/shared": "*",
     "bs58": "^6.0.0",
     "viem": "~2.17.0"
+  },
+  "devDependencies": {
+    "prisma": "^6.19.3",
+    "vitest": "^4.1.7"
   }
 }

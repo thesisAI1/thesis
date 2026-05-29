@@ -1,0 +1,146 @@
+// THESIS — SQLite persistence schema.
+//
+// This mirrors the in-memory `Data` blob the file-backed store keeps (see
+// src/store/fileStore.ts). It is a behaviour-identical drop-in: the PrismaStore
+// reproduces every FileStore method exactly, so the only thing that matters here
+// is that each column can hold what the JSON store held.
+//
+// Two deliberate type choices keep parity with the JSON round-trip:
+//   - ISO timestamps are stored as String (NOT DateTime). FileStore compares
+//     them lexicographically (e.g. countBuysSince, pruneQueue, lastBuyAt) and
+//     never parses them — so we keep the exact string and the same compare.
+//   - Monetary / numeric fields are Float (SQLite REAL), matching the plain JS
+//     numbers FileStore holds in memory.
+//
+// Nested domain objects (Position.order, QueueItem.submission) are stored as
+// Json; the mapper reconstructs the exact @thesis/shared shape on read.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Author X-id -> payout wallet link. Keyed on the numeric X id (handles change).
+model RegistryEntry {
+  xUserId  String @id
+  handle   String
+  wallet   String
+  linkedAt String
+}
+
+/// A trading position, upserted by id. `order` (TradeOrder incl. takeProfits[])
+/// is stored as Json and reconstructed on read.
+model Position {
+  id                   String  @id
+  postId               String
+  authorXId            String
+  authorHandle         String
+  authorAvatarUrl      String?
+  postUrl              String?
+  order                Json
+  status               String
+  entryPriceEth        Float
+  marketCapAtEntryUsd  Float?
+  entryTxHash          String
+  remainingFraction    Float
+  tiersHit             Int
+  realisedPnlEth       Float
+  lastExitPriceEth     Float?
+  lastExitTxHash       String?
+  openedAt             String
+  closedAt             String?
+
+  @@index([status])
+}
+
+/// Append-only buy log (for the rate limit). Insertion order recoverable via id.
+/// @@index([isoAt]) makes countBuysSince / lastBuyAt fast — both columns are on
+/// the hot path and the table grows without bound (one row per buy).
+model BuyLog {
+  id    Int    @id @default(autoincrement())
+  isoAt String
+
+  @@index([isoAt])
+}
+
+/// An unregistered author's accumulated profit share, keyed by X id.
+model Escrow {
+  xUserId   String @id
+  handle    String
+  amountEth Float
+  updatedAt String
+}
+
+/// A posted "reply with your wallet" request, keyed by its tweet id.
+model PayoutRequest {
+  requestTweetId String @id
+  xUserId        String
+  handle         String
+  threadPostId   String
+  requestedAt    String
+
+  @@index([xUserId])
+}
+
+/// Submission dedup log. postId is unique; the Int id drives the 5000-row cap
+/// (keep the last 5000 inserted) and membership ordering.
+model ProcessedPost {
+  id     Int    @id @default(autoincrement())
+  postId String @unique
+}
+
+/// A persisted Faculty review summary. FileStore PUSHES these — duplicate
+/// postIds are allowed, so postId is a plain (non-unique) field. Oldest-first
+/// ordering is recovered via the autoincrement id.
+model Review {
+  id              Int     @id @default(autoincrement())
+  reviewedAt      String
+  postId          String
+  postUrl         String
+  authorXId       String
+  authorHandle    String
+  contractAddress String
+  chain           String
+  authorScore     Float
+  tokenScore      Float
+  grade           String
+  decision        String
+  confidence      Float
+  rationale       String
+  positionId      String?
+  skippedReason   String?
+}
+
+/// A profit distribution (the 25/25/25/25 split). FileStore PUSHES these —
+/// positionId is non-unique; oldest-first ordering via the autoincrement id.
+model Distribution {
+  id              Int     @id @default(autoincrement())
+  positionId      String
+  totalProfitEth  Float
+  toAuthorEth     Float
+  toPortfolioEth  Float
+  toTeamEth       Float
+  toBuybackEth    Float
+  authorWallet    String?
+}
+
+/// The review queue. `submission` (Submission) is stored as Json. The
+/// autoincrement id gives a stable insertion order for the dequeueHighest
+/// "highest priority, first-enqueued on ties" tiebreak.
+model QueueItem {
+  id         Int    @id @default(autoincrement())
+  submission Json
+  priority   Float
+  enqueuedAt String
+}
+
+/// Cumulative triage funnel counters — a single fixed row.
+model Funnel {
+  id     Int @id @default(1)
+  seen   Int @default(0)
+  passed Int @default(0)
+}

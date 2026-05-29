@@ -1,0 +1,137 @@
+/**
+ * One-shot migration: JSON file store -> SQLite/Prisma store.
+ *
+ * Reads an existing `thesis-data.json` (the file the legacy FileStore wrote)
+ * and replays every record into a PrismaStore over the same DATA_DIR, using the
+ * Store interface so the exact upsert / append / accumulate semantics apply.
+ *
+ * Usage:
+ *   npm run migrate:json -w @thesis/backend
+ *   npm run migrate:json -w @thesis/backend -- /path/to/thesis-data.json
+ *
+ * Idempotent-ish: collections the interface UPSERTS (registry, positions,
+ * escrow, payout requests, processed) can be re-run safely. Append-style
+ * collections (buy log, reviews, distributions, queue) and the funnel would
+ * DOUBLE on a second run — run this once against a fresh SQLite db.
+ *
+ * Fidelity note: escrow `updatedAt` is re-stamped to now() because the only
+ * interface entry point (addEscrow) accumulates and stamps the time itself.
+ * The accumulated amount is preserved exactly; only the timestamp moves.
+ */
+
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import type {
+  Distribution,
+  Position,
+  RegistryEntry,
+  ReviewRecord,
+} from "@thesis/shared";
+import { config } from "../src/config.js";
+import type { EscrowEntry, Funnel, PayoutRequest, QueueItem } from "../src/store/index.js";
+import { PrismaStore } from "../src/store/prismaStore.js";
+
+/** The on-disk shape the legacy FileStore persisted (see fileStore.ts). */
+interface FileData {
+  registry: Record<string, RegistryEntry>;
+  positions: Position[];
+  buyLog: string[];
+  escrow: Record<string, EscrowEntry>;
+  payoutRequests: Record<string, PayoutRequest>;
+  processed: string[];
+  reviews: ReviewRecord[];
+  distributions: Distribution[];
+  queue: QueueItem[];
+  funnel: Funnel;
+}
+
+const EMPTY: FileData = {
+  registry: {},
+  positions: [],
+  buyLog: [],
+  escrow: {},
+  payoutRequests: {},
+  processed: [],
+  reviews: [],
+  distributions: [],
+  queue: [],
+  funnel: { seen: 0, passed: 0 },
+};
+
+function resolveSourcePath(): string {
+  const arg = process.argv[2];
+  if (arg) return resolve(arg);
+  return join(resolve(config.service.dataDir), "thesis-data.json");
+}
+
+function loadFileData(path: string): FileData {
+  if (!existsSync(path)) {
+    console.warn(`[migrate] no JSON file at ${path} — nothing to migrate, exiting.`);
+    return { ...EMPTY };
+  }
+  const parsed = JSON.parse(readFileSync(path, "utf8")) as Partial<FileData>;
+  return { ...EMPTY, ...parsed };
+}
+
+async function migrate(): Promise<void> {
+  const sourcePath = resolveSourcePath();
+  const data = loadFileData(sourcePath);
+  const store = new PrismaStore(config.service.dataDir);
+
+  // Upsert-style collections — safe to re-run.
+  for (const entry of Object.values(data.registry)) {
+    await store.linkWallet(entry);
+  }
+  for (const position of data.positions) {
+    await store.savePosition(position);
+  }
+  for (const entry of Object.values(data.escrow)) {
+    await store.addEscrow(entry.xUserId, entry.handle, entry.amountEth);
+  }
+  for (const req of Object.values(data.payoutRequests)) {
+    await store.addPayoutRequest(req);
+  }
+  for (const postId of data.processed) {
+    await store.markProcessed(postId);
+  }
+
+  // Append-style collections — preserve order; run once against a fresh db.
+  for (const iso of data.buyLog) {
+    await store.recordBuy(iso);
+  }
+  for (const review of data.reviews) {
+    await store.saveReview(review);
+  }
+  for (const dist of data.distributions) {
+    await store.saveDistribution(dist);
+  }
+  for (const item of data.queue) {
+    await store.enqueue(item);
+  }
+
+  // Funnel is a single counter pair.
+  if (data.funnel.seen !== 0 || data.funnel.passed !== 0) {
+    await store.bumpFunnel(data.funnel.seen, data.funnel.passed);
+  }
+
+  await store.disconnect();
+
+  console.log(
+    `[migrate] done from ${sourcePath}: ` +
+      `${Object.keys(data.registry).length} registry, ` +
+      `${data.positions.length} positions, ` +
+      `${data.buyLog.length} buys, ` +
+      `${Object.keys(data.escrow).length} escrow, ` +
+      `${Object.keys(data.payoutRequests).length} payout requests, ` +
+      `${data.processed.length} processed, ` +
+      `${data.reviews.length} reviews, ` +
+      `${data.distributions.length} distributions, ` +
+      `${data.queue.length} queued, ` +
+      `funnel {seen:${data.funnel.seen}, passed:${data.funnel.passed}}.`,
+  );
+}
+
+migrate().catch((err) => {
+  console.error("[migrate] failed:", err);
+  process.exitCode = 1;
+});

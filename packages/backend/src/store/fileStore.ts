@@ -142,12 +142,16 @@ export class FileStore implements Store {
   }
 
   /** Try the main file, then the .bak fallback, then EMPTY. Logs which path
-   *  was used so an operator scanning startup output sees corruption events. */
+   *  was used so an operator scanning startup output sees corruption events.
+   *
+   *  Uses structuredClone(EMPTY) as the base so that each instance gets its own
+   *  independent copy of the nested arrays/objects — never a shared reference to
+   *  the module-level constant that would leak mutations across instances. */
   private loadOrRecover(): Data {
     if (existsSync(this.file)) {
       try {
         const json = readFileSync(this.file, "utf8");
-        return { ...EMPTY, ...(JSON.parse(json) as Partial<Data>) };
+        return { ...structuredClone(EMPTY), ...(JSON.parse(json) as Partial<Data>) };
       } catch (err) {
         console.warn(
           `[FileStore] main file is corrupt (${String(err)}) — trying backup`,
@@ -158,14 +162,14 @@ export class FileStore implements Store {
       try {
         const json = readFileSync(this.bakFile, "utf8");
         console.warn(`[FileStore] recovered from backup ${this.bakFile}`);
-        return { ...EMPTY, ...(JSON.parse(json) as Partial<Data>) };
+        return { ...structuredClone(EMPTY), ...(JSON.parse(json) as Partial<Data>) };
       } catch (err) {
         console.error(
           `[FileStore] backup also corrupt (${String(err)}) — starting EMPTY`,
         );
       }
     }
-    return { ...EMPTY };
+    return structuredClone(EMPTY);
   }
 
   /** Atomic write: stage to .tmp, copy current to .bak (best-effort), swap. */
