@@ -374,23 +374,59 @@ code { font-family: var(--mono); }
 .funnel-line { font-family: var(--mono); font-size: 12px; color: var(--dim); margin-top: 13px; }
 .funnel-line b { color: var(--muted); font-weight: 600; }
 
-.block-title { margin: 36px 0 4px; display: flex; align-items: center; gap: 9px; }
+.block-title { margin: 36px 0 4px; display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 600; }
 .block-sub { color: var(--muted); font-size: 13.5px; margin-bottom: 14px; }
+/* Small outline icon that prefixes a section title. Color follows the accent
+ * by default so it visually anchors the heading without overpowering it. */
+.block-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; color: var(--accent);
+  flex-shrink: 0;
+}
 .count-chip {
-  font-family: var(--mono); font-size: 11px; font-weight: 700; color: var(--muted);
-  background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 1px 9px;
+  font-family: var(--mono); font-size: 10.5px; font-weight: 600; color: var(--muted);
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px; padding: 1px 8px;
+  letter-spacing: 0.2px;
 }
 
-.table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 12px; margin-top: 12px; }
+/* Premium table container — subtle vertical gradient + hairline highlight on
+ * top edge so the rows feel like they sit inside a card, not on the page.
+ * Applied to every `.table-wrap` for visual consistency between the Open
+ * Positions and Closed Trades tables. The `.scroll-cap-table` overlay layers
+ * cleanly on top because both extend from the same base. */
+.table-wrap {
+  position: relative;
+  overflow: hidden auto;
+  margin-top: 12px;
+  background: linear-gradient(180deg, #0e1219 0%, #0a0e16 100%);
+  border: 1px solid #1d2433;
+  border-radius: 12px;
+}
+.table-wrap::before {
+  content: "";
+  position: absolute; top: 0; left: 0; right: 0; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+  z-index: 2;
+}
 .data-table { width: 100%; border-collapse: collapse; font-size: 13px; min-width: 640px; }
 .data-table th {
-  text-align: left; color: var(--dim); font-family: var(--mono); font-weight: 600; font-size: 10.5px;
-  text-transform: uppercase; letter-spacing: 0.6px;
-  padding: 11px 14px; background: var(--panel-2); border-bottom: 1px solid var(--border);
+  text-align: left; color: var(--dim); font-family: var(--mono); font-weight: 500;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 1.3px;
+  padding: 11px 14px;
+  background: rgba(17,21,31,0.6);
+  border-bottom: 1px solid #1d2433;
 }
-.data-table td { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+.data-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid #131825;
+}
 .data-table tr:last-child td { border-bottom: none; }
-.data-table tbody tr:hover { background: var(--panel); }
+.data-table tbody tr {
+  transition: background 120ms ease;
+}
+.data-table tbody tr:hover {
+  background: rgba(230,163,62,0.04);
+}
 .data-table .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .tok { color: var(--blue); text-decoration: none; font-family: var(--mono); }
 .tok:hover { text-decoration: underline; }
