@@ -436,17 +436,6 @@ code { font-family: var(--mono); }
 .data-table tbody tr:hover {
   background: rgba(230,163,62,0.08);
 }
-/* Featured row — the freshest position at the top of Open Positions gets a
- * 3px gold inset on the left edge plus a stronger gold tint so the eye
- * lands on it first. Hover still amplifies further so the affordance reads
- * correctly even on the featured row. */
-.data-table tbody tr.featured-row {
-  background: rgba(230,163,62,0.06);
-  box-shadow: inset 3px 0 0 0 var(--accent);
-}
-.data-table tbody tr.featured-row:hover {
-  background: rgba(230,163,62,0.11);
-}
 .data-table .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .tok { color: var(--blue); text-decoration: none; font-family: var(--mono); }
 .tok:hover { text-decoration: underline; }

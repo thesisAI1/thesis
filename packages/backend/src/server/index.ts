@@ -857,6 +857,16 @@ async function apiDashboard(res: ServerResponse): Promise<void> {
     });
   }
 
+  // Sort the open positions so the ones with the most ladder progress sit
+  // at the top — the dashboard reads "what's actually working" before
+  // "what was opened first". Primary key: tiersHit DESC (3 TPs hit beats
+  // 2 TPs hit). Tiebreaker: unrealizedPct DESC (within the same tier the
+  // one closer to the next TP shows up first).
+  openPositions.sort((a, b) => {
+    if (b.tiersHit !== a.tiersHit) return b.tiersHit - a.tiersHit;
+    return (b.unrealizedPct ?? 0) - (a.unrealizedPct ?? 0);
+  });
+
   const closedPositions = closed
     .map((p) => ({
       id: p.id,
