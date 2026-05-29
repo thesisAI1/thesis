@@ -821,41 +821,27 @@ footer p { color: var(--dim); font-size: 12.5px; max-width: 640px; margin: 0 aut
    * without panning. */
   .table-wrap {
     /* Strip the desktop card chrome on mobile so each row card stands on
-     * its own — and CRUCIALLY override the scroll-cap height limits the
-     * desktop tables use. With overflow:visible inside a max-height
-     * container, content spills out underneath later sections (the
-     * $THESIS strip rendered in the middle of Closed Trades was this
-     * bug). On mobile we want every card visible inline and the whole
-     * page scrolls as one. */
-    overflow: visible;
-    max-height: none;
+     * its own. KEEP the scroll-cap behaviour — the wrapper still bounds
+     * its height and scrolls vertically. User swipes inside the container
+     * to reach off-screen cards, same UX as desktop, no buttons needed. */
     background: transparent;
     border: none;
     border-radius: 0;
     box-shadow: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
-  .table-wrap.scroll-cap,
-  .table-wrap.scroll-cap-table,
-  .table-wrap.scroll-cap-tall { max-height: none; overflow: visible; }
   .table-wrap::before { display: none; }
 
-  /* "Mobile preview" — hide cards beyond the first 5 (open) / 3 (closed)
-   * by default so the page doesn't run to infinity. The wrapper gains
-   * .is-mobile-expanded when the user taps "Show all", revealing the rest. */
-  .data-table tbody tr.is-mobile-extra { display: none; }
-  .table-wrap.is-mobile-expanded .data-table tbody tr.is-mobile-extra { display: block; }
-  .mobile-expand-btn {
-    display: block; width: 100%; margin: 8px 0 24px;
-    padding: 10px 14px;
-    background: transparent;
-    border: 1px dashed var(--border-2);
-    border-radius: 8px;
-    color: var(--muted);
-    font-family: var(--mono);
-    font-size: 12px; letter-spacing: 0.5px;
-    cursor: pointer;
-  }
-  .mobile-expand-btn:active { background: rgba(230,163,62,0.06); }
+  /* Tight scroll-cap heights for mobile so each section shows ~3 cards by
+   * default and the rest are reachable via swipe. Tuned for ~200px per card
+   * + a peek of the next one as scroll affordance. */
+  .table-wrap.scroll-cap-tall { max-height: 620px; }
+  .table-wrap.scroll-cap-table { max-height: 460px; }
+  /* Hide the show-more button — it's the desktop scroll-cap pattern that
+   * we're now using natively on mobile too, so the button is redundant. */
+  .mobile-expand-btn { display: none; }
   .data-table { min-width: 0; font-size: 13px; }
   .data-table thead { display: none; }
   .data-table tbody tr {
