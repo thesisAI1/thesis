@@ -50,6 +50,35 @@ import { getStore } from "../store/index.js";
 import { log } from "../util/log.js";
 import { payoutSentText } from "../util/replies.js";
 
+/** Lightweight ETH/USD rate cache. CoinGecko's free public endpoint is
+ *  rate-limited at ~30 calls/min — we hit it at most once every 5 minutes so
+ *  even at sustained traffic we stay well inside the budget. Cache survives
+ *  for the process lifetime; on fetch failure the previous value is reused so
+ *  a transient outage doesn't make the dashboard regress to "no USD figure". */
+const ETH_USD_TTL_MS = 5 * 60 * 1000;
+let _ethUsdRate = 0;
+let _ethUsdFetchedAt = 0;
+async function getEthUsdRate(): Promise<number> {
+  if (_ethUsdRate > 0 && Date.now() - _ethUsdFetchedAt < ETH_USD_TTL_MS) {
+    return _ethUsdRate;
+  }
+  try {
+    const res = await fetch(
+      "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+    );
+    if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
+    const json = (await res.json()) as { ethereum?: { usd?: number } };
+    const usd = Number(json?.ethereum?.usd ?? 0);
+    if (usd > 0) {
+      _ethUsdRate = usd;
+      _ethUsdFetchedAt = Date.now();
+    }
+  } catch (err) {
+    log.warn(`server: ETH/USD fetch failed (${String(err)}) — using stale rate ${_ethUsdRate}`);
+  }
+  return _ethUsdRate;
+}
+
 /** Process-lifetime cache of token tickers. Symbols are immutable for a given
  *  contract, so once resolved the cache value stands. We deliberately do NOT
  *  cache empty results (`""`) — a brand-new Clanker can be unknown to Birdeye
@@ -772,6 +801,11 @@ async function apiDashboard(res: ServerResponse): Promise<void> {
   }
 
   const openPositions: OpenPositionView[] = [];
+  // Running total of the on-chain ETH value of every open position's remaining
+  // tokens, valued at the live price. Combined with the wallet ETH balance
+  // this is the real "portfolio under management" figure (vs the misleadingly
+  // small "wallet only" number we used to show).
+  let openPositionsValueEth = 0;
   for (const p of open) {
     let currentPriceEth = p.entryPriceEth;
     try {
@@ -782,7 +816,9 @@ async function apiDashboard(res: ServerResponse): Promise<void> {
     // Unrealised PnL is measured on the slice still held.
     const remainingCost = p.order.amountInEth * p.remainingFraction;
     const remainingTokens = p.entryPriceEth > 0 ? remainingCost / p.entryPriceEth : 0;
-    const unrealizedPnlEth = remainingTokens * currentPriceEth - remainingCost;
+    const liveValueEth = remainingTokens * currentPriceEth;
+    const unrealizedPnlEth = liveValueEth - remainingCost;
+    openPositionsValueEth += liveValueEth;
     // Current MC = entry MC × (current price / entry price). Token supply is
     // constant for Clanker/Bankr deploys, so price ratio is a clean proxy.
     const marketCapAtEntryUsd = p.marketCapAtEntryUsd ?? null;
@@ -859,11 +895,31 @@ async function apiDashboard(res: ServerResponse): Promise<void> {
     { toAuthors: 0, toPortfolio: 0, toTeam: 0, toBuyback: 0 },
   );
 
+  // ETH/USD reference — used for the portfolio total-value display. Comes
+  // from a 5-min cache (CoinGecko); on cache miss this kicks off a fetch
+  // and may return 0 on the very first request, which the frontend treats
+  // as "show only the ETH figure" and tries again on next refresh.
+  const ethUsdPrice = await getEthUsdRate();
+  const totalPortfolioValueEth = balanceEth + openPositionsValueEth;
+
   sendJson(res, 200, {
     mode: config.mode,
     portfolio: {
       walletAddress,
       balanceEth,
+      /** Sum of every open position's live ETH value (remainingTokens × price). */
+      openPositionsValueEth,
+      /** balanceEth + openPositionsValueEth — the real money under management. */
+      totalPortfolioValueEth,
+      /** ETH/USD spot from CoinGecko (5-min cached). 0 when the first fetch
+       *  hasn't returned yet — the frontend hides USD figures in that case. */
+      ethUsdPrice,
+      /** Wallet-only USD value, for the breakdown sub-line. */
+      walletBalanceUsd: ethUsdPrice > 0 ? balanceEth * ethUsdPrice : 0,
+      /** Open-positions-only USD value, for the breakdown sub-line. */
+      openPositionsValueUsd: ethUsdPrice > 0 ? openPositionsValueEth * ethUsdPrice : 0,
+      /** Total USD value (wallet + open positions). */
+      totalPortfolioValueUsd: ethUsdPrice > 0 ? totalPortfolioValueEth * ethUsdPrice : 0,
       realizedPnlEth,
       openCount: open.length,
       closedCount: closed.length,

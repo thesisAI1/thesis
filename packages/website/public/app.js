@@ -203,7 +203,7 @@ function renderDashboard(d) {
   else wl.hidden = true;
 
   $("#stat-grid").innerHTML = [
-    statCard("Portfolio value", fmtEth(p.balanceEth) + " ETH", "trading wallet balance"),
+    portfolioValueCard(p),
     statCard("Realised PnL", fmtEth(p.realizedPnlEth) + " ETH", "since inception", pnlClass(p.realizedPnlEth)),
     statCard("Win rate", Math.round((p.winRate || 0) * 100) + "%", `${p.winCount} / ${p.closedCount} closed`),
     statCard("Open positions", String(p.openCount), `${p.closedCount} closed`),
@@ -232,6 +232,50 @@ function statCard(label, value, sub, vc) {
   return `<div class="stat-card"><div class="stat-label">${esc(label)}</div>
     <div class="stat-value ${vc || ""}">${esc(value)}</div>
     <div class="stat-sub">${esc(sub)}</div></div>`;
+}
+
+/**
+ * Portfolio value stat card — bespoke because it needs to combine wallet
+ * ETH balance + the live ETH value of every open position to communicate
+ * the REAL money under management. The old version showed only the wallet
+ * balance which under-sold things badly when a lot was tied up in open
+ * positions.
+ *
+ * Main number is USD when we have an ETH/USD rate, ETH otherwise (the very
+ * first request after a process restart may land before the rate is cached).
+ * Sub-line always breaks down "wallet + N open" so visitors can see the mix.
+ */
+function portfolioValueCard(p) {
+  const totalEth = Number(p.totalPortfolioValueEth) || Number(p.balanceEth) || 0;
+  const totalUsd = Number(p.totalPortfolioValueUsd) || 0;
+  const walletEth = Number(p.balanceEth) || 0;
+  const openValueEth = Number(p.openPositionsValueEth) || 0;
+  const openCount = Number(p.openCount) || 0;
+  // Main figure: USD when known, fall back to ETH on the cold-start tick.
+  const mainValue = totalUsd > 0 ? fmtUsd(totalUsd) : fmtEth(totalEth) + " ETH";
+  // Sub-line: ETH total + breakdown. Reads naturally as a sentence.
+  const ethTotalStr = fmtEth(totalEth) + " Ξ";
+  const breakdown =
+    openCount > 0
+      ? `wallet ${fmtEth(walletEth)} + ${fmtEth(openValueEth)} in ${openCount} open`
+      : `wallet only — no open positions`;
+  const subLine = totalUsd > 0 ? `${ethTotalStr} · ${breakdown}` : breakdown;
+  return (
+    `<div class="stat-card">` +
+    `<div class="stat-label">Portfolio value</div>` +
+    `<div class="stat-value">${esc(mainValue)}</div>` +
+    `<div class="stat-sub">${esc(subLine)}</div>` +
+    `</div>`
+  );
+}
+
+/** Format a USD amount as "$X,XXX" — drops cents above $100 (signal-only),
+ *  keeps them below so a $4.20 author payout doesn't round to "$4". */
+function fmtUsd(n) {
+  if (!isFinite(n) || n === 0) return "$0";
+  const abs = Math.abs(n);
+  if (abs >= 100) return "$" + Math.round(n).toLocaleString("en-US");
+  return "$" + n.toFixed(2);
 }
 function mini(value, label) {
   return `<div class="mini"><div class="mini-value">${esc(value)}</div>
