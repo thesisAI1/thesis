@@ -9,6 +9,7 @@
 import type { Position, TradeOrder, Verdict } from "@thesis/shared";
 import { config } from "../config.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
+import { evaluateBuyGate } from "../domain/gate.js";
 import { getStore } from "../store/index.js";
 
 export interface BursarResult {
@@ -22,6 +23,14 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export async function runBursar(verdict: Verdict): Promise<BursarResult> {
   if (verdict.decision !== "BUY") {
     return { position: null, skippedReason: "verdict is SKIP" };
+  }
+
+  // Final, non-bypassable pre-spend check. Even if a BUY verdict reaches us
+  // (e.g. a future code path, or a bug upstream), the deterministic gate has
+  // the last word before any real ETH moves.
+  const gate = evaluateBuyGate(verdict.submission.contractAddress, verdict.tokenReport);
+  if (!gate.allowed) {
+    return { position: null, skippedReason: `hard gate: ${gate.reason}` };
   }
 
   const store = getStore();

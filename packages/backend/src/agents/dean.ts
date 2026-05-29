@@ -17,6 +17,7 @@ import type {
   Verdict,
 } from "@thesis/shared";
 import { config } from "../config.js";
+import { evaluateBuyGate } from "../domain/gate.js";
 
 export async function runDean(
   submission: Submission,
@@ -51,10 +52,18 @@ export async function runDean(
   );
 
   const grade = llm ? llm.grade : toGrade(combined);
-  const decision: Verdict["decision"] = meetsBuyThreshold(grade, config.trading.minBuyGrade)
-    ? "BUY"
-    : "SKIP";
+  // The grade only PROPOSES. The deterministic hard gate DISPOSES: a token the
+  // Auditor rejected (score 0 — honeypot, too new, thin liquidity, etc.) is
+  // never bought, no matter how high the LLM graded it. This is what stops an
+  // attacker-crafted thesis from talking the committee into a bad buy.
+  const meetsGrade = meetsBuyThreshold(grade, config.trading.minBuyGrade);
+  const gate = evaluateBuyGate(submission.contractAddress, tokenReport);
+  const decision: Verdict["decision"] = meetsGrade && gate.allowed ? "BUY" : "SKIP";
   const confidence = llm ? llm.confidence : combined / 100;
+
+  if (meetsGrade && !gate.allowed) {
+    reasoning.push(`Hard gate override — ${gate.reason}. Forcing SKIP.`);
+  }
 
   const { positionSizeMinPct, positionSizeMaxPct } = config.trading;
   const positionSizePct =
