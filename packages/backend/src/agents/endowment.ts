@@ -92,7 +92,13 @@ export async function runEndowment(
   // send/RPC failure (or a crash) RESUMES on the next monitor tick and re-runs
   // ONLY the legs that have not yet succeeded — the author, lottery winners, and
   // buyback are each paid exactly once, never twice.
-  const progress: SettlementProgress = position.settlement ?? {};
+  const progress: SettlementProgress = {
+    authorDone: false,
+    teamDone: false,
+    buybackDone: false,
+    distributionDone: false,
+    ...(position.settlement ?? {}),
+  };
   const saveProgress = async (): Promise<void> => {
     position.settlement = progress;
     await store.savePosition(position);
@@ -116,6 +122,15 @@ export async function runEndowment(
       );
     } else {
       await store.addEscrow(position.authorXId, position.authorHandle, quarter);
+      // addEscrow ADDS to the author's running escrow total, so it must never
+      // run twice. Persist authorDone in the very next write — BEFORE the
+      // payout-request tweet and the getEscrow read below — so a crash can't let
+      // the monitor's resume pass re-run this leg and re-add the escrow,
+      // over-paying the author on claim. (Residual: a crash inside this single
+      // write is the same accepted at-least-once risk as a direct send that
+      // lands on-chain then crashes before its marker persists.)
+      progress.authorDone = true;
+      await saveProgress();
       if (!options.silentAuthorTweet) {
         await requestAuthorPayout(position);
       }

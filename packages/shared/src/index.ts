@@ -183,17 +183,23 @@ export interface Position {
 /** Which legs of a position's 25/25/25/25 settlement have completed. Persisted
  *  on the Position so a settlement interrupted by a crash or a transient RPC
  *  failure resumes idempotently on the next monitor tick. */
+/**
+ * Which legs of a position's 25/25/25/25 settlement have completed. Every field
+ * is REQUIRED (default false) so a half-shaped progress object can't be
+ * represented; read sites normalise a partial/absent persisted value with
+ * `{ ...defaults, ...stored }`.
+ */
 export interface SettlementProgress {
   /** Author leg truly succeeded (direct send landed, or escrow recorded). NOT
    *  set when a direct payout returned `{kind:"failed"}` — that leaves it for
    *  retry rather than marking it done. */
-  authorDone?: boolean;
+  authorDone: boolean;
   /** Team / holder-lottery leg ran to completion (or was not applicable). */
-  teamDone?: boolean;
+  teamDone: boolean;
   /** Buyback & burn ran to completion (or was not applicable). */
-  buybackDone?: boolean;
+  buybackDone: boolean;
   /** Distribution record persisted + endowment stream event published (once). */
-  distributionDone?: boolean;
+  distributionDone: boolean;
 }
 
 /** The 25/25/25/25 split The Endowment performs on a profitable exit. */

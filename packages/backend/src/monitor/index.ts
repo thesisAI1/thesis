@@ -388,7 +388,13 @@ async function settle(
   // settlement (e.g. author paid but buyback still failing) leaves the position
   // unsettled so the next tick retries the remaining legs — runEndowment skips
   // the ones already done, so no leg is ever paid twice.
-  const p: SettlementProgress = pos.settlement ?? {};
+  const p: SettlementProgress = {
+    authorDone: false,
+    teamDone: false,
+    buybackDone: false,
+    distributionDone: false,
+    ...(pos.settlement ?? {}),
+  };
   if (!(p.authorDone && p.teamDone && p.buybackDone)) {
     log.error(
       `monitor: settlement INCOMPLETE for ${pos.id} ` +
