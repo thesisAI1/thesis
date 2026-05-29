@@ -1040,6 +1040,15 @@ async function buildDashboardPayload(): Promise<object> {
       amountInEth: p.order.amountInEth,
       entryPriceEth: p.entryPriceEth,
       exitPriceEth: p.lastExitPriceEth ?? 0,
+      // Entry market cap, and exit MC derived from the price ratio (same
+      // derivation the profit card uses): exit MC = entry MC × exitPrice/entryPrice.
+      // The closed-trades table shows these instead of the raw per-token prices,
+      // which are unreadable at memecoin scale (e.g. 6.01e-10).
+      marketCapAtEntryUsd: p.marketCapAtEntryUsd ?? null,
+      exitMarketCapUsd:
+        p.marketCapAtEntryUsd != null && p.entryPriceEth > 0 && p.lastExitPriceEth != null
+          ? p.marketCapAtEntryUsd * (p.lastExitPriceEth / p.entryPriceEth)
+          : null,
       realisedPnlEth: p.realisedPnlEth,
       realisedPct:
         p.order.amountInEth > 0 ? (p.realisedPnlEth / p.order.amountInEth) * 100 : 0,
