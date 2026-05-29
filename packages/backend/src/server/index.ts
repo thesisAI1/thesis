@@ -41,6 +41,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createBaseDataAdapter } from "../adapters/basedata/index.js";
+import { RealBaseData } from "../adapters/basedata/real.js";
 import { createXAdapter } from "../adapters/x/index.js";
 import { config } from "../config.js";
 import { subscribe, type StreamEvent } from "../events.js";
@@ -49,20 +50,42 @@ import { getStore } from "../store/index.js";
 import { log } from "../util/log.js";
 import { payoutSentText } from "../util/replies.js";
 
-/** Process-lifetime cache of token tickers (DexScreener calls). Tickers are
- *  immutable for a given contract, so first lookup is the only network hit. */
+/** Process-lifetime cache of token tickers. Symbols are immutable for a given
+ *  contract, so once resolved the cache value stands. We deliberately do NOT
+ *  cache empty results (`""`) — a brand-new Clanker can be unknown to Birdeye
+ *  for the first 5-15 mins after launch and we want the next dashboard refresh
+ *  to keep trying, not freeze the "0xABC..." fallback in stone. */
 const symbolCache = new Map<string, string>();
+/** Stateless fallback adapter — DexScreener directly. Used only when the
+ *  primary adapter (likely Birdeye) returned an empty symbol; DexScreener
+ *  indexes new pools within seconds of pool creation, so it tends to pick
+ *  up tokens that Birdeye is still catching up to. */
+const dexScreenerFallback = new RealBaseData();
 async function getSymbolCached(address: string): Promise<string> {
   const key = address.toLowerCase();
   const hit = symbolCache.get(key);
-  if (hit !== undefined) return hit;
+  // Only short-circuit on a NON-empty cache hit. Empty entries fall through
+  // so we re-resolve on every dashboard request until a real symbol lands.
+  if (hit) return hit;
+
+  let sym = "";
   try {
-    const sym = await createBaseDataAdapter().getTokenSymbol(address);
-    symbolCache.set(key, sym);
-    return sym;
+    sym = await createBaseDataAdapter().getTokenSymbol(address);
   } catch {
-    return "";
+    /* primary adapter failed — try fallback below */
   }
+  // Fall back to DexScreener when Birdeye comes up empty. Skip the extra
+  // call when the primary IS already DexScreener (BIRDEYE_API_KEY not set).
+  if (!sym && config.baseData.birdeyeKey) {
+    try {
+      sym = await dexScreenerFallback.getTokenSymbol(address);
+    } catch {
+      /* swallow — both providers tried, accept the empty result */
+    }
+  }
+  // Only persist non-empty results so a later resolution can still overwrite.
+  if (sym) symbolCache.set(key, sym);
+  return sym;
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url));
