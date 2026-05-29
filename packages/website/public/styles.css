@@ -530,6 +530,11 @@ code { font-family: var(--mono); }
  * the OS default. */
 .scroll-cap { overflow-y: auto; }
 .scroll-cap-table { max-height: 240px; }
+/* Variant for Open Positions — caps the visible window at roughly 10 rows
+ * (plus the sticky header) so the table doesn't dominate the page when
+ * lots of positions are open. Rows beyond fold smoothly behind the
+ * scrollbar with a partial view of the next one as an affordance. */
+.scroll-cap-tall { max-height: 620px; }
 .scroll-cap-feed { max-height: 340px; }
 /* Sticky table header so the column labels stay visible while the body
  * scrolls. Without the background, body rows would bleed through. */
