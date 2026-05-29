@@ -324,6 +324,33 @@ code { font-family: var(--mono); }
 .mc-now.down { color: var(--red); }
 .mc-na { color: var(--dim); font-family: var(--mono); }
 
+/* Tier-progress cell — replaces the old "X/4 TP" text in the open
+ * positions table. One segment per take-profit tier, filled green on hit,
+ * gold partial fill on the current tier (% toward next target), grey on
+ * future tiers. See tierProgressCell() in app.js for the data wiring. */
+.tp-cell { display: flex; flex-direction: column; gap: 4px; min-width: 130px; }
+.tp-bar { display: flex; gap: 3px; }
+.tp-seg {
+  flex: 1; height: 6px; border-radius: 2px;
+  background: var(--panel); position: relative; overflow: hidden;
+}
+.tp-seg.tp-hit { background: var(--green); }
+.tp-seg.tp-future { background: var(--panel); }
+.tp-seg.tp-current { background: var(--panel); }
+.tp-seg.tp-current .tp-fill {
+  position: absolute; inset: 0;
+  background: var(--accent);
+  transition: width 400ms ease-out;
+}
+.tp-caption {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font-family: var(--mono); font-size: 10px; color: var(--dim);
+  letter-spacing: 0.2px;
+}
+.tp-caption .tp-good { color: var(--green); }
+.tp-caption .tp-dim { color: var(--muted); }
+.tp-fallback { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
 .pos { color: var(--green); }
 .neg { color: var(--red); }
 .badge { display: inline-block; font-family: var(--mono); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 6px; }

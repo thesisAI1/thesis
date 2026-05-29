@@ -243,17 +243,94 @@ function renderOpen(rows) {
   $("#open-empty").hidden = rows.length > 0;
   $("#open-rows").innerHTML = rows
     .map((o) => {
-      const stage = `${o.tiersHit}/${o.tierCount} TP`;
       return `<tr>
     <td>${tokenCell(o.tokenSymbol, o.contractAddress)}</td>
     <td>${authorCell(o)}</td>
     <td>${gradeBadge(o.grade)}</td>
-    <td>${esc(stage)}</td>
+    <td>${tierProgressCell(o)}</td>
     <td class="num">${fmtEth(o.amountInEth)}</td>
     <td class="num">${mcapCell(o.marketCapAtEntryUsd, o.marketCapNowUsd)}</td>
     <td class="num ${pnlClass(o.unrealizedPnlEth)}">${fmtEth(o.unrealizedPnlEth)} (${fmtPct(o.unrealizedPct)})</td></tr>`;
     })
     .join("");
+}
+
+/**
+ * Render the tier-progress widget that replaces the old "X/4 TP" text.
+ *
+ * Draws one bar segment per take-profit tier. A segment is:
+ *   - "filled green"  if that tier has already been hit (sold)
+ *   - "partial gold"  if it's the next tier — the fill width is how close
+ *                     the price is to the next target, measured as a
+ *                     percentage of the distance from the previous threshold
+ *                     to the next one (e.g. at +165% with TP1 at +100% and
+ *                     TP2 at +200%, fill = (165-100)/(200-100) = 65%)
+ *   - "empty grey"    if it's a future tier
+ *
+ * Below the bars we print a tiny caption: left = what's been hit (or the
+ * current gain if no tier yet), right = what's next. When everything is hit,
+ * the right side becomes "trailing stop" since that's all that holds the
+ * position open after the final TP.
+ */
+function tierProgressCell(o) {
+  const tiersHit = Number(o.tiersHit) || 0;
+  const targets = Array.isArray(o.tierTargets) ? o.tierTargets : [];
+  const tierCount = targets.length || Number(o.tierCount) || 0;
+  // Defensive: if the API ever ships a position with no tier targets, fall
+  // back to the old "1/4 TP" text rather than rendering an empty cell.
+  if (tierCount === 0) {
+    return `<div class="tp-cell"><span class="tp-fallback">${esc(tiersHit + "/" + (o.tierCount || 0) + " TP")}</span></div>`;
+  }
+  const gainPct = Number(o.unrealizedPct);
+  const segments = [];
+  for (let i = 0; i < tierCount; i++) {
+    if (i < tiersHit) {
+      segments.push('<div class="tp-seg tp-hit"></div>');
+    } else if (i === tiersHit) {
+      // Current tier — compute fill toward the next target.
+      const prev = i > 0 ? targets[i - 1].gainPct : 0;
+      const next = targets[i].gainPct;
+      let fillPct = 0;
+      if (isFinite(gainPct) && next > prev) {
+        fillPct = ((gainPct - prev) / (next - prev)) * 100;
+        if (fillPct < 0) fillPct = 0;
+        if (fillPct > 100) fillPct = 100;
+      }
+      segments.push(
+        `<div class="tp-seg tp-current"><div class="tp-fill" style="width:${fillPct.toFixed(0)}%"></div></div>`,
+      );
+    } else {
+      segments.push('<div class="tp-seg tp-future"></div>');
+    }
+  }
+  // Bottom captions.
+  let left, right;
+  if (tiersHit === 0) {
+    left = isFinite(gainPct) ? fmtSignedPct(gainPct) : "—";
+    right = `&rarr; TP1 +${targets[0].gainPct}%`;
+  } else if (tiersHit >= tierCount) {
+    left = `<span class="tp-good">All TPs hit</span>`;
+    right = `trailing stop`;
+  } else {
+    const lastHit = targets[tiersHit - 1].gainPct;
+    left = `<span class="tp-good">TP${tiersHit} &middot; +${lastHit}%</span>`;
+    right = `&rarr; TP${tiersHit + 1} +${targets[tiersHit].gainPct}%`;
+  }
+  return (
+    `<div class="tp-cell">` +
+    `<div class="tp-bar">${segments.join("")}</div>` +
+    `<div class="tp-caption"><span>${left}</span><span class="tp-dim">${right}</span></div>` +
+    `</div>`
+  );
+}
+
+/** Compact signed-percent formatter for the tier progress caption — keeps one
+ *  decimal under 10, drops it once we're well into multi-digit territory. */
+function fmtSignedPct(n) {
+  if (!isFinite(n)) return "—";
+  const sign = n >= 0 ? "+" : "";
+  const abs = Math.abs(n);
+  return `${sign}${abs < 10 ? n.toFixed(1) : Math.round(n)}%`;
 }
 
 /** Render the token cell: $TICKER link to DexScreener + copy-CA icon button. */

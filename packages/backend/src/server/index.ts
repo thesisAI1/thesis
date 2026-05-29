@@ -683,6 +683,12 @@ interface OpenPositionView {
   status: string;
   tiersHit: number;
   tierCount: number;
+  /** Take-profit tier definitions, in order. Each entry is {gainPct, sellPct}
+   *  e.g. {gainPct: 100, sellPct: 50} = TP1 at +100% sells half the position.
+   *  Used by the dashboard's tier-progress widget to draw "TP1 hit / progress
+   *  toward TP2" bars. Sourced from each position's own order.takeProfits so
+   *  legacy positions on a different ladder still render correctly. */
+  tierTargets: Array<{ gainPct: number; sellPct: number }>;
   remainingPct: number;
   amountInEth: number;
   entryPriceEth: number;
@@ -772,6 +778,12 @@ async function apiDashboard(res: ServerResponse): Promise<void> {
       status: p.status,
       tiersHit: p.tiersHit,
       tierCount: p.order.takeProfits.length,
+      tierTargets: p.order.takeProfits.map((t) => ({
+        // priceX is the multiplier (e.g. 2.0 means +100%); subtract 1 and ×100
+        // to get the gain percentage shown on the tier progress bar.
+        gainPct: Math.round((t.priceX - 1) * 100),
+        sellPct: Math.round(t.sellFraction * 100),
+      })),
       remainingPct: Math.round(p.remainingFraction * 100),
       amountInEth: p.order.amountInEth,
       entryPriceEth: p.entryPriceEth,
