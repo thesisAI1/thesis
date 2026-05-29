@@ -39,6 +39,7 @@ HANDOFF-*.md
 TRIAGE-AND-PLAN.md
 TASKS-PR.md
 ARCHITECTURE.md
+MERGE-GUIDE.md
 
 # AI assistant local config / session state
 .claude/

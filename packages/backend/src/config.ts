@@ -88,6 +88,14 @@ export const config = {
     /** Shared secret for the /admin/test-swap endpoint. If blank, the endpoint
      *  is disabled — set this to a random long string to enable it. */
     adminSecret: str("ADMIN_SECRET"),
+    /** Optional IP allow-list for /admin/* — comma-separated. EMPTY (default)
+     *  means no IP restriction, so existing deployments are unaffected. Set to
+     *  e.g. "127.0.0.1,::1" to make the admin endpoints reachable only from
+     *  localhost (use an SSH tunnel to drive them remotely). */
+    adminAllowedIps: str("ADMIN_ALLOWED_IPS")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
   },
 
   chatbot: {

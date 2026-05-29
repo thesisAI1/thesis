@@ -45,8 +45,9 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { dirname, extname, join, normalize, resolve } from "node:path";
+import { dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkAdmin } from "./admin-auth.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createBaseDataAdapter } from "../adapters/basedata/index.js";
 import { RealBaseData } from "../adapters/basedata/real.js";
@@ -190,16 +191,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
  * Returns: { ok, txHash, amountOut, priceEth, basescanUrl }
  */
 async function adminTestSwap(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const secret = config.server.adminSecret;
-  if (!secret) {
-    return sendJson(res, 503, {
-      ok: false,
-      error: "ADMIN_SECRET is not set — test endpoint disabled.",
-    });
-  }
-  if (req.headers["x-admin-secret"] !== secret) {
-    return sendJson(res, 401, { ok: false, error: "unauthorized" });
-  }
+  const gate = checkAdmin(req);
+  if (!gate.ok) return sendJson(res, gate.status, { ok: false, error: gate.error });
   let body: { tokenAddress?: string; amountEth?: number };
   try {
     body = JSON.parse(await readBody(req)) as typeof body;
@@ -260,13 +253,8 @@ async function adminTestSwap(req: IncomingMessage, res: ServerResponse): Promise
  * Returns: { ok, txHash, amountEth, basescanUrl, replyId? }
  */
 async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const secret = config.server.adminSecret;
-  if (!secret) {
-    return sendJson(res, 503, { ok: false, error: "ADMIN_SECRET is not set — endpoint disabled." });
-  }
-  if (req.headers["x-admin-secret"] !== secret) {
-    return sendJson(res, 401, { ok: false, error: "unauthorized" });
-  }
+  const gate = checkAdmin(req);
+  if (!gate.ok) return sendJson(res, gate.status, { ok: false, error: gate.error });
   let body: {
     xUserId?: string;
     wallet?: string;
@@ -674,7 +662,7 @@ async function adminForceClosePosition(
     return sendJson(res, 500, {
       ok: false,
       positionId,
-      error: String(err),
+      error: "internal error",
       message:
         "Close pipeline exhausted retries — see logs. The token's transfer hooks " +
         "are likely blocking us across every route. Position remains open.",
