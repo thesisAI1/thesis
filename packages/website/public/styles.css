@@ -839,9 +839,6 @@ footer p { color: var(--dim); font-size: 12.5px; max-width: 640px; margin: 0 aut
    * + a peek of the next one as scroll affordance. */
   .table-wrap.scroll-cap-tall { max-height: 620px; }
   .table-wrap.scroll-cap-table { max-height: 460px; }
-  /* Hide the show-more button — it's the desktop scroll-cap pattern that
-   * we're now using natively on mobile too, so the button is redundant. */
-  .mobile-expand-btn { display: none; }
   .data-table { min-width: 0; font-size: 13px; }
   .data-table thead { display: none; }
   .data-table tbody tr {
