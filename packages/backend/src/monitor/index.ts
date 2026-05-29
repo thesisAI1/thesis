@@ -15,7 +15,7 @@
  * net profit. Each exit is announced as a reply on the original X post.
  */
 
-import type { Position } from "@thesis/shared";
+import type { Position, SettlementProgress } from "@thesis/shared";
 import { createBaseDataAdapter } from "../adapters/basedata/index.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter } from "../adapters/x/index.js";
@@ -38,6 +38,16 @@ export async function runMonitorTick(): Promise<void> {
 
 async function monitorTickInner(): Promise<void> {
   const store = getStore();
+
+  // PR3 — resume any closed-but-unsettled positions FIRST: a settlement that
+  // failed or only partially completed on an earlier tick (transient payout
+  // RPC error, crash mid-settle). settle() is idempotent — runEndowment skips
+  // legs already done — so a retry pays each leg exactly once, never twice.
+  // Runs every tick, even when nothing is currently open.
+  for (const stranded of await store.getUnsettledClosedPositions()) {
+    await settle(stranded, { resume: true });
+  }
+
   const open = await store.getOpenPositions();
   if (open.length === 0) return;
 
@@ -326,24 +336,86 @@ interface SettleResult {
   lotteryPayment: LotteryPaymentInfo | null;
 }
 
-/** Split the position's total realised profit 25/25/25/25 (once, at close).
- *  Returns the author + lottery payment outcomes so the caller can fold
- *  both into the close-announcement tweet (one combined reply). Returns
- *  null when not in profit (no settlement runs). */
-async function settle(pos: Position): Promise<SettleResult | null> {
-  if (pos.realisedPnlEth <= 0) return null;
-  const result = await settlePosition(pos, pos.realisedPnlEth);
-  if (!result) return null;
-  await getStore().saveDistribution(result.distribution);
-  publish({
-    type: "endowment",
-    positionId: result.distribution.positionId,
-    authorHandle: pos.authorHandle,
-    totalProfitEth: result.distribution.totalProfitEth,
-    toAuthorEth: result.distribution.toAuthorEth,
-    toBuybackEth: result.distribution.toBuybackEth,
-    authorWallet: result.distribution.authorWallet,
-  });
+/** Split the position's total realised profit 25/25/25/25. Idempotent and
+ *  durable (PR3): each paying leg is gated on a persisted marker, so a
+ *  settlement interrupted by a transient failure is retried by the monitor's
+ *  resume pass and completed without double-paying. The position is marked
+ *  `settledAt` (terminal) ONLY once every applicable leg has actually succeeded;
+ *  until then it stays closed-but-unsettled and is retried each tick.
+ *
+ *  Returns the author + lottery payment outcomes so the FIRST-close caller can
+ *  fold both into the close-announcement tweet. Returns null when not in profit
+ *  (no settlement runs) or when settlement could not be completed this tick. */
+async function settle(
+  pos: Position,
+  opts: { resume?: boolean } = {},
+): Promise<SettleResult | null> {
+  // Terminal guard — never run the payout legs for an already-settled position.
+  if (pos.settledAt) return null;
+
+  // No profit → nothing to distribute, but still mark terminal so the resume
+  // pass doesn't reconsider it on every tick.
+  if (pos.realisedPnlEth <= 0) {
+    pos.settledAt = new Date().toISOString();
+    await getStore().savePosition(pos);
+    return null;
+  }
+
+  let result;
+  try {
+    // On a resume the close was already announced; let the escrow leg post its
+    // own payout-request (silentAuthorTweet:false) so an author whose leg only
+    // succeeds now still has a tweet to claim against.
+    result = await settlePosition(pos, pos.realisedPnlEth, {
+      silentAuthorTweet: !opts.resume,
+    });
+  } catch (err) {
+    log.error(
+      `monitor: settlement THREW for ${pos.id} (realisedPnlEth=${pos.realisedPnlEth}) — ` +
+        `position is CLOSED but UNSETTLED; will retry next tick: ${String(err)}`,
+    );
+    return null;
+  }
+  if (!result) {
+    log.error(
+      `monitor: settlement returned null for ${pos.id} despite realisedPnlEth=` +
+        `${pos.realisedPnlEth} — CLOSED but UNSETTLED`,
+    );
+    return null;
+  }
+
+  // Only finalise when EVERY paying leg has actually completed. A partial
+  // settlement (e.g. author paid but buyback still failing) leaves the position
+  // unsettled so the next tick retries the remaining legs — runEndowment skips
+  // the ones already done, so no leg is ever paid twice.
+  const p: SettlementProgress = pos.settlement ?? {};
+  if (!(p.authorDone && p.teamDone && p.buybackDone)) {
+    log.error(
+      `monitor: settlement INCOMPLETE for ${pos.id} ` +
+        `(author=${!!p.authorDone} team=${!!p.teamDone} buyback=${!!p.buybackDone}) — ` +
+        `will retry next tick`,
+    );
+    return { authorPayment: result.authorPayment, lotteryPayment: result.lotteryPayment };
+  }
+
+  // All legs done — record the distribution + publish the event exactly once,
+  // then mark the position terminally settled.
+  if (!p.distributionDone) {
+    await getStore().saveDistribution(result.distribution);
+    publish({
+      type: "endowment",
+      positionId: result.distribution.positionId,
+      authorHandle: pos.authorHandle,
+      totalProfitEth: result.distribution.totalProfitEth,
+      toAuthorEth: result.distribution.toAuthorEth,
+      toBuybackEth: result.distribution.toBuybackEth,
+      authorWallet: result.distribution.authorWallet,
+    });
+    p.distributionDone = true;
+  }
+  pos.settlement = p;
+  pos.settledAt = new Date().toISOString();
+  await getStore().savePosition(pos);
   return { authorPayment: result.authorPayment, lotteryPayment: result.lotteryPayment };
 }
 

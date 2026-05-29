@@ -69,6 +69,9 @@ export interface Store {
   getOpenPositions(): Promise<Position[]>;
   /** Every position, open and closed. */
   getAllPositions(): Promise<Position[]>;
+  /** Closed positions whose 25/25/25/25 settlement has NOT fully completed
+   *  (no `settledAt`). The monitor retries these every tick until they settle. */
+  getUnsettledClosedPositions(): Promise<Position[]>;
 
   /** Record that a buy happened at `isoAt` (for the rate limit). */
   recordBuy(isoAt: string): Promise<void>;

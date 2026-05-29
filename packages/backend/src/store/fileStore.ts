@@ -141,6 +141,10 @@ export class FileStore implements Store {
     return [...this.data.positions];
   }
 
+  async getUnsettledClosedPositions(): Promise<Position[]> {
+    return this.data.positions.filter((p) => p.status === "closed" && !p.settledAt);
+  }
+
   async recordBuy(isoAt: string): Promise<void> {
     this.data.buyLog.push(isoAt);
     this.persist();

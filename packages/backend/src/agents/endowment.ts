@@ -19,7 +19,7 @@
  * Every on-chain leg is gated (LIVE_TRADING_ARMED) and mock-safe.
  */
 
-import type { Distribution, Position, RegistryEntry } from "@thesis/shared";
+import type { Distribution, Position, RegistryEntry, SettlementProgress } from "@thesis/shared";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter } from "../adapters/x/index.js";
 import { config, useMock } from "../config.js";
@@ -87,30 +87,56 @@ export async function runEndowment(
   const chain = createChainAdapter();
   const entry = await store.getRegistryEntry(position.authorXId);
 
+  // PR3 — idempotent settlement. Each leg is gated on a persisted marker, and
+  // progress is saved after each leg, so a settlement interrupted by a transient
+  // send/RPC failure (or a crash) RESUMES on the next monitor tick and re-runs
+  // ONLY the legs that have not yet succeeded — the author, lottery winners, and
+  // buyback are each paid exactly once, never twice.
+  const progress: SettlementProgress = position.settlement ?? {};
+  const saveProgress = async (): Promise<void> => {
+    position.settlement = progress;
+    await store.savePosition(position);
+  };
+
   // 25% — the author. Pay a known wallet directly, or escrow + ask on X.
   let authorPayment: AuthorPaymentInfo;
-  if (entry) {
-    authorPayment = await payAuthorDirect(
-      position,
-      entry,
-      quarter,
-      options.silentAuthorTweet === true,
-    );
+  if (progress.authorDone) {
+    // Already paid/escrowed on an earlier attempt — the close tweet went out
+    // then too. Reconstruct a benign descriptor for the return value.
+    authorPayment = entry
+      ? { kind: "direct", wallet: entry.wallet, txHash: "", amountEth: quarter }
+      : { kind: "escrowed", amountEth: quarter, handle: position.authorHandle };
   } else {
-    await store.addEscrow(position.authorXId, position.authorHandle, quarter);
-    if (!options.silentAuthorTweet) {
-      await requestAuthorPayout(position);
+    if (entry) {
+      authorPayment = await payAuthorDirect(
+        position,
+        entry,
+        quarter,
+        options.silentAuthorTweet === true,
+      );
+    } else {
+      await store.addEscrow(position.authorXId, position.authorHandle, quarter);
+      if (!options.silentAuthorTweet) {
+        await requestAuthorPayout(position);
+      }
+      // The escrow amount in the payout-request copy is the CUMULATIVE total
+      // (this close + any prior unanswered closes) — that's what the author
+      // actually has waiting, not just the latest tranche.
+      const updated = await store.getEscrow(position.authorXId);
+      const totalOwed = updated?.amountEth ?? quarter;
+      authorPayment = {
+        kind: "escrowed",
+        amountEth: totalOwed,
+        handle: position.authorHandle,
+      };
     }
-    // The escrow amount in the payout-request copy is the CUMULATIVE total
-    // (this close + any prior unanswered closes) — that's what the author
-    // actually has waiting, not just the latest tranche.
-    const updated = await store.getEscrow(position.authorXId);
-    const totalOwed = updated?.amountEth ?? quarter;
-    authorPayment = {
-      kind: "escrowed",
-      amountEth: totalOwed,
-      handle: position.authorHandle,
-    };
+    // Mark done ONLY on real success. A failed direct payout returns
+    // {kind:"failed"} (not a throw), so leave authorDone false and let the
+    // monitor retry next tick rather than stranding the author unpaid.
+    if (authorPayment.kind !== "failed") {
+      progress.authorDone = true;
+      await saveProgress();
+    }
   }
 
   // 25% — holder lottery (or classic team payout, depending on config).
@@ -123,23 +149,44 @@ export async function runEndowment(
   let lotteryPayment: LotteryPaymentInfo | null = null;
   let teamPaidEth = 0;
   let buybackBudget = quarter; // base buyback slice; may be topped up below
-  if (config.holderLottery.enabled) {
-    const result = await runHolderLottery(position, quarter, chain);
-    lotteryPayment = result;
-    teamPaidEth = result.paid.reduce((s, p) => s + p.amountEth, 0);
-    // Any winner who failed OR any leftover (lottery off / no eligibles)
-    // gets rolled into the buyback so the full 25% still pulls weight.
-    buybackBudget += result.undistributedEth;
-  } else if (useMock() || config.chain.teamWallet) {
-    await runLeg("pay team", () => chain.sendEth(config.chain.teamWallet, quarter));
-    teamPaidEth = quarter;
+  if (!progress.teamDone) {
+    let teamOk = true;
+    if (config.holderLottery.enabled) {
+      // runHolderLottery only throws BEFORE any winner is paid (a drawLottery
+      // failure); that propagates, leaving teamDone false → safe to retry.
+      // Partial winner-send failures are caught inside and rolled into the
+      // buyback, so the leg still "completes" and is never re-run.
+      const result = await runHolderLottery(position, quarter, chain);
+      lotteryPayment = result;
+      teamPaidEth = result.paid.reduce((s, p) => s + p.amountEth, 0);
+      buybackBudget += result.undistributedEth;
+    } else if (useMock() || config.chain.teamWallet) {
+      teamOk = await runLeg("pay team", () =>
+        chain.sendEth(config.chain.teamWallet, quarter),
+      );
+      teamPaidEth = teamOk ? quarter : 0;
+    }
+    if (teamOk) {
+      progress.teamDone = true;
+      await saveProgress();
+    }
   }
 
   // 25% (+ any undistributed lottery ETH) — buy back $THESIS and burn it.
-  if (useMock() || config.chain.thesisToken) {
-    await runLeg("buyback & burn $THESIS", () =>
-      chain.buybackAndBurn(buybackBudget).then((r) => r.txHash),
-    );
+  if (!progress.buybackDone) {
+    if (useMock() || config.chain.thesisToken) {
+      const ok = await runLeg("buyback & burn $THESIS", () =>
+        chain.buybackAndBurn(buybackBudget).then((r) => r.txHash),
+      );
+      if (ok) {
+        progress.buybackDone = true;
+        await saveProgress();
+      }
+    } else {
+      // Not applicable in this config — mark done so settlement can finalise.
+      progress.buybackDone = true;
+      await saveProgress();
+    }
   }
 
   // 25% — the trading portfolio: the profit already sits in the wallet.
@@ -295,12 +342,16 @@ async function requestAuthorPayout(position: Position): Promise<void> {
   }
 }
 
-/** Run one on-chain leg; log the outcome without aborting settlement. */
-async function runLeg(label: string, exec: () => Promise<string>): Promise<void> {
+/** Run one on-chain leg; log the outcome without aborting settlement. Returns
+ *  true if the leg succeeded, false if it threw — the caller uses this to mark
+ *  the leg done (skip it on a retry) or leave it for retry. */
+async function runLeg(label: string, run: () => Promise<string>): Promise<boolean> {
   try {
-    const txHash = await exec();
+    const txHash = await run();
     log.info(`endowment: ${label} — tx ${txHash}`);
+    return true;
   } catch (err) {
     log.error(`endowment: ${label} failed — ${String(err)}`);
+    return false;
   }
 }
