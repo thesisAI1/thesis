@@ -49,10 +49,11 @@ import { dirname, extname, join, normalize, relative, resolve, sep } from "node:
 import { fileURLToPath } from "node:url";
 import { checkAdmin } from "./admin-auth.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
-import { createBaseDataAdapter } from "../adapters/basedata/index.js";
+import { createBaseDataAdapter, type BaseDataAdapter } from "../adapters/basedata/index.js";
+import { MockBaseData } from "../adapters/basedata/mock.js";
 import { RealBaseData } from "../adapters/basedata/real.js";
 import { createXAdapter } from "../adapters/x/index.js";
-import { config } from "../config.js";
+import { config, useMock } from "../config.js";
 import { subscribe, type StreamEvent } from "../events.js";
 import { closeByAuthor } from "../monitor/index.js";
 import { getStore } from "../store/index.js";
@@ -97,8 +98,17 @@ const symbolCache = new Map<string, string>();
 /** Stateless fallback adapter — DexScreener directly. Used only when the
  *  primary adapter (likely Birdeye) returned an empty symbol; DexScreener
  *  indexes new pools within seconds of pool creation, so it tends to pick
- *  up tokens that Birdeye is still catching up to. */
-const dexScreenerFallback = new RealBaseData();
+ *  up tokens that Birdeye is still catching up to.
+ *
+ *  Mock-aware: a hardcoded `new RealBaseData()` here would let a mock run that
+ *  happens to have a BIRDEYE_API_KEY in its env leak a real DexScreener call
+ *  (the fallback branch below is gated on that key). Honour useMock() so the
+ *  mock pipeline can never touch the network; in live mode this stays
+ *  DexScreener-direct, distinct from the Birdeye primary, which is the whole
+ *  point of this secondary lookup. */
+const dexScreenerFallback: BaseDataAdapter = useMock()
+  ? new MockBaseData()
+  : new RealBaseData();
 async function getSymbolCached(address: string): Promise<string> {
   const key = address.toLowerCase();
   const hit = symbolCache.get(key);

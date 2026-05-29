@@ -8,12 +8,16 @@
  * cost. Switch to live mode by filling in .env and setting THESIS_MODE=live.
  */
 
-import { config } from "./config.js";
+import { config, validateConfig } from "./config.js";
 import { startServer } from "./server/index.js";
 import { runOnce, startService } from "./service.js";
 import { log } from "./util/log.js";
 
 async function main(): Promise<void> {
+  // Fail fast: a typo'd / out-of-range / contradictory config (e.g. a NaN
+  // stop-loss that would silently never fire) must refuse to boot, not run.
+  validateConfig();
+
   log.info(`THESIS backend starting — mode: ${config.mode}`);
 
   if (process.argv.includes("--demo")) {

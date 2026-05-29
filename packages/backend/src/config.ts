@@ -200,3 +200,131 @@ export const config = {
 export function useMock(): boolean {
   return config.mode !== "live";
 }
+
+/** Thrown by {@link validateConfig} when the loaded config is unusable. */
+export class ConfigError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ConfigError";
+  }
+}
+
+/**
+ * Fail-fast configuration check — run once at boot (see src/index.ts), BEFORE
+ * the server or service loops start.
+ *
+ * `num()` is `Number(v)`, which silently yields NaN for a typo'd env var
+ * ("3o" → NaN). A NaN threshold poisons every comparison: `price <= NaN` is
+ * always false, so a NaN STOP_LOSS_PCT means the stop-loss NEVER fires and the
+ * bot rides a losing trade to zero — invisibly. This gate turns that silent NaN
+ * (plus out-of-range, contradictory, and live-without-a-key configs) into a loud
+ * refusal to start.
+ *
+ * It collects ALL problems and throws them together, so one boot tells the
+ * operator everything that is wrong rather than one-error-per-restart.
+ */
+export function validateConfig(): void {
+  const problems: string[] = [];
+
+  // Show the operator the raw env value that failed (or that it was unset),
+  // not just the parsed NaN — that is what makes the typo obvious.
+  const raw = (key: string): string => {
+    const v = process.env[key];
+    return v === undefined ? "<unset>" : `"${v}"`;
+  };
+  /** Require a finite number within [min, max] (inclusive). */
+  const range = (key: string, v: number, min: number, max: number): void => {
+    if (!Number.isFinite(v)) {
+      problems.push(`${key}: must be a finite number (got ${raw(key)})`);
+    } else if (v < min || v > max) {
+      problems.push(`${key}: must be between ${min} and ${max} (got ${v})`);
+    }
+  };
+
+  const BIG = Number.MAX_SAFE_INTEGER;
+  const DAY_SEC = 86_400;
+  const HOURS_PER_YEAR = 8_760;
+
+  // --- numeric finiteness + sane ranges -----------------------------------
+  // server / chain
+  range("PORT", config.server.port, 1, 65_535);
+  range("BASE_CHAIN_ID", config.chain.chainId, 1, BIG);
+  range("BASE_SWAP_FEE_TIER", config.chain.feeTier, 1, 1_000_000);
+  range("SWAP_SLIPPAGE_PCT", config.chain.slippagePct, 0, 100);
+
+  // service loop intervals — 0 would hot-loop the self-rescheduling loops.
+  range("POLL_INTERVAL_SEC", config.service.pollIntervalSec, 1, DAY_SEC);
+  range("REVIEW_INTERVAL_SEC", config.service.reviewIntervalSec, 1, DAY_SEC);
+  range("MONITOR_INTERVAL_SEC", config.service.monitorIntervalSec, 1, DAY_SEC);
+
+  // auditor gates
+  range("MIN_TOKEN_AGE_HOURS", config.auditor.minTokenAgeHours, 0, HOURS_PER_YEAR);
+  range("MAX_TOP10_PCT", config.auditor.maxTop10Pct, 0, 100);
+  range("MIN_MARKET_CAP_USD", config.auditor.minMarketCapUsd, 0, BIG);
+  range("MAX_MARKET_CAP_USD", config.auditor.maxMarketCapUsd, 0, BIG);
+
+  // triage gates
+  range("MIN_AUTHOR_FOLLOWERS", config.triage.minAuthorFollowers, 0, BIG);
+  range("MIN_THESIS_WORDS", config.triage.minThesisWords, 0, 10_000);
+  range("AUTHOR_COOLDOWN_HOURS", config.triage.authorCooldownHours, 0, HOURS_PER_YEAR);
+  range("CONTRACT_DEDUP_HOURS", config.triage.contractDedupHours, 0, HOURS_PER_YEAR);
+  range("REVIEW_BUDGET_PER_HOUR", config.triage.reviewBudgetPerHour, 0, BIG);
+  range("QUEUE_TTL_MIN", config.triage.queueTtlMin, 0, BIG);
+
+  // holder lottery
+  range("HOLDER_LOTTERY_WINNERS", config.holderLottery.winnersPerTrade, 0, 1_000);
+  range("HOLDER_LOTTERY_MIN_TOKENS", config.holderLottery.minHoldingTokens, 0, BIG);
+  range("HOLDER_LOTTERY_SNAPSHOT_TTL_MIN", config.holderLottery.snapshotTtlMin, 0, BIG);
+
+  // trading — the money-affecting knobs
+  range("POSITION_SIZE_MIN_PCT", config.trading.positionSizeMinPct, 0, 100);
+  range("POSITION_SIZE_MAX_PCT", config.trading.positionSizeMaxPct, 0, 100);
+  range("STOP_LOSS_PCT", config.trading.stopLossPct, 0, 100);
+  range("MAX_BUYS_PER_DAY", config.trading.maxBuysPerDay, 0, 100_000);
+  range("BUY_COOLDOWN_MINUTES", config.trading.buyCooldownMinutes, 0, 7 * DAY_SEC / 60);
+
+  // --- cross-field invariants ---------------------------------------------
+  // Only meaningful when both sides parsed — the range() checks above already
+  // flagged any NaN, so guard on finiteness to avoid a confusing NaN-vs-NaN
+  // comparison message on top of the real error.
+  const { positionSizeMinPct, positionSizeMaxPct } = config.trading;
+  if (
+    Number.isFinite(positionSizeMinPct) &&
+    Number.isFinite(positionSizeMaxPct) &&
+    positionSizeMinPct > positionSizeMaxPct
+  ) {
+    problems.push(
+      `POSITION_SIZE_MIN_PCT (${positionSizeMinPct}) must be <= POSITION_SIZE_MAX_PCT (${positionSizeMaxPct})`,
+    );
+  }
+  const { minMarketCapUsd, maxMarketCapUsd } = config.auditor;
+  if (
+    Number.isFinite(minMarketCapUsd) &&
+    Number.isFinite(maxMarketCapUsd) &&
+    minMarketCapUsd > maxMarketCapUsd
+  ) {
+    problems.push(
+      `MIN_MARKET_CAP_USD (${minMarketCapUsd}) must be <= MAX_MARKET_CAP_USD (${maxMarketCapUsd})`,
+    );
+  }
+
+  // --- live-mode required secrets -----------------------------------------
+  // In mock mode every field has a safe default; live mode moves real ETH, so
+  // the things that make trading possible must actually be present.
+  if (config.mode === "live") {
+    if (!config.chain.tradingWalletKey) {
+      problems.push(
+        "THESIS_MODE=live requires TRADING_WALLET_PRIVATE_KEY (no wallet key = cannot sign trades)",
+      );
+    }
+    if (!config.chain.rpcUrl) {
+      problems.push("THESIS_MODE=live requires BASE_RPC_URL");
+    }
+  }
+
+  if (problems.length > 0) {
+    throw new ConfigError(
+      `Invalid configuration — refusing to start:\n  - ${problems.join("\n  - ")}`,
+    );
+  }
+}
