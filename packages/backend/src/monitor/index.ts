@@ -455,16 +455,22 @@ function buildClosingText(
 
 /** Format the lottery payment as a single multi-line block for the close
  *  tweet. Returns "" when no lottery info is present or nobody actually
- *  won (so the caller can decide whether to append at all). */
+ *  won (so the caller can decide whether to append at all).
+ *
+ *  Winners are listed with their FULL wallet address, one per line, so any
+ *  holder can copy the address straight into BaseScan and verify their
+ *  inbound ETH transfer. Truncated addresses (0xABCD…1234) read prettier
+ *  but force everyone to take our word for it — full addresses turn the
+ *  lottery into a self-verifying receipt. The tweet stays well under the
+ *  Premium 25k char limit even with five 42-char addresses. */
 function formatLotteryLine(info: LotteryPaymentInfo | null): string {
   if (!info || info.paid.length === 0) return "";
   const per = info.paid[0].amountEth; // equal split, all the same
-  const winnersList = info.paid
-    .map((p) => `${p.wallet.slice(0, 6)}…${p.wallet.slice(-4)}`)
-    .join(", ");
+  const winnersList = info.paid.map((p) => p.wallet).join("\n");
   return [
     `🎲 Holder lottery: ${info.paid.length} random $THESIS holders just earned ${per.toFixed(4)} Ξ each (pool of ${info.eligibleCount} eligibles).`,
-    `Winners: ${winnersList}`,
+    `Winners:`,
+    winnersList,
   ].join("\n");
 }
 
