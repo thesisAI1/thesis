@@ -196,11 +196,18 @@ export class RealChain implements ChainAdapter {
       // attempt. If KyberSwap can't find an alternative route (e.g. all the
       // token's liquidity sits on the excluded pool) it throws — we propagate
       // immediately because no future retry will help.
+      //
+      // tokenOut = ETH_SENTINEL (not config.chain.weth) tells KyberSwap to
+      // deliver NATIVE ETH to the wallet. The router routes through the same
+      // WETH pools as before and auto-unwraps right before the final transfer,
+      // saving us a follow-up WETH.withdraw() call after every close. Without
+      // this the trading wallet kept accumulating WETH that the operator had
+      // to manually unwrap before the funds were usable for the next buy.
       let route: KyberRouteData;
       try {
         route = await this.fetchKyberRoute(
           address,
-          config.chain.weth,
+          ETH_SENTINEL,
           amountIn,
           [...excludedSources],
         );
