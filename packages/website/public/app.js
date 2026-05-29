@@ -317,14 +317,52 @@ function mini(value, label) {
     <div class="mini-label">${esc(label)}</div></div>`;
 }
 
+/** Mobile preview limits — on small viewports we only show the first N rows
+ *  of each table by default and hide the rest behind a "Show all" toggle.
+ *  Numbers match the desktop scroll-cap height (10 for open, 3 for closed). */
+const MOBILE_PREVIEW_OPEN = 5;
+const MOBILE_PREVIEW_CLOSED = 3;
+
+/** Show/hide the "show all N" button under a table based on whether there
+ *  are actually hidden rows. Called from renderOpen / renderClosed. */
+function updateMobileExpandBtn(section, total, preview) {
+  const btn = $(`#${section}-mobile-expand`);
+  if (!btn) return;
+  if (total <= preview) {
+    btn.hidden = true;
+    return;
+  }
+  btn.hidden = false;
+  const wrap = $(`#${section}-wrap`);
+  const expanded = wrap && wrap.classList.contains("is-mobile-expanded");
+  btn.textContent = expanded
+    ? "↑ Show less"
+    : `↓ Show all ${total}`;
+}
+
+/** Toggle the "expanded" state on a table-wrap. Hidden rows (.is-mobile-extra)
+ *  appear/disappear via the CSS rule wired to .is-mobile-expanded. */
+window.toggleMobileExpand = function (section) {
+  const wrap = $(`#${section}-wrap`);
+  const btn = $(`#${section}-mobile-expand`);
+  if (!wrap || !btn) return;
+  const expanded = wrap.classList.toggle("is-mobile-expanded");
+  // Re-derive total from rendered rows to keep button copy accurate.
+  const total = wrap.querySelectorAll("tbody tr").length;
+  btn.textContent = expanded ? "↑ Show less" : `↓ Show all ${total}`;
+};
+
 function renderOpen(rows) {
   $("#open-count").textContent = rows.length;
   $("#open-empty").hidden = rows.length > 0;
   $("#open-rows").innerHTML = rows
-    .map((o) => {
+    .map((o, i) => {
       // data-label is consumed by the mobile card-view CSS (@media ≤600px)
       // to prefix each value with its column name. Desktop ignores it.
-      return `<tr>
+      // is-mobile-extra hides rows beyond the preview count on mobile until
+      // the user taps "Show all"; desktop ignores the class.
+      const extra = i >= MOBILE_PREVIEW_OPEN ? " is-mobile-extra" : "";
+      return `<tr class="${extra.trim()}">
     <td data-label="Token">${tokenCell(o.tokenSymbol, o.contractAddress)}</td>
     <td data-label="Author">${authorCell(o)}</td>
     <td data-label="Grade">${gradeBadge(o.grade)}</td>
@@ -334,6 +372,7 @@ function renderOpen(rows) {
     <td class="num ${pnlClass(o.unrealizedPnlEth)}" data-label="Unrealised">${fmtEth(o.unrealizedPnlEth)} (${fmtPct(o.unrealizedPct)})</td></tr>`;
     })
     .join("");
+  updateMobileExpandBtn("open", rows.length, MOBILE_PREVIEW_OPEN);
 }
 
 /**
@@ -489,14 +528,18 @@ function fmtMcap(usd) {
 function renderClosed(rows) {
   $("#closed-count").textContent = rows.length;
   $("#closed-empty").hidden = rows.length > 0;
-  $("#closed-rows").innerHTML = rows.map((c) => `<tr>
+  $("#closed-rows").innerHTML = rows.map((c, i) => {
+    const extra = i >= MOBILE_PREVIEW_CLOSED ? " is-mobile-extra" : "";
+    return `<tr class="${extra.trim()}">
     <td data-label="Token">${tokenCell(c.tokenSymbol, c.contractAddress)}</td>
     <td data-label="Author">${esc(c.authorHandle)}</td>
     <td class="num" data-label="Size">${fmtEth(c.amountInEth)}</td>
     <td class="num" data-label="Entry">${esc(fmtPrice(c.entryPriceEth))}</td>
     <td class="num" data-label="Exit">${esc(fmtPrice(c.exitPriceEth))}</td>
     <td class="num ${pnlClass(c.realisedPnlEth)}" data-label="Realised PnL">${fmtEth(c.realisedPnlEth)} (${fmtPct(c.realisedPct)})</td>
-    <td data-label="Closed">${esc(timeAgo(c.closedAt))}</td></tr>`).join("");
+    <td data-label="Closed">${esc(timeAgo(c.closedAt))}</td></tr>`;
+  }).join("");
+  updateMobileExpandBtn("closed", rows.length, MOBILE_PREVIEW_CLOSED);
 }
 function renderFeed(rows) {
   $("#feed-empty").hidden = rows.length > 0;

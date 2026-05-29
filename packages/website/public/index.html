@@ -156,21 +156,23 @@
         Open positions
         <span class="count-chip" id="open-count">0</span>
       </h3>
-      <div class="table-wrap scroll-cap scroll-cap-table scroll-cap-tall">
+      <div class="table-wrap scroll-cap scroll-cap-table scroll-cap-tall" id="open-wrap">
         <table class="data-table">
           <thead><tr><th>Token</th><th>Author / Thesis</th><th>Grade</th><th>Stage</th><th class="num">Size</th><th class="num">Market cap</th><th class="num">Unrealised</th></tr></thead>
           <tbody id="open-rows"></tbody>
         </table>
       </div>
+      <button class="mobile-expand-btn" id="open-mobile-expand" type="button" onclick="toggleMobileExpand('open')" hidden></button>
       <p class="empty" id="open-empty" hidden>No open positions right now.</p>
 
       <h3 class="block-title">Closed trades <span class="count-chip" id="closed-count">0</span></h3>
-      <div class="table-wrap scroll-cap scroll-cap-table">
+      <div class="table-wrap scroll-cap scroll-cap-table" id="closed-wrap">
         <table class="data-table">
           <thead><tr><th>Token</th><th>Author</th><th class="num">Size</th><th class="num">Entry</th><th class="num">Exit</th><th class="num">Realised PnL</th><th>Closed</th></tr></thead>
           <tbody id="closed-rows"></tbody>
         </table>
       </div>
+      <button class="mobile-expand-btn" id="closed-mobile-expand" type="button" onclick="toggleMobileExpand('closed')" hidden></button>
       <p class="empty" id="closed-empty" hidden>No closed trades yet.</p>
 
       <h3 class="block-title">Decision log</h3>
