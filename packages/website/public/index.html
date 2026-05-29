@@ -29,38 +29,24 @@
 
   <main>
     <section class="hero">
-      <p class="eyebrow">AUTONOMOUS&nbsp;&nbsp;&middot;&nbsp;&nbsp;ON-CHAIN&nbsp;&nbsp;&middot;&nbsp;&nbsp;BASE</p>
-      <h1>You submit the thesis.<br /><span class="accent">The committee trades it.</span></h1>
+      <div class="hero-eyebrow-row">
+        <p class="eyebrow">AUTONOMOUS&nbsp;&nbsp;&middot;&nbsp;&nbsp;ON-CHAIN&nbsp;&nbsp;&middot;&nbsp;&nbsp;BASE</p>
+        <span class="hero-live-pill"><span class="hero-live-dot"></span>committee live</span>
+      </div>
+      <h1 class="hero-h1">You submit the thesis. <span class="accent">The committee trades it.</span></h1>
       <p class="lede">
-        Tag the agent on X with a token thesis. Five AI agents put it through
-        review — and you watch every one of them think, in real time. Pass, and
-        <strong>25% of the profit is yours</strong>.
+        Tag the agent on X with a Base token thesis. If the committee buys it,
+        <strong>25% of every profitable close</strong> goes straight to your wallet.
       </p>
       <div class="hero-cta">
-        <a class="btn btn-primary" href="#room">Watch the committee</a>
-        <a class="btn" href="#payout">How payouts work</a>
+        <a class="btn btn-primary" href="#room">Watch the committee <span aria-hidden="true">&#8594;</span></a>
+        <span class="hero-cta-secondary">or <a href="docs.html#payouts">read how payouts work</a></span>
       </div>
-    </section>
-
-    <!-- ===================== $THESIS TOKEN ===================== -->
-    <section class="token-launch" id="token">
-      <div class="section-tag">$THESIS · LIVE ON BASE</div>
-      <h2>The $THESIS token</h2>
-      <p class="token-intro">
-        Launched on Bankr. A quarter of every winning trade buys $THESIS on the
-        open market and burns it — every committee win permanently shrinks the
-        supply.
-      </p>
-      <div class="token-card">
-        <div class="token-row">
-          <span class="token-label">CA</span>
-          <code class="token-ca" id="token-ca">0x36e807119529E44d6F36aD5CE24AeB87a4529ba3</code>
-          <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('token-ca').textContent).then(()=>{this.textContent='&#10003; copied';setTimeout(()=>{this.textContent='copy';},1600);});">copy</button>
-        </div>
-        <div class="token-actions">
-          <a class="btn btn-primary" href="https://dexscreener.com/base/0x36e807119529E44d6F36aD5CE24AeB87a4529ba3" target="_blank" rel="noopener noreferrer">View chart on DexScreener &#8594;</a>
-          <a class="btn" href="https://basescan.org/token/0x36e807119529E44d6F36aD5CE24AeB87a4529ba3" target="_blank" rel="noopener noreferrer">Contract on BaseScan &#8599;</a>
-        </div>
+      <div class="hero-stats" id="hero-stats" hidden>
+        <div class="hero-stat"><span class="hero-stat-label">FUNDED</span><span class="hero-stat-value" id="hero-funded">&mdash;</span></div>
+        <div class="hero-stat"><span class="hero-stat-label">PAID TO AUTHORS</span><span class="hero-stat-value accent-green" id="hero-paid">&mdash;</span></div>
+        <div class="hero-stat"><span class="hero-stat-label">$THESIS BUYBACK</span><span class="hero-stat-value accent" id="hero-burned">&mdash;</span></div>
+        <div class="hero-stat-time"><span class="hero-stat-dot"></span>updated <span id="hero-stat-time-val">just now</span></div>
       </div>
     </section>
 
@@ -237,6 +223,35 @@
           <p>The agent sends your ETH on Base and replies with the transaction
           link. Your wallet is remembered, so any future win pays you straight
           away.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== $THESIS TOKEN (compact, bottom) ===================== -->
+    <section class="token-strip" id="token">
+      <div class="section-tag">$THESIS&nbsp;&nbsp;&middot;&nbsp;&nbsp;LIVE ON BASE</div>
+      <div class="token-strip-card">
+        <div class="token-strip-row">
+          <div class="token-strip-left">
+            <div class="token-strip-title">
+              <span class="token-strip-ticker">$THESIS</span>
+              <span class="token-strip-tag">PROJECT TOKEN &middot; BANKR LAUNCH</span>
+            </div>
+            <p class="token-strip-desc">
+              25% of every winning trade buys back $THESIS on the open market
+              and burns it &mdash; every committee win permanently shrinks the
+              supply.
+            </p>
+          </div>
+          <div class="token-strip-actions">
+            <a class="btn btn-primary" href="https://dexscreener.com/base/0x36e807119529E44d6F36aD5CE24AeB87a4529ba3" target="_blank" rel="noopener noreferrer">Chart &#8594;</a>
+            <a class="btn" href="https://basescan.org/token/0x36e807119529E44d6F36aD5CE24AeB87a4529ba3" target="_blank" rel="noopener noreferrer">BaseScan &#8599;</a>
+          </div>
+        </div>
+        <div class="token-strip-ca">
+          <span class="token-strip-ca-label">CA</span>
+          <code class="token-strip-ca-value" id="token-ca">0x36e807119529E44d6F36aD5CE24AeB87a4529ba3</code>
+          <button class="token-strip-copy" onclick="navigator.clipboard.writeText(document.getElementById('token-ca').textContent).then(()=>{this.textContent='&#10003; copied';setTimeout(()=>{this.textContent='copy';},1600);});">copy</button>
         </div>
       </div>
     </section>

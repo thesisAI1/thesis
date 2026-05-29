@@ -219,6 +219,12 @@ function renderDashboard(d) {
   // recap. d.closedPositions is sorted DESC by closedAt so [0] is the
   // freshest event we can show.
   renderActivityStrip((d.closedPositions || [])[0]);
+
+  // Hero live-stats banner — three quick numbers under the CTA so first
+  // impression includes real activity, not just copy. Re-renders on every
+  // dashboard refresh; tickLiveStatus keeps the "updated Xs ago" copy
+  // fresh in between.
+  renderHeroStats(r, di);
   $("#stat-row").innerHTML = [
     mini(String(r.total), "theses reviewed"),
     mini(`${r.buys} / ${r.skips}`, "bought / skipped"),
@@ -556,15 +562,35 @@ function renderActivityStrip(latest) {
 let _lastDataFetchedAt = 0;
 function tickLiveStatus() {
   if (!_lastDataFetchedAt) return;
-  const el = $("#live-status-time");
-  if (!el) return;
   const secs = Math.floor((Date.now() - _lastDataFetchedAt) / 1000);
   let text;
   if (secs < 5) text = "just now";
   else if (secs < 60) text = `${secs}s ago`;
   else if (secs < 3600) text = `${Math.floor(secs / 60)}m ago`;
   else text = `${Math.floor(secs / 3600)}h ago`;
-  el.textContent = text;
+  // Same timestamp drives two pills (Live Performance section + hero banner).
+  const a = $("#live-status-time");
+  if (a) a.textContent = text;
+  const b = $("#hero-stat-time-val");
+  if (b) b.textContent = text;
+}
+
+/** Fill the three quick numbers in the hero banner (funded count, paid to
+ *  authors, $THESIS buyback ETH). Reveals the banner once data lands —
+ *  hidden until then so the hero doesn't flash an empty card on cold load. */
+function renderHeroStats(reviews, distributions) {
+  const wrap = $("#hero-stats");
+  if (!wrap) return;
+  const funded = Number(reviews && reviews.buys) || 0;
+  const paidEth = Number(distributions && distributions.toAuthors) || 0;
+  const buybackEth = Number(distributions && distributions.toBuyback) || 0;
+  const elFunded = $("#hero-funded");
+  const elPaid = $("#hero-paid");
+  const elBurned = $("#hero-burned");
+  if (elFunded) elFunded.textContent = `${funded} ${funded === 1 ? "thesis" : "theses"}`;
+  if (elPaid) elPaid.textContent = `${fmtEth(paidEth)} Ξ`;
+  if (elBurned) elBurned.textContent = `${fmtEth(buybackEth)} Ξ`;
+  wrap.hidden = false;
 }
 
 /* ---------- init ---------- */
