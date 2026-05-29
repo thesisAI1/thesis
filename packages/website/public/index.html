@@ -145,7 +145,13 @@
 
     <!-- ===================== DASHBOARD ===================== -->
     <section class="dash" id="dashboard">
-      <div class="section-tag">LIVE PERFORMANCE</div>
+      <div class="dash-top-row">
+        <div class="section-tag">LIVE PERFORMANCE</div>
+        <div class="live-status" id="live-status" hidden>
+          <span class="live-status-dot"></span>
+          <span>live &middot; updated <span id="live-status-time">just now</span></span>
+        </div>
+      </div>
       <div class="dash-head">
         <div>
           <h2>Every trade, on the record</h2>
@@ -155,6 +161,7 @@
       </div>
 
       <div class="stat-grid" id="stat-grid"></div>
+      <a class="activity-strip" id="activity-strip" hidden href="#" target="_blank" rel="noopener noreferrer"></a>
       <div class="stat-row" id="stat-row"></div>
       <p class="funnel-line" id="funnel-line"></p>
 

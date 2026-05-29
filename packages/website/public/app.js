@@ -202,12 +202,23 @@ function renderDashboard(d) {
   if (p.walletAddress) { wl.href = bscAddr(p.walletAddress); wl.hidden = false; }
   else wl.hidden = true;
 
+  // Live timestamp pill — reveal once data has actually loaded once, then
+  // tickLiveStatus() keeps the "updated Xs ago" copy fresh between refreshes.
+  _lastDataFetchedAt = Date.now();
+  $("#live-status").hidden = false;
+  tickLiveStatus();
+
   $("#stat-grid").innerHTML = [
     portfolioValueCard(p),
-    statCard("Realised PnL", fmtEth(p.realizedPnlEth) + " ETH", "since inception", pnlClass(p.realizedPnlEth)),
-    statCard("Win rate", Math.round((p.winRate || 0) * 100) + "%", `${p.winCount} / ${p.closedCount} closed`),
-    statCard("Open positions", String(p.openCount), `${p.closedCount} closed`),
+    statCard("Realised PnL", fmtEth(p.realizedPnlEth) + " ETH", "since inception", pnlClass(p.realizedPnlEth), STAT_ICONS.pnl),
+    statCard("Win rate", Math.round((p.winRate || 0) * 100) + "%", `${p.winCount} / ${p.closedCount} closed`, "", STAT_ICONS.winrate),
+    statCard("Open positions", String(p.openCount), `${p.closedCount} closed`, "", STAT_ICONS.open),
   ].join("");
+
+  // Activity strip — surfaces the single most recent close as a one-line
+  // recap. d.closedPositions is sorted DESC by closedAt so [0] is the
+  // freshest event we can show.
+  renderActivityStrip((d.closedPositions || [])[0]);
   $("#stat-row").innerHTML = [
     mini(String(r.total), "theses reviewed"),
     mini(`${r.buys} / ${r.skips}`, "bought / skipped"),
@@ -228,8 +239,24 @@ function renderDashboard(d) {
   renderDist(di);
 }
 
-function statCard(label, value, sub, vc) {
-  return `<div class="stat-card"><div class="stat-label">${esc(label)}</div>
+/** Inline-SVG icon set used by the Live Performance stat cards. Kept as
+ *  small outline glyphs (~14px) so they read as quiet metadata next to the
+ *  label, not as decoration. Color is set via currentColor so the .stat-icon
+ *  CSS class controls the tint (hero card gets accent, others get muted). */
+const STAT_ICONS = {
+  portfolio:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/></svg>',
+  pnl:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg>',
+  winrate:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="6"/><path d="M9 16l-1.5 6 4.5-3 4.5 3-1.5-6"/></svg>',
+  open:
+    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/></svg>',
+};
+
+function statCard(label, value, sub, vc, icon) {
+  const head = `<div class="stat-head">${icon ? `<span class="stat-icon">${icon}</span>` : ""}<span class="stat-label">${esc(label)}</span></div>`;
+  return `<div class="stat-card">${head}
     <div class="stat-value ${vc || ""}">${esc(value)}</div>
     <div class="stat-sub">${esc(sub)}</div></div>`;
 }
@@ -260,9 +287,11 @@ function portfolioValueCard(p) {
       ? `wallet ${fmtEth(walletEth)} + ${fmtEth(openValueEth)} in ${openCount} open`
       : `wallet only — no open positions`;
   const subLine = totalUsd > 0 ? `${ethTotalStr} · ${breakdown}` : breakdown;
+  // is-hero CSS class gets the richer gradient + larger hero number — visually
+  // anchors the row so visitors register the headline figure first.
   return (
-    `<div class="stat-card">` +
-    `<div class="stat-label">Portfolio value</div>` +
+    `<div class="stat-card is-hero">` +
+    `<div class="stat-head"><span class="stat-icon">${STAT_ICONS.portfolio}</span><span class="stat-label">Portfolio value</span></div>` +
     `<div class="stat-value">${esc(mainValue)}</div>` +
     `<div class="stat-sub">${esc(subLine)}</div>` +
     `</div>`
@@ -488,6 +517,56 @@ function renderDist(di) {
     <div class="dist-label">${esc(label)}</div></div>`).join("");
 }
 
+/** Render the activity strip beneath the stat cards. Takes the freshest
+ *  closed position (sorted DESC by closedAt on the API side) and turns it
+ *  into a one-line recap that links to the close-announcement tweet on X.
+ *
+ *  Hides itself when the trade log is empty or the latest entry has no
+ *  postUrl to link to — the strip is a "click to read more" surface and
+ *  serves no purpose without a destination. */
+function renderActivityStrip(latest) {
+  const strip = $("#activity-strip");
+  if (!strip) return;
+  if (!latest || !latest.postUrl) {
+    strip.hidden = true;
+    strip.removeAttribute("href");
+    strip.innerHTML = "";
+    return;
+  }
+  const pnl = Number(latest.realisedPnlEth) || 0;
+  const amountClass = pnl >= 0 ? "act-amount" : "act-amount neg";
+  const sign = pnl >= 0 ? "+" : "";
+  const ticker = latest.tokenSymbol
+    ? "$" + esc(latest.tokenSymbol)
+    : esc(shortAddr(latest.contractAddress));
+  strip.hidden = false;
+  strip.href = latest.postUrl;
+  strip.innerHTML =
+    `<span class="act-when">${esc(timeAgo(latest.closedAt))}</span>` +
+    `<span class="act-verb">Closed</span>` +
+    `<span class="act-token">${ticker}</span>` +
+    `<span class="${amountClass}">${sign}${fmtEth(pnl)} Ξ</span>` +
+    `<span class="act-tail">for <span class="act-handle">${esc(latest.authorHandle || "")}</span></span>` +
+    `<span class="act-arrow">→</span>`;
+}
+
+/** Track when the dashboard payload last landed; tickLiveStatus reads this
+ *  every second to keep the "updated Xs ago" pill copy current between the
+ *  20s refresh cycles. */
+let _lastDataFetchedAt = 0;
+function tickLiveStatus() {
+  if (!_lastDataFetchedAt) return;
+  const el = $("#live-status-time");
+  if (!el) return;
+  const secs = Math.floor((Date.now() - _lastDataFetchedAt) / 1000);
+  let text;
+  if (secs < 5) text = "just now";
+  else if (secs < 60) text = `${secs}s ago`;
+  else if (secs < 3600) text = `${Math.floor(secs / 60)}m ago`;
+  else text = `${Math.floor(secs / 3600)}h ago`;
+  el.textContent = text;
+}
+
 /* ---------- init ---------- */
 
 document.getElementById("sub-copy-ca")?.addEventListener("click", function () {
@@ -502,3 +581,4 @@ document.getElementById("sub-copy-ca")?.addEventListener("click", function () {
 connectStream();
 refreshDashboard();
 setInterval(refreshDashboard, 20000);
+setInterval(tickLiveStatus, 1000);
