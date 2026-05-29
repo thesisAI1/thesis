@@ -757,8 +757,49 @@ interface OpenPositionView {
   entryTxHash: string;
 }
 
-/** Everything the public transparency dashboard needs, in one payload. */
+/** Process-lifetime cache for the dashboard response. First visitor in a TTL
+ *  window pays the full build cost (~500ms-2s + several external API calls);
+ *  every other visitor in the same window gets the cached body in <1ms. At
+ *  the dashboard's natural 20s refresh cadence this cuts server load by an
+ *  order of magnitude under traffic without any UX regression — visitors
+ *  still see fresh-enough data because the cache TTL is tighter than the
+ *  refresh interval. */
+const DASHBOARD_CACHE_TTL_MS = 15_000;
+let _dashboardCacheBody: string | null = null;
+let _dashboardCacheExpiresAt = 0;
+/** Shared promise for concurrent cache-miss visitors — keeps the second
+ *  through Nth callers in a single 15s window from each triggering their
+ *  own duplicate build. They all await the same first-caller's promise. */
+let _dashboardInflight: Promise<string> | null = null;
+
+/** Cached dashboard endpoint. Serves cached JSON when fresh; otherwise
+ *  kicks off a build and shares its promise across concurrent callers. */
 async function apiDashboard(res: ServerResponse): Promise<void> {
+  let body = _dashboardCacheBody;
+  if (!body || Date.now() >= _dashboardCacheExpiresAt) {
+    if (!_dashboardInflight) {
+      _dashboardInflight = (async () => {
+        try {
+          const payload = await buildDashboardPayload();
+          const json = JSON.stringify(payload);
+          _dashboardCacheBody = json;
+          _dashboardCacheExpiresAt = Date.now() + DASHBOARD_CACHE_TTL_MS;
+          return json;
+        } finally {
+          _dashboardInflight = null;
+        }
+      })();
+    }
+    body = await _dashboardInflight;
+  }
+  res.writeHead(200, { "content-type": "application/json" });
+  res.end(body);
+}
+
+/** All the heavy work for the dashboard payload — file reads, chain calls,
+ *  price lookups, aggregation. Pulled out of the HTTP handler so the cache
+ *  layer in apiDashboard() can wrap it. Same return shape as before. */
+async function buildDashboardPayload(): Promise<object> {
   const store = getStore();
   const chain = createChainAdapter();
   const [positions, reviews, distributions, funnel, queue] = await Promise.all([
@@ -912,7 +953,7 @@ async function apiDashboard(res: ServerResponse): Promise<void> {
   const ethUsdPrice = await getEthUsdRate();
   const totalPortfolioValueEth = balanceEth + openPositionsValueEth;
 
-  sendJson(res, 200, {
+  return {
     mode: config.mode,
     portfolio: {
       walletAddress,
@@ -951,7 +992,7 @@ async function apiDashboard(res: ServerResponse): Promise<void> {
     openPositions,
     closedPositions: closedPositions.slice(0, 25),
     recentReviews: reviews.slice(-20).reverse(),
-  });
+  };
 }
 
 interface LeaderboardEntry {
