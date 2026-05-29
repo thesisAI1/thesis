@@ -40,11 +40,16 @@ export const MAX_FAILS = 10;
  *  brute-force speed bump on a single-process server). */
 const failures = new Map<string, { count: number; firstAt: number }>();
 
+/** HTTP status codes a denied admin request can carry. A literal union (rather
+ *  than `number`) makes the contract self-documenting and lets the compiler
+ *  catch a wrong code at the sendJson call site. */
+export type AdminDenyStatus = 401 | 403 | 429 | 503;
+
 /** The verdict from checkAdmin — a discriminated union so the caller narrows
  *  cleanly: `if (!gate.ok) sendJson(res, gate.status, …)`. */
 export type AdminGate =
   | { ok: true }
-  | { ok: false; status: number; error: string };
+  | { ok: false; status: AdminDenyStatus; error: string };
 
 /** Best-effort client IP. Behind a trusted reverse proxy this is the proxy's
  *  address; the IP allow-list is intended for the localhost/SSH-tunnel case
@@ -86,12 +91,24 @@ function isLockedOut(ip: string): boolean {
 /** Injectable clock so tests can exercise the lockout window deterministically.
  *  Defaults to Date.now in production. */
 let nowMs: () => number = () => Date.now();
+
+/** @internal TEST ONLY — overrides the lockout clock. These hooks can reset the
+ *  brute-force state, so they must never be reachable in production; they throw
+ *  if NODE_ENV is "production". */
 export function __setClockForTest(fn: () => number): void {
+  assertNotProduction();
   nowMs = fn;
 }
+/** @internal TEST ONLY — clears the per-IP failure tracker + restores the clock. */
 export function __resetAuthStateForTest(): void {
+  assertNotProduction();
   failures.clear();
   nowMs = () => Date.now();
+}
+function assertNotProduction(): void {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("admin-auth test hooks must not be called in production");
+  }
 }
 
 /**

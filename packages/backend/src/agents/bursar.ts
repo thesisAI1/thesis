@@ -25,9 +25,11 @@ export async function runBursar(verdict: Verdict): Promise<BursarResult> {
     return { position: null, skippedReason: "verdict is SKIP" };
   }
 
-  // Final, non-bypassable pre-spend check. Even if a BUY verdict reaches us
-  // (e.g. a future code path, or a bug upstream), the deterministic gate has
-  // the last word before any real ETH moves.
+  // Final deterministic pre-spend check on the external-submission path. Even
+  // if a BUY verdict reaches us via a future code path or an upstream bug, the
+  // gate runs again here before any real ETH moves. (The gate exempts the
+  // $THESIS self-token by design; operator /admin spends are a separate,
+  // secret-gated path that does not flow through here.)
   const gate = evaluateBuyGate(verdict.submission.contractAddress, verdict.tokenReport);
   if (!gate.allowed) {
     return { position: null, skippedReason: `hard gate: ${gate.reason}` };

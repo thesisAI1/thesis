@@ -16,6 +16,7 @@
  * lands (GREEN).
  */
 
+import "./helpers/isolate-store.js"; // MUST be first — temp DATA_DIR + mock mode before config loads
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AuthorReport, Submission, TokenReport, Verdict } from "@thesis/shared";
@@ -157,6 +158,16 @@ test("gate: vetoes a honeypot even if score is somehow > 0", () => {
   assert.equal(r.allowed, false);
 });
 
+test("gate: vetoes a NaN score (malformed data feed must never pass)", () => {
+  // `NaN <= 0` is false — a naive guard would have let this BUY. The gate uses
+  // `!(score > 0)`, so NaN is correctly vetoed.
+  const r = evaluateBuyGate(
+    "0x4444444444444444444444444444444444444444",
+    healthyToken({ score: Number.NaN }),
+  );
+  assert.equal(r.allowed, false, "a NaN score must be vetoed, not allowed");
+});
+
 test("gate: exempts the committee's own $THESIS token", () => {
   const realSelf = config.chain.thesisToken;
   config.chain.thesisToken = "0x9999999999999999999999999999999999999999";
@@ -188,4 +199,17 @@ test("Bursar: refuses to buy a score-0 token even when handed a BUY verdict", as
   } as Verdict;
   const result = await runBursar(verdict);
   assert.equal(result.position, null, "Bursar must not open a position on a rejected token");
+});
+
+// --- rule-based (no-LLM) path: the gate must hold when the LLM is unavailable -
+
+test("Dean (no LLM key): score-0 token is SKIP via the rule-based path", async () => {
+  const realKey = config.llm.anthropicKey;
+  config.llm.anthropicKey = ""; // force the deterministic fallback (no fetch)
+  try {
+    const verdict = await runDean(aSubmission(), anAuthorReport(), rejectedToken());
+    assert.equal(verdict.decision, "SKIP", "no-LLM path must still veto a score-0 token");
+  } finally {
+    config.llm.anthropicKey = realKey;
+  }
 });

@@ -9,6 +9,7 @@
  * body. They FAIL before the wiring (RED) and PASS after (GREEN).
  */
 
+import "./helpers/isolate-store.js"; // MUST be first — temp DATA_DIR + mock mode before config loads
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AuthorReport, Submission, TokenReport } from "@thesis/shared";
