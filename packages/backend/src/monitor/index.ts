@@ -374,20 +374,55 @@ async function reply(
     log.warn(`x: exit reply failed for ${pos.postId}: ${String(err)}`);
   }
 
-  // If the author share is escrowed (no wallet on file), the close-
-  // announcement reply IS the payout request. Register its id so the
-  // wallet-reply handler will match a future "@thesis_agent 0x…"
-  // reply against it.
-  if (replyId && authorPayment && authorPayment.kind === "escrowed") {
+  // If the author share is escrowed (no wallet on file), we MUST have a
+  // tweet they can reply to with their wallet — otherwise the wallet-reply
+  // handler has nothing to match against and the escrow sits orphaned
+  // forever. Layered defence:
+  //   1. Normal path — the close announcement IS the request, register its id.
+  //   2. Close tweet failed (X 403, network error, etc.) — post a simpler
+  //      fallback "we owe you, please send wallet" tweet with no card and no
+  //      crypto addresses in the copy. Register THAT id.
+  //   3. Fallback tweet also failed — register the request against the
+  //      original thesis post id. The author can still reply there with a
+  //      wallet (their thread already tagged @thesis_agent, so the reply
+  //      will appear in our mentions) and we'll match it.
+  // Net effect: an escrowed author ALWAYS has a path to claim their share,
+  // even if every outbound tweet attempt fails.
+  if (authorPayment && authorPayment.kind === "escrowed") {
+    let requestTweetId = replyId;
+
+    if (!requestTweetId) {
+      log.warn(
+        `x: close reply failed for ${pos.id} — posting fallback payout request`,
+      );
+      try {
+        requestTweetId = await x.replyToPost(
+          pos.postId,
+          payoutRequestText({
+            handle: pos.authorHandle,
+            amountEth: authorPayment.amountEth,
+          }),
+        );
+        log.info(`x: posted fallback payout request — reply ${requestTweetId}`);
+      } catch (err) {
+        log.error(
+          `x: fallback payout request also failed for ${pos.id}: ${String(err)}`,
+        );
+      }
+    }
+
+    const finalRequestTweetId = requestTweetId || pos.postId;
     await getStore().addPayoutRequest({
-      requestTweetId: replyId,
+      requestTweetId: finalRequestTweetId,
       xUserId: pos.authorXId,
       handle: pos.authorHandle,
       threadPostId: pos.postId,
       requestedAt: new Date().toISOString(),
     });
     log.info(
-      `endowment: ${pos.authorHandle} payout request bound to close tweet ${replyId} — escrow ${authorPayment.amountEth.toFixed(4)} ETH`,
+      `endowment: ${pos.authorHandle} payout request bound to tweet ${finalRequestTweetId} ` +
+        `(${finalRequestTweetId === pos.postId ? "fallback to original thesis post — both tweet attempts failed" : finalRequestTweetId === replyId ? "via close announcement" : "via fallback request post"}) ` +
+        `— escrow ${authorPayment.amountEth.toFixed(4)} ETH`,
     );
   }
 }
@@ -457,20 +492,19 @@ function buildClosingText(
  *  tweet. Returns "" when no lottery info is present or nobody actually
  *  won (so the caller can decide whether to append at all).
  *
- *  Winners are listed with their FULL wallet address, one per line, so any
- *  holder can copy the address straight into BaseScan and verify their
- *  inbound ETH transfer. Truncated addresses (0xABCD…1234) read prettier
- *  but force everyone to take our word for it — full addresses turn the
- *  lottery into a self-verifying receipt. The tweet stays well under the
- *  Premium 25k char limit even with five 42-char addresses. */
+ *  IMPORTANT: this used to include the FULL 0x addresses of every winner
+ *  for verifiability, but X (Twitter) blocks tweets containing wallet
+ *  addresses for the first ~7 days after a new app authentication, with a
+ *  403 "Crypto addresses are prohibited" error. That killed every close
+ *  announcement until we noticed. We now describe the lottery in words
+ *  only — the trading wallet's BaseScan address (already linked from the
+ *  homepage) shows every winner's inbound transfer for self-verification. */
 function formatLotteryLine(info: LotteryPaymentInfo | null): string {
   if (!info || info.paid.length === 0) return "";
   const per = info.paid[0].amountEth; // equal split, all the same
-  const winnersList = info.paid.map((p) => p.wallet).join("\n");
   return [
-    `🎲 Holder lottery: ${info.paid.length} random $THESIS holders just earned ${per.toFixed(4)} Ξ each (pool of ${info.eligibleCount} eligibles).`,
-    `Winners:`,
-    winnersList,
+    `🎲 Holder lottery: ${info.paid.length} random $THESIS holders won ${per.toFixed(4)} Ξ each (pool of ${info.eligibleCount} eligibles).`,
+    `Winners visible on the trading wallet's recent BaseScan transfers.`,
   ].join("\n");
 }
 

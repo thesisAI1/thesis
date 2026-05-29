@@ -32,6 +32,14 @@
  *                                     us and we want to push through from the
  *                                     admin side without waiting on the author
  *                                     (gated by ADMIN_SECRET header)
+ *   POST  /admin/repost-close-announcement  re-post the X close announcement
+ *                                     for a closed position. Used to recover
+ *                                     escrowed authors after the original
+ *                                     close tweet failed (X's 7-day no-crypto
+ *                                     -addresses rule, network outage, etc.)
+ *                                     — repost is address-free + rebinds the
+ *                                     payoutRequest to the new tweet id
+ *                                     (gated by ADMIN_SECRET header)
  */
 
 import { existsSync } from "node:fs";
@@ -157,6 +165,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (path === "/admin/rebuy-position" && req.method === "POST") return adminRebuyPosition(req, res);
   if (path === "/admin/backfill-entry-mc" && req.method === "POST") return adminBackfillEntryMc(req, res);
   if (path === "/admin/force-close-position" && req.method === "POST") return adminForceClosePosition(req, res);
+  if (path === "/admin/repost-close-announcement" && req.method === "POST") return adminRepostCloseAnnouncement(req, res);
 
   // Clean URL for the documentation page.
   if (path === "/docs") return serveStatic("/docs.html", res);
@@ -684,6 +693,117 @@ async function adminForceClosePosition(
     basescanUrl: after?.lastExitTxHash
       ? `https://basescan.org/tx/${after.lastExitTxHash}`
       : undefined,
+  });
+}
+
+/**
+ * POST /admin/repost-close-announcement — retry the X close announcement for
+ * a closed position whose original tweet failed (e.g. X's 7-day "no crypto
+ * addresses" rule after a fresh app authentication).
+ *
+ * Posts a SIMPLIFIED close announcement (no card, no wallet addresses) so X
+ * accepts it cleanly. If the position's author is escrowed (no wallet on
+ * file), updates the payout request to point at this new tweet — so when the
+ * author replies with a wallet, the existing payout handler matches and pays
+ * them out automatically. Existing payout requests for the same author are
+ * cleared first (might be pointing at the original failed tweet OR the
+ * fallback thesis-post id).
+ *
+ * Auth: header `x-admin-secret`.
+ * Body (JSON): { positionId: "pos-..." }
+ *
+ * Returns: { ok, positionId, replyId, escrow? }
+ */
+async function adminRepostCloseAnnouncement(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const secret = config.server.adminSecret;
+  if (!secret) return sendJson(res, 503, { ok: false, error: "ADMIN_SECRET is not set" });
+  if (req.headers["x-admin-secret"] !== secret) {
+    return sendJson(res, 401, { ok: false, error: "unauthorized" });
+  }
+  let body: { positionId?: string };
+  try {
+    body = JSON.parse(await readBody(req)) as typeof body;
+  } catch {
+    return sendJson(res, 400, { ok: false, error: "invalid JSON body" });
+  }
+  const positionId = body.positionId?.trim();
+  if (!positionId) return sendJson(res, 400, { ok: false, error: "positionId is required" });
+
+  const store = getStore();
+  const positions = await store.getAllPositions();
+  const pos = positions.find((p) => p.id === positionId);
+  if (!pos) return sendJson(res, 404, { ok: false, error: "position not found" });
+  if (pos.status !== "closed") {
+    return sendJson(res, 409, { ok: false, error: `position is ${pos.status}, expected closed` });
+  }
+
+  // Check escrow — if the author hasn't been paid (no wallet on file), we
+  // turn this repost INTO a payout request so they can claim.
+  const escrow = await store.getEscrow(pos.authorXId);
+  const isEscrowed = Boolean(escrow && escrow.amountEth > 0);
+
+  // Build a tight, address-free announcement. Repost intentionally skips the
+  // card image and the per-winner lottery block — both of those tripped X's
+  // crypto-address filter the first time. The BaseScan tx link is the one
+  // reliable receipt for on-chain delivery.
+  const sign = pos.realisedPnlEth >= 0 ? "+" : "";
+  const lines: string[] = [
+    `Closing summary for the thesis above.`,
+    `Net result: ${sign}${pos.realisedPnlEth.toFixed(4)} ETH.`,
+  ];
+  if (pos.realisedPnlEth > 0) {
+    lines.push(`Author share: 25% of profit. Buyback + holder lottery + portfolio split — all settled on-chain.`);
+  }
+  if (isEscrowed && escrow) {
+    lines.push("");
+    lines.push(
+      `${pos.authorHandle} — reply to THIS tweet with your Base wallet (0x…) to claim your ${escrow.amountEth.toFixed(4)} ETH share.`,
+    );
+    lines.push("Only the original thesis author can claim — replies from other accounts are ignored.");
+  }
+  if (pos.lastExitTxHash) {
+    lines.push("");
+    lines.push(`https://basescan.org/tx/${pos.lastExitTxHash}`);
+  }
+  const text = lines.join("\n");
+
+  log.info(`admin: repost-close ${positionId} — posting fresh announcement (${text.length} chars)`);
+  let replyId: string;
+  try {
+    replyId = await createXAdapter().replyToPost(pos.postId, text);
+    log.info(`admin: repost-close — tweeted reply ${replyId}`);
+  } catch (err) {
+    log.error(`admin: repost-close failed for ${positionId} — ${String(err)}`);
+    return sendJson(res, 502, { ok: false, error: String(err) });
+  }
+
+  if (isEscrowed) {
+    // Wipe any prior payout requests for this user (the original failed close
+    // tweet OR the fallback to thesis post id) before registering the new one.
+    await store.clearPayoutRequestsForUser(pos.authorXId);
+    await store.addPayoutRequest({
+      requestTweetId: replyId,
+      xUserId: pos.authorXId,
+      handle: pos.authorHandle,
+      threadPostId: pos.postId,
+      requestedAt: new Date().toISOString(),
+    });
+    log.info(
+      `admin: repost-close — payout request rebound for ${pos.authorHandle} ` +
+        `(${escrow?.amountEth.toFixed(4)} ETH escrow) → tweet ${replyId}`,
+    );
+  }
+
+  return sendJson(res, 200, {
+    ok: true,
+    positionId,
+    replyId,
+    escrow: isEscrowed && escrow
+      ? { handle: pos.authorHandle, amountEth: escrow.amountEth, requestRegistered: true }
+      : null,
   });
 }
 

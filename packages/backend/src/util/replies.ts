@@ -217,7 +217,12 @@ export function payoutRequestText(o: { handle: string; amountEth: number }): str
   ].join("\n");
 }
 
-/** The reply confirming an author payout was sent on-chain. */
+/** The reply confirming an author payout was sent on-chain. The recipient
+ *  wallet used to be inline here for verifiability, but X (Twitter) blocks
+ *  tweets containing wallet addresses for ~7 days after a new app auth —
+ *  it was killing every close announcement with a 403. The BaseScan tx link
+ *  below already shows the recipient address on-chain, so transparency is
+ *  preserved without the inline 0x string that triggers the filter. */
 export function payoutSentText(o: {
   handle: string;
   amountEth: number;
@@ -225,7 +230,7 @@ export function payoutSentText(o: {
   txHash: string;
 }): string {
   return [
-    `${o.handle} — author share paid: ${o.amountEth.toFixed(4)} ETH sent to ${o.wallet}.`,
+    `${o.handle} — author share paid: ${o.amountEth.toFixed(4)} ETH delivered on-chain.`,
     "Thanks for the thesis. Tag the committee again any time.",
     bscTx(o.txHash),
   ].join("\n");
