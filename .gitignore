@@ -55,3 +55,6 @@ AUDIT-FINDINGS.md
 .claude/
 CLAUDE.md
 AGENTS.md
+specs/
+docs/plans/
+docs/logs/
