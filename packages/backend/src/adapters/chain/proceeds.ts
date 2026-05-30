@@ -45,7 +45,7 @@ export interface SwapProceeds {
  * that lock, so an operator firing one DURING a monitor sell could land an ETH
  * credit between the two reads and inflate the measured proceeds. Low-
  * probability + operator-gated; closing it (bringing admin spends under the
- * lock) is part of the deferred monitor-lock rework (Codex #1). A concurrent
+ * lock) is part of the deferred monitor-lock rework. A concurrent
  * EXTERNAL transfer into the wallet has the same effect but is negligible given
  * the ~1-block window. Either way this still strictly improves on the old quote
  * (which overstated by slippage on EVERY sell).
