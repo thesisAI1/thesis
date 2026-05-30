@@ -7,46 +7,24 @@
 import Link from "next/link";
 import { Reveal } from "./Reveal";
 import { CountUp } from "./CountUp";
-import { DrawSvg } from "./DrawSvg";
-import styles from "./home.module.css";
+import { HeroVideo } from "./HeroVideo";
 
 export function Hero() {
   return (
-    <section className="relative overflow-hidden">
-      <DrawSvg className={styles.theta} ariaHidden>
-        <svg viewBox="0 0 400 400" fill="none">
-          <ellipse cx="200" cy="200" rx="118" ry="160" stroke="var(--border)" strokeWidth="1.5" />
-          <ellipse
-            cx="200"
-            cy="200"
-            rx="92"
-            ry="128"
-            stroke="var(--accent)"
-            strokeWidth="2.5"
-            data-draw
-          />
-          <rect
-            x="118"
-            y="188"
-            width="164"
-            height="22"
-            rx="11"
-            fill="none"
-            stroke="var(--accent)"
-            strokeWidth="2.5"
-          />
-          <line x1="200" y1="40" x2="200" y2="360" stroke="var(--border)" strokeWidth="1" />
-          <line x1="40" y1="200" x2="360" y2="200" stroke="var(--border)" strokeWidth="1" />
-          <circle cx="200" cy="200" r="178" stroke="var(--border)" strokeWidth="1" />
-          <circle cx="111" cy="46" r="5" fill="var(--blue)" />
-          <circle cx="289" cy="46" r="5" fill="var(--accent)" />
-          <circle cx="378" cy="200" r="5" fill="var(--purple)" />
-          <circle cx="289" cy="354" r="5" fill="var(--green)" />
-          <circle cx="111" cy="354" r="5" fill="var(--red)" />
-        </svg>
-      </DrawSvg>
+    <section className="relative isolate overflow-hidden">
+      {/* Video stage: a 16:9 block on mobile (the whole theta scene stays visible),
+          a full-bleed background on desktop (the headline overlays it). */}
+      <div className="relative aspect-[16/9] w-full md:absolute md:inset-0 md:aspect-auto md:h-full">
+        <HeroVideo />
+        {/* Orbit anchor for OrbField — the point the five faculty orbs circle. */}
+        <span
+          data-orb-anchor="theta"
+          className="pointer-events-none absolute left-[67%] top-[47%] md:left-[55%] md:top-[45%]"
+          aria-hidden="true"
+        />
+      </div>
 
-      <div className="relative z-[2] mx-auto max-w-shell px-7 pb-[72px] pt-[88px]">
+      <div className="relative z-[2] mx-auto flex w-full max-w-shell flex-col justify-center px-7 pb-16 pt-10 md:min-h-[88vh] md:py-24">
         <Reveal>
           <span className="mb-[26px] inline-flex items-center gap-2 rounded-pill border border-[color-mix(in_srgb,var(--green)_28%,transparent)] bg-[color-mix(in_srgb,var(--green)_8%,transparent)] px-[13px] py-[6px]">
             <span

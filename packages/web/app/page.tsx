@@ -13,6 +13,7 @@ import { Footer } from "@/components/shell/Footer";
 import { getDashboard, ThesisApiError, type DashboardData } from "@/lib/api";
 import { VerdictTape } from "./_home/VerdictTape";
 import { Hero } from "./_home/Hero";
+import { OrbField } from "./_home/OrbField";
 import { Pipeline } from "./_home/Pipeline";
 import { FacultyRoom } from "./_home/FacultyRoom";
 import { Record } from "./_home/Record";
@@ -37,6 +38,7 @@ export default async function Home() {
   return (
     <>
       <TopBar variant="site" />
+      <OrbField />
       <VerdictTape />
       <main>
         <Hero />

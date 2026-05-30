@@ -1,0 +1,199 @@
+/* The Pipeline — alternating cards that unfurl out of the docking orbs.
+   Robustness: cards are fully visible by default (SSR / no-JS). They are only
+   "armed" (hidden, ready to unfurl) once OrbField adds [data-orbs-live] to the
+   section, and they reveal when OrbField sets data-active as each orb lands.
+   Armed clips are gated behind :not([data-active]) so the reveal ALWAYS wins,
+   on every breakpoint (no source-order specificity fights). */
+
+.wrap {
+  position: relative;
+  margin-top: 8px;
+}
+
+/* faint central spine the orbs travel down */
+.spine {
+  position: absolute;
+  top: 86px;
+  bottom: 30px;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-0.5px);
+  background: linear-gradient(180deg, transparent, var(--border) 6%, var(--border) 94%, transparent);
+  pointer-events: none;
+}
+
+.entry {
+  --c: var(--accent);
+  position: relative;
+  border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
+  border-radius: var(--r-lg);
+  background:
+    radial-gradient(130% 160% at 0% 0%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 58%),
+    linear-gradient(180deg, #14192400, #0e1219);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 12%, transparent),
+    0 18px 50px -30px color-mix(in srgb, var(--accent) 70%, transparent);
+  padding: 22px 24px;
+  margin-bottom: 6px;
+}
+.entryTag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 1.6px;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.row {
+  position: relative;
+  display: flex;
+  padding: 6px 0;
+}
+.row + .row {
+  margin-top: -46px; /* interleave the alternating cards into a tight zigzag */
+}
+.left {
+  justify-content: flex-start;
+}
+.right {
+  justify-content: flex-end;
+}
+
+.card {
+  --c: var(--accent);
+  position: relative;
+  width: 48%;
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, #131825, #0e1219);
+  padding: 18px 20px;
+}
+
+/* dock node(s) — sit just INSIDE the card's inner edge so the orb lands on it */
+.nodes {
+  position: absolute;
+  top: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  z-index: 2;
+}
+.left .nodes {
+  right: 16px;
+}
+.right .nodes {
+  left: 16px;
+}
+.node {
+  --c: var(--accent);
+  position: relative;
+  display: block;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--c) 45%, transparent);
+  background: color-mix(in srgb, var(--c) 14%, var(--panel-2));
+  transition: box-shadow 0.45s ease, background 0.45s ease;
+}
+
+/* ---- armed + reveal (only when OrbField is live) ---------------------- */
+[data-orbs-live] .card {
+  opacity: 0;
+  transform: scale(0.965);
+  transition: opacity 0.5s ease, clip-path 0.7s cubic-bezier(0.2, 0.9, 0.3, 1),
+    transform 0.6s cubic-bezier(0.2, 0.9, 0.3, 1), border-color 0.5s ease, box-shadow 0.5s ease;
+  will-change: clip-path, opacity, transform;
+}
+[data-orbs-live] .left .card {
+  transform-origin: right center;
+}
+[data-orbs-live] .right .card {
+  transform-origin: left center;
+}
+[data-orbs-live] .left .card:not([data-active="true"]) {
+  clip-path: inset(0 0 0 100%);
+}
+[data-orbs-live] .right .card:not([data-active="true"]) {
+  clip-path: inset(0 100% 0 0);
+}
+[data-orbs-live] .card[data-active="true"] {
+  opacity: 1;
+  transform: scale(1);
+  clip-path: inset(0 0 0 0);
+  border-color: color-mix(in srgb, var(--c) 42%, var(--border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--c) 18%, transparent),
+    0 16px 44px -26px color-mix(in srgb, var(--c) 85%, transparent);
+}
+[data-orbs-live] .card[data-active="true"] .node {
+  background: var(--c);
+  box-shadow: 0 0 16px 3px color-mix(in srgb, var(--c) 55%, transparent);
+}
+
+/* landing pulse — an expanding ring the moment the orb docks */
+.node::after {
+  content: "";
+  position: absolute;
+  inset: -3px;
+  border-radius: 999px;
+  border: 1px solid var(--c);
+  opacity: 0;
+  pointer-events: none;
+}
+[data-orbs-live] .card[data-active="true"] .node::after {
+  animation: orbland 0.7s ease-out;
+}
+@keyframes orbland {
+  0% {
+    opacity: 0.75;
+    transform: scale(0.7);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.8);
+  }
+}
+
+/* ---- mobile: single column, rail + nodes on the left --------------- */
+@media (max-width: 767px) {
+  .spine {
+    left: 19px;
+  }
+  .row {
+    padding: 8px 0;
+  }
+  .row + .row {
+    margin-top: 0; /* no interleave when stacked single-column */
+  }
+  .left,
+  .right {
+    justify-content: flex-start;
+    padding-left: 46px;
+  }
+  .card {
+    width: 100%;
+  }
+  .left .nodes,
+  .right .nodes {
+    left: 12px;
+    right: auto;
+  }
+  [data-orbs-live] .left .card,
+  [data-orbs-live] .right .card {
+    transform-origin: left center;
+  }
+  [data-orbs-live] .left .card:not([data-active="true"]),
+  [data-orbs-live] .right .card:not([data-active="true"]) {
+    clip-path: inset(0 100% 0 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-orbs-live] .card {
+    opacity: 1 !important;
+    clip-path: none !important;
+    transform: none !important;
+    transition: none !important;
+  }
+  [data-orbs-live] .node::after {
+    animation: none !important;
+  }
+}
