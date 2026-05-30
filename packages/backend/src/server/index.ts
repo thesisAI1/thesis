@@ -167,7 +167,10 @@ export function startServer(): void {
   });
 }
 
-async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+// Exported as a test seam: admin-route-wiring.test.ts drives this router with
+// stub req/res to assert every /admin/* path is gated by checkAdmin. No
+// behaviour change — startServer() still calls it exactly as before.
+export async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", config.server.publicBaseUrl);
   const path = url.pathname;
 
@@ -459,6 +462,21 @@ async function adminRebuyPosition(req: IncomingMessage, res: ServerResponse): Pr
   const positions = await store.getAllPositions();
   const pos = positions.find((p) => p.id === positionId);
   if (!pos) return sendJson(res, 404, { ok: false, error: "position not found" });
+
+  // L8 (admin path): preserve the "at most one open position per contract"
+  // invariant that runBursar enforces. Re-opening this position must not
+  // collide with another already-open one, and re-buying an ALREADY-open
+  // position would double-spend + wipe its live tracking state. Reject either.
+  const contract = pos.order.contractAddress.toLowerCase();
+  const conflict = positions.find(
+    (p) => p.status === "open" && p.order.contractAddress.toLowerCase() === contract,
+  );
+  if (conflict) {
+    return sendJson(res, 409, {
+      ok: false,
+      error: `an open position (${conflict.id}) already holds this contract`,
+    });
+  }
 
   const amountInEth = pos.order.amountInEth;
   const oldEntryPriceEth = pos.entryPriceEth;
