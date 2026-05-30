@@ -127,6 +127,25 @@ export const config = {
     enabled: str("CHATBOT_ENABLED", "true") !== "false",
   },
 
+  telegram: {
+    botToken: str("TELEGRAM_BOT_TOKEN"),
+    /** Set TELEGRAM_ENABLED=false to disable the bot entirely. */
+    enabled: str("TELEGRAM_ENABLED", "true") !== "false",
+    /** Comma-separated list of Telegram chat IDs allowed to interact. */
+    allowedChats: str("TELEGRAM_ALLOWED_CHATS")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+    pollIntervalSec: num("TELEGRAM_POLL_INTERVAL_SEC", 30),
+  },
+
+  observability: {
+    /** Seconds before heartbeat is considered stale. 0 = auto-derive from poll interval. */
+    heartbeatStaleSec: num("HEARTBEAT_STALE_SEC", 0),
+    /** How many recent events to keep in memory. */
+    recentBufferSize: num("OBS_RECENT_BUFFER_SIZE", 200),
+  },
+
   service: {
     /** How often to poll X for new mentions (seconds). */
     pollIntervalSec: num("POLL_INTERVAL_SEC", 300),
