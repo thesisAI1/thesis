@@ -18,6 +18,7 @@ import type {
 } from "@thesis/shared";
 import { config } from "../config.js";
 import { evaluateBuyGate } from "../domain/gate.js";
+import { log } from "../util/log.js";
 import { untrustedBlock, UNTRUSTED_INSTRUCTION } from "../util/untrusted.js";
 
 export async function runDean(
@@ -45,11 +46,14 @@ export async function runDean(
     `Weighing the Registrar (${authorReport.score}) against the Auditor (${tokenReport.score})`,
   );
 
+  const hadKey = Boolean(config.llm.anthropicKey);
   const llm = await llmVerdict(submission, authorReport, tokenReport);
   reasoning.push(
     llm
       ? "Consulted the LLM for a judgement call on the thesis itself"
-      : "Scored against the rule book (no LLM key set)",
+      : hadKey
+        ? "LLM call failed (OUTAGE) — scored against the rule book as fallback"
+        : "Scored against the rule book (no LLM key set)",
   );
 
   const grade = llm ? llm.grade : toGrade(combined);
@@ -186,11 +190,21 @@ async function llmVerdict(
         messages: [{ role: "user", content: prompt }],
       }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      log.warn(
+        `dean: LLM call FAILED (HTTP ${res.status}) — OUTAGE, falling back to rule-based grade`,
+      );
+      return null;
+    }
     const json = (await res.json()) as { content?: Array<{ text?: string }> };
     const text = json.content?.[0]?.text ?? "";
     const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return null;
+    if (!match) {
+      log.warn(
+        "dean: LLM response could not be parsed — OUTAGE, falling back to rule-based grade",
+      );
+      return null;
+    }
     const parsed = JSON.parse(match[0]) as {
       grade?: string;
       confidence?: number;
@@ -201,7 +215,10 @@ async function llmVerdict(
       confidence: clamp01(Number(parsed.confidence ?? 0.5)),
       rationale: String(parsed.rationale ?? "LLM verdict."),
     };
-  } catch {
+  } catch (err) {
+    log.warn(
+      `dean: LLM call threw — OUTAGE (${String(err)}), falling back to rule-based grade`,
+    );
     return null;
   }
 }

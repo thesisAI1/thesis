@@ -45,7 +45,17 @@ async function monitorTickInner(): Promise<void> {
   // legs already done — so a retry pays each leg exactly once, never twice.
   // Runs every tick, even when nothing is currently open.
   for (const stranded of await store.getUnsettledClosedPositions()) {
-    await settle(stranded, { resume: true });
+    // Per-item isolation: a throw here (e.g. a corrupt position, a store write
+    // error, or saveDistribution/publish failing) must NOT abort the whole tick
+    // before the live TP/SL sweep below — otherwise one stuck position would
+    // silently starve stop-loss monitoring for EVERY other open position.
+    try {
+      await settle(stranded, { resume: true });
+    } catch (err) {
+      log.error(
+        `monitor: resume-settle threw for ${stranded.id} — skipping it this tick: ${String(err)}`,
+      );
+    }
   }
 
   const open = await store.getOpenPositions();

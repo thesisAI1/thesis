@@ -104,10 +104,38 @@ let _snapshotFetchedAt = 0;
 let _excludesCache: Set<string> = new Set();
 let _excludesFetchedAt = 0;
 
+/** How many TTL multiples old a snapshot can be before we refuse to use it.
+ *  At the default 60-min TTL this is 6 hours. Past that, paying a frozen,
+ *  possibly-stale holder set is worse than rolling the lottery slice into
+ *  the buyback (the no-eligibles path). */
+const STALE_TTL_MULTIPLE = 6;
+
+/**
+ * Pure helper — returns true iff the snapshot is fresh enough to be used.
+ *
+ * Returns false when:
+ *   - cacheLength === 0 (nothing to serve)
+ *   - (nowMs - fetchedAtMs) > ttlMs * STALE_TTL_MULTIPLE  (ceiling exceeded)
+ *
+ * Exported so it can be unit-tested without touching module state.
+ */
+export function isSnapshotWithinStaleCeiling(
+  cacheLength: number,
+  fetchedAtMs: number,
+  nowMs: number,
+  ttlMs: number,
+): boolean {
+  if (cacheLength === 0) return false;
+  return nowMs - fetchedAtMs <= ttlMs * STALE_TTL_MULTIPLE;
+}
+
 /**
  * Fetch the current list of eligible holders. Returns a cached snapshot
  * unless the TTL has elapsed. On failure to refresh, the previous snapshot
- * is reused so a transient Birdeye outage doesn't disable the lottery.
+ * is reused so a transient Birdeye outage doesn't disable the lottery —
+ * but only up to the staleness ceiling (STALE_TTL_MULTIPLE × TTL).
+ * Past the ceiling, we return [] so the Endowment folds the lottery slice
+ * into the buyback rather than paying a frozen, possibly-wrong holder set.
  */
 export async function getEligibleHolders(): Promise<EligibleHolder[]> {
   const ttlMs = config.holderLottery.snapshotTtlMin * 60 * 1000;
@@ -124,6 +152,15 @@ export async function getEligibleHolders(): Promise<EligibleHolder[]> {
     log.warn(
       `holders: snapshot refresh failed (${String(err)}) — reusing previous (${_snapshotCache.length} eligibles)`,
     );
+  }
+  // Staleness ceiling: refuse to serve data that's too old. The Endowment
+  // treats an empty return as "no eligibles" and rolls the lottery ETH into
+  // the buyback instead of paying a potentially-stale holder set.
+  if (!isSnapshotWithinStaleCeiling(_snapshotCache.length, _snapshotFetchedAt, Date.now(), ttlMs)) {
+    log.error(
+      `holders: cached snapshot is too stale (>${STALE_TTL_MULTIPLE}× TTL) — returning [] to avoid paying stale holders`,
+    );
+    return [];
   }
   return _snapshotCache;
 }
