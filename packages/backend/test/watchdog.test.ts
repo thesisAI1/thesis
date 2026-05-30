@@ -1,12 +1,8 @@
 /**
- * RED tests for S8 — watchdog with literal HEARTBEAT_STALE_SEC threshold.
- * Env must be set BEFORE import (config reads at module load).
- * markTick(atMs?) / checkLiveness(nowMs?) accept optional timestamps for deterministic testing.
- * Module does not exist yet → RED.
+ * Tests for S8 — watchdog with a literal stale threshold.
+ * Threshold + poll interval are injected as params, so these are deterministic
+ * and decoupled from the config singleton: checkLiveness(nowMs, staleSec, pollSec).
  */
-
-// Set a small literal threshold so tests don't have to wait real time.
-process.env.HEARTBEAT_STALE_SEC = "2";
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
@@ -20,8 +16,8 @@ describe("watchdog — literal threshold (HEARTBEAT_STALE_SEC=2)", () => {
     const unsub = subscribeOps((e) => received.push(e));
 
     markTick(1000);
-    // 2500 - 1000 = 1500ms = 1.5s < 2s threshold → no event
-    checkLiveness(2500);
+    // 2500 - 1000 = 1.5s < 2s threshold → no event
+    checkLiveness(2500, 2);
 
     unsub();
     const staleEvents = (received as Array<Record<string, unknown>>).filter(
@@ -35,8 +31,8 @@ describe("watchdog — literal threshold (HEARTBEAT_STALE_SEC=2)", () => {
     const unsub = subscribeOps((e) => received.push(e));
 
     markTick(1000);
-    // 4000 - 1000 = 3000ms = 3s > 2s threshold → should fire
-    checkLiveness(4000);
+    // 4000 - 1000 = 3s > 2s threshold → should fire
+    checkLiveness(4000, 2);
 
     unsub();
     const staleEvents = (received as Array<Record<string, unknown>>).filter(
