@@ -41,6 +41,21 @@ export interface PayoutRequest {
   requestedAt: string;
 }
 
+/**
+ * A write-ahead marker for a buy that has been (or is about to be) executed
+ * on-chain but whose Position may not yet be persisted. Recorded BEFORE the
+ * on-chain buy and cleared once the Position is saved (or the buy reverts). A
+ * marker left behind on startup means a buy MAY have executed without a saved
+ * position — the bot would never monitor those tokens (silent loss), so the
+ * service logs it loudly for manual reconciliation.
+ */
+export interface PendingBuy {
+  postId: string;
+  contractAddress: string;
+  amountInEth: number;
+  at: string;
+}
+
 /** A submission waiting in the review queue, with its triage priority. */
 export interface QueueItem {
   submission: Submission;
@@ -73,6 +88,15 @@ export interface Store {
    *  (no `settledAt`). The monitor retries these every tick until they settle. */
   getUnsettledClosedPositions(): Promise<Position[]>;
 
+  /** Write-ahead a buy intent BEFORE the on-chain buy, so a crash before the
+   *  Position is persisted is recoverable rather than a silent loss. */
+  recordPendingBuy(buy: PendingBuy): Promise<void>;
+  /** Open pending-buy markers. A non-empty list on startup means a buy may have
+   *  executed without a saved position — needs manual reconciliation. */
+  getPendingBuys(): Promise<PendingBuy[]>;
+  /** Clear a post's pending marker once its Position is saved (or buy reverted). */
+  clearPendingBuy(postId: string): Promise<void>;
+
   /** Record that a buy happened at `isoAt` (for the rate limit). */
   recordBuy(isoAt: string): Promise<void>;
   /** How many buys happened at or after `isoSince`. */
@@ -85,6 +109,10 @@ export interface Store {
   getEscrow(xUserId: string): Promise<EscrowEntry | null>;
   /** Clear an author's escrow (e.g. after it has been paid out). */
   clearEscrow(xUserId: string): Promise<void>;
+  /** Atomically clear an author's escrow AND all their open payout requests in
+   *  a single persist — used after a completed wallet payout so no half-cleared
+   *  state can be re-processed by a later poll. */
+  clearPayout(xUserId: string): Promise<void>;
 
   /** Record a posted "reply with your wallet" request, keyed by its tweet id. */
   addPayoutRequest(req: PayoutRequest): Promise<void>;
