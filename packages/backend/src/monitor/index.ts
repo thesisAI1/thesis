@@ -25,10 +25,11 @@ import { fetchAvatarAsDataUri, rasterise } from "../cards/render.js";
 import { recordActivity } from "../activity.js";
 import { publish } from "../events.js";
 import { settlePosition } from "../pipeline/index.js";
+import { publishOps } from "../observability/opsBus.js";
 import { tokensForCost } from "../domain/sizing.js";
 import { getStore } from "../store/index.js";
 import { withLock } from "../store/lock.js";
-import { log } from "../util/log.js";
+import { log, logEvent } from "../util/log.js";
 import { nativeGlyph } from "../util/chains.js";
 import { exitReplyText, payoutRequestText, payoutSentText } from "../util/replies.js";
 
@@ -100,6 +101,7 @@ async function monitorTickInner(): Promise<void> {
         const msg = `monitor: ${chain} batch price fetch failed (${streak} consecutive) — no TP/SL for [${ids}] this tick: ${String(err)}`;
         if (streak >= 3) log.error(msg);
         else log.warn(msg);
+        logEvent({ level: streak >= 3 ? "error" : "warn", area: "monitor", type: "price-fetch:failed", msg });
       }
     }),
   );
@@ -212,6 +214,7 @@ async function takeTier(pos: Position): Promise<boolean> {
     // will retry, by which time the underlying issue may have cleared (balance
     // settled, anti-MEV cooldown elapsed, slippage room opened up, etc.).
     log.warn(`monitor: ${pos.id} TP${tierNum} sell reverted — will retry next tick: ${String(err)}`);
+    logEvent({ level: "warn", area: "monitor", type: "sell-revert:failed", msg: `monitor: ${pos.id} TP${tierNum} sell reverted — will retry next tick: ${String(err)}` });
     return false;
   }
 
@@ -236,6 +239,7 @@ async function takeTier(pos: Position): Promise<boolean> {
     positionId: pos.id,
     amountEth: sale.profit,
   });
+  publishOps({ type: "trade:sell", at: new Date().toISOString(), positionId: pos.id, tier: tierNum, proceedsEth: sale.proceeds, profitEth: sale.profit });
 
   // Final tier closes the position. Mark + persist + settle BEFORE the reply
   // so the author-payment + holder-lottery lines can be folded into the
@@ -246,6 +250,7 @@ async function takeTier(pos: Position): Promise<boolean> {
     pos.closedAt = new Date().toISOString();
     await getStore().savePosition(pos);
     log.info(`monitor: ${pos.id} fully closed — all take-profit tiers cleared`);
+    publishOps({ type: "position:close", at: new Date().toISOString(), positionId: pos.id, netPnlEth: pos.realisedPnlEth, reason: "tp" });
     settled = await settle(pos);
   }
 
@@ -313,11 +318,13 @@ async function closeOutWithKind(
     if (kind === "manual") {
       // Surface to the author-actions caller so it can post a "try again" reply.
       log.warn(`monitor: ${pos.id} manual-close sell reverted: ${String(err)}`);
+      logEvent({ level: "warn", area: "monitor", type: "manual-close-revert:failed", msg: `monitor: ${pos.id} manual-close sell reverted: ${String(err)}` });
       throw err;
     }
     // Automatic SL / aging — same logic as takeTier: do NOT mark closed,
     // do NOT credit PnL, do NOT settle. Retry on the next monitor tick.
     log.warn(`monitor: ${pos.id} ${kind} sell reverted — will retry next tick: ${String(err)}`);
+    logEvent({ level: "warn", area: "monitor", type: "auto-close-revert:failed", msg: `monitor: ${pos.id} ${kind} sell reverted — will retry next tick: ${String(err)}` });
     return;
   }
 
@@ -349,6 +356,7 @@ async function closeOutWithKind(
     positionId: pos.id,
     amountEth: total,
   });
+  publishOps({ type: "position:close", at: new Date().toISOString(), positionId: pos.id, netPnlEth: total, reason: kind });
   // Settle first so we know how the author was paid (direct vs escrow vs
   // failed) AND who won the holder lottery — this gets folded into the
   // close-announcement tweet so the whole story lands as ONE reply.
@@ -491,6 +499,7 @@ async function settle(
       toBuybackEth: result.distribution.toBuybackEth,
       authorWallet: result.distribution.authorWallet,
     });
+    publishOps({ type: "settle:done", at: new Date().toISOString(), positionId: result.distribution.positionId, toAuthorEth: result.distribution.toAuthorEth, totalProfitEth: result.distribution.totalProfitEth });
     p.distributionDone = true;
   }
   pos.settlement = p;
@@ -593,8 +602,10 @@ async function reply(
     log.info(
       `x: replied to ${pos.postId} (${o.kind}${mediaPng ? " + card" : ""}) — reply ${replyId}`,
     );
+    publishOps({ type: "tweet:posted", at: new Date().toISOString(), kind: "exit", replyId, postId: pos.postId });
   } catch (err) {
     log.warn(`x: exit reply failed for ${pos.postId}: ${String(err)}`);
+    logEvent({ level: "warn", area: "monitor", type: "exit-reply:failed", msg: `x: exit reply failed for ${pos.postId}: ${String(err)}` });
   }
 
   // If the author share is escrowed (no wallet on file), we MUST have a
