@@ -114,7 +114,11 @@ export interface ScheduledEvent {
  * publish, with mockup-matched timing. The Faculty Room replays these through
  * its reducer so the demo and the real stream share one code path.
  */
-export function demoEvents(review: DemoReview): ScheduledEvent[] {
+export function demoEvents(
+  review: DemoReview,
+  opts: { settle?: boolean } = {},
+): ScheduledEvent[] {
+  const settle = opts.settle ?? false;
   const out: ScheduledEvent[] = [];
   const STEP = 450;
 
@@ -177,8 +181,27 @@ export function demoEvents(review: DemoReview): ScheduledEvent[] {
   bursarLines.forEach((text, i) =>
     out.push({ at: 5600 + i * 460, event: { type: "agent:step", agent: "bursar", text } }),
   );
-  out.push({ at: buy ? 7700 : 7200, event: { type: "agent:done", agent: "bursar" } });
-  out.push({ at: buy ? 7900 : 7400, event: { type: "review:end" } });
+  const bursarDoneAt = buy ? 7700 : 7200;
+  out.push({ at: bursarDoneAt, event: { type: "agent:done", agent: "bursar" } });
+
+  // On a funded trade, optionally play the settlement beat — the Endowment
+  // splits a profitable close 25/25/25/25 and pays the author 25%. Opt-in: the
+  // homepage room leaves it off (a buy isn't a close); the office sim turns it
+  // on so the Endowment has its moment and the author visibly gets paid.
+  if (settle && buy) {
+    const settleAt = bursarDoneAt + 700;
+    out.push({
+      at: settleAt,
+      event: {
+        type: "endowment",
+        authorHandle: review.author,
+        toAuthorEth: Number(((review.size / 100) * 0.9).toFixed(4)),
+      },
+    });
+    out.push({ at: settleAt + 2000, event: { type: "review:end" } });
+  } else {
+    out.push({ at: buy ? 7900 : 7400, event: { type: "review:end" } });
+  }
 
   return out;
 }
