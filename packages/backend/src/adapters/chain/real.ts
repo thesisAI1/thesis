@@ -301,18 +301,42 @@ export class RealChain implements ChainAdapter {
     }
     // Wait for the buy tx to be MINED before reading balanceOf again — we
     // need post-buy state to compute the delta.
-    await this.publicClient.waitForTransactionReceipt({ hash: buy.txHash as Hex });
-    const balanceAfter = (await this.publicClient.readContract({
-      address: thesisAddress,
-      abi: ERC20_ABI,
-      functionName: "balanceOf",
-      args: [this.account.address],
-    })) as bigint;
+    //
+    // Use 2 confirmations (not the viem default of 1): Alchemy's read endpoint
+    // serves balanceOf from a pool of replicas, and a single-confirmation tx
+    // can be "official" on one replica while the next balanceOf hits a sibling
+    // that is one block behind. Two confirmations gives the cluster time to
+    // converge before we read.
+    await this.publicClient.waitForTransactionReceipt({
+      hash: buy.txHash as Hex,
+      confirmations: 2,
+    });
+
+    // Read balance with retries. Even with confirmations: 2 we see
+    // intermittent stale reads — especially when KyberSwap routes via
+    // uniswap-v4-doppler (Bankr) hooks, whose settlement performs extra
+    // internal calls that can leave individual RPC replicas momentarily
+    // out of sync. We retry up to 5 times with 2s spacing; in practice
+    // the second read almost always succeeds. Total worst-case extra
+    // wait ~10s — well worth it vs silently losing the burn (incident
+    // 2026-05-29/30: 8+ burns dropped because the first balance read
+    // came back stale and we threw "balance didn't grow" prematurely).
+    let balanceAfter = balanceBefore;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      balanceAfter = (await this.publicClient.readContract({
+        address: thesisAddress,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [this.account.address],
+      })) as bigint;
+      if (balanceAfter > balanceBefore) break;
+      if (attempt < 4) await new Promise((r) => setTimeout(r, 2_000));
+    }
 
     const bought = balanceAfter > balanceBefore ? balanceAfter - balanceBefore : 0n;
     if (bought === 0n) {
       throw new Error(
-        `chain: buyback tx ${buy.txHash} confirmed but $THESIS balance didn't grow — cannot burn`,
+        `chain: buyback tx ${buy.txHash} confirmed but $THESIS balance didn't grow after 5 retries — cannot burn`,
       );
     }
     // Defensive clamp: never burn more than the current wallet balance.
