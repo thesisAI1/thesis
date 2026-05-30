@@ -1,9 +1,18 @@
 import { config } from "../../config.js";
 import { subscribeOps, type OpsEvent } from "../../observability/opsBus.js";
 import { createTelegramAdapter, type TelegramAdapter } from "./index.js";
-import { truncAddr } from "./redact.js";
+import { redactText, truncAddr } from "./redact.js";
 
 export function formatOpsEvent(e: OpsEvent): string | null {
+  // Single redaction chokepoint: every line — including the free-text error /
+  // payout:failed / settle:failed branches, which can carry a full wallet or tx
+  // hash from a chain-adapter error string — is scrubbed before it can reach
+  // Telegram. truncAddr-shortened forms are already safe and pass through.
+  const line = formatRaw(e);
+  return line === null ? null : redactText(line);
+}
+
+function formatRaw(e: OpsEvent): string | null {
   switch (e.type) {
     case "error":
       return `🔴 [${e.area}] ${e.msg}`;
@@ -43,13 +52,18 @@ export function formatOpsEvent(e: OpsEvent): string | null {
 export function startNotifier(deps?: {
   adapter?: TelegramAdapter;
   allowedChats?: string[];
+  enabled?: boolean;
 }): () => void {
-  const adapter = deps?.adapter ?? createTelegramAdapter();
+  // Respect the TELEGRAM_ENABLED off-switch (the bot's startBot is already gated;
+  // the notifier must be too, or a disabled bot still pushes alerts in live mode).
+  const enabled = deps?.enabled ?? config.telegram.enabled;
   const allowedChats = deps?.allowedChats ?? config.telegram.allowedChats;
 
-  if (allowedChats.length === 0) {
+  if (!enabled || allowedChats.length === 0) {
     return () => {};
   }
+
+  const adapter = deps?.adapter ?? createTelegramAdapter();
 
   const unsubscribe = subscribeOps((e) => {
     const t = formatOpsEvent(e);
