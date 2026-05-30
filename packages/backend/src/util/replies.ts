@@ -137,7 +137,9 @@ export function classifySkipReason(reason: string): SkipKind | null {
   return null;
 }
 
-/** The reply posted on each exit — a take-profit tier or the stop-loss. */
+/** The reply posted on each exit — a take-profit tier, the stop-loss, or
+ *  the time-tightened "aging" close for un-tiered positions that never
+ *  proved momentum. */
 export function exitReplyText(
   o:
     | {
@@ -151,7 +153,8 @@ export function exitReplyText(
         txHash: string;
       }
     | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string }
-    | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string },
+    | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string }
+    | { kind: "aging"; netPnlEth: number; ageHours: number; thresholdPct: number; txHash: string },
 ): string {
   if (o.kind === "manual") {
     const sign = o.netPnlEth >= 0 ? "+" : "";
@@ -160,6 +163,17 @@ export function exitReplyText(
       `${o.tiersHit > 0 ? `${o.tiersHit} take-profit tier${o.tiersHit === 1 ? "" : "s"} banked profit before you called the close.` : "Position fully closed."}`,
       `Net result on the position: ${sign}${o.netPnlEth.toFixed(4)} ETH.`,
       "Author share + buyback + burn settled — see the card.",
+      bscTx(o.txHash),
+    ].join("\n");
+  }
+  if (o.kind === "aging") {
+    const sign = o.netPnlEth >= 0 ? "+" : "";
+    const days = o.ageHours >= 24 ? `${Math.floor(o.ageHours / 24)}d` : `${Math.round(o.ageHours)}h`;
+    return [
+      `Aging close — position open ${days} without hitting any take-profit tier.`,
+      `Our time-tightened stop kicked in at -${o.thresholdPct}% to free capital for the next read.`,
+      `Net result on the position: ${sign}${o.netPnlEth.toFixed(4)} ETH.`,
+      "Capital efficiency matters at this stage of the project — we cycle out stagnant bags to keep the agent funded for fresh opportunities.",
       bscTx(o.txHash),
     ].join("\n");
   }

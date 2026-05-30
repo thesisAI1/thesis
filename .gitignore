@@ -30,3 +30,5 @@ tmp/
 *.tar.gz
 *.tar
 SECURITY-AUDIT-*.md
+HANDOFF.md
+HANDOFF-*.md

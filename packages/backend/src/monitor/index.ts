@@ -65,7 +65,39 @@ function stopPrice(pos: Position): number {
   return pos.entryPriceEth * milestoneX * pos.order.stopLossX;
 }
 
+/** Aging stop-loss — applies ONLY to positions that have never hit a
+ *  take-profit tier. Progressively tightens as the position ages, so
+ *  stagnant un-tiered bags can't sit at -20% indefinitely tying up
+ *  capital. A position that proves momentum (TP1+) graduates out of
+ *  aging and is governed by the standard trailing stop only.
+ *
+ *  Schedule:
+ *    0-24h  →  no aging gate (standard trailing -30% applies)
+ *    24-48h →  close if price < entry × 0.80  (-20%)
+ *    48-72h →  close if price < entry × 0.90  (-10%)
+ *    72h+   →  close if price < entry × 0.95  (-5%)
+ *
+ *  Returns the threshold multiplier (e.g. 0.80) when aging applies,
+ *  or null when the position is outside the aging regime (too young,
+ *  or already proven via tiersHit >= 1). */
+function agingThreshold(pos: Position): number | null {
+  if (pos.tiersHit > 0) return null;
+  const ageMs = Date.now() - new Date(pos.openedAt).getTime();
+  const ageHours = ageMs / 3_600_000;
+  if (ageHours >= 72) return 0.95;
+  if (ageHours >= 48) return 0.90;
+  if (ageHours >= 24) return 0.80;
+  return null;
+}
+
 async function processPosition(pos: Position, price: number): Promise<void> {
+  // Aging stop-loss takes priority over both standard SL and TP — but
+  // is only ever a tightening, so a healthy position never trips it.
+  const aging = agingThreshold(pos);
+  if (aging !== null && price < pos.entryPriceEth * aging) {
+    await ageOut(pos, price);
+    return;
+  }
   // Trailing stop-loss takes priority — sell the whole remainder and close.
   if (price <= stopPrice(pos)) {
     await stopOut(pos);
@@ -159,6 +191,14 @@ async function stopOut(pos: Position): Promise<void> {
   await closeOutWithKind(pos, stopPrice(pos), "sl");
 }
 
+/** Aging close: position never hit a TP and now trips a time-tightened
+ *  threshold (see agingThreshold). Same close pipeline as stopOut, just
+ *  a distinct kind so the reply text can explain the real reason
+ *  (age-based, not -30% trailing). */
+async function ageOut(pos: Position, currentPrice: number): Promise<void> {
+  await closeOutWithKind(pos, currentPrice, "aging");
+}
+
 /**
  * Close the remaining position at a given price and run the full
  * close pipeline: on-chain sell → save closed state → settle splits →
@@ -172,7 +212,7 @@ async function stopOut(pos: Position): Promise<void> {
 async function closeOutWithKind(
   pos: Position,
   exitPrice: number,
-  kind: "sl" | "manual",
+  kind: "sl" | "manual" | "aging",
 ): Promise<void> {
   const cost = pos.order.amountInEth * pos.remainingFraction;
 
@@ -181,8 +221,8 @@ async function closeOutWithKind(
   // exclusion baked into the chain adapter. Total worst-case wait ≈90s,
   // comfortably within the author's expectation of "it's working on it"
   // and well below the next manual-close cooldown (60s anti-spam).
-  // SL stays single-attempt so a falling price doesn't sit in retry-land
-  // while losing more value — the next monitor tick will pick it up.
+  // SL and aging stay single-attempt — they're automatic, no human
+  // waiting, and a stale dust position doesn't need patient retries.
   const sellOpts =
     kind === "manual" ? { maxAttempts: 3, delayBetweenMs: 30_000 } : undefined;
   let sale: { proceeds: number; profit: number; txHash: string };
@@ -194,9 +234,9 @@ async function closeOutWithKind(
       log.warn(`monitor: ${pos.id} manual-close sell reverted: ${String(err)}`);
       throw err;
     }
-    // Automatic SL — same logic as takeTier: do NOT mark closed, do NOT
-    // credit PnL, do NOT settle. Retry on the next monitor tick.
-    log.warn(`monitor: ${pos.id} stop-out sell reverted — will retry next tick: ${String(err)}`);
+    // Automatic SL / aging — same logic as takeTier: do NOT mark closed,
+    // do NOT credit PnL, do NOT settle. Retry on the next monitor tick.
+    log.warn(`monitor: ${pos.id} ${kind} sell reverted — will retry next tick: ${String(err)}`);
     return;
   }
 
@@ -209,14 +249,36 @@ async function closeOutWithKind(
   await getStore().savePosition(pos);
 
   const total = pos.realisedPnlEth;
+  const kindLabel =
+    kind === "manual"
+      ? "manually closed by author"
+      : kind === "aging"
+        ? "aged out (un-tiered, time-tightened SL)"
+        : "stopped out";
   log.info(
-    `monitor: ${pos.id} ${kind === "manual" ? "manually closed by author" : "stopped out"} — ` +
-      `net result ${total >= 0 ? "+" : ""}${total.toFixed(4)} ETH`,
+    `monitor: ${pos.id} ${kindLabel} — net result ${total >= 0 ? "+" : ""}${total.toFixed(4)} ETH`,
   );
   // Settle first so we know how the author was paid (direct vs escrow vs
   // failed) AND who won the holder lottery — this gets folded into the
   // close-announcement tweet so the whole story lands as ONE reply.
   const settled = await settle(pos);
+  // Aging closes carry the age + threshold so the reply text can explain
+  // exactly why the position was cut (not "stop-loss triggered" — that
+  // would misrepresent it. The trailing -30% didn't fire; the time-tightened
+  // gate did, because the position never proved momentum).
+  if (kind === "aging") {
+    const ageHours =
+      (Date.now() - new Date(pos.openedAt).getTime()) / 3_600_000;
+    const aging = agingThreshold(pos) ?? 0.95;
+    const thresholdPct = Math.round((1 - aging) * 100);
+    await reply(
+      pos,
+      { kind, netPnlEth: total, ageHours, thresholdPct, txHash: sale.txHash },
+      settled?.authorPayment ?? null,
+      settled?.lotteryPayment ?? null,
+    );
+    return;
+  }
   await reply(
     pos,
     { kind, netPnlEth: total, tiersHit: pos.tiersHit, txHash: sale.txHash },
@@ -335,7 +397,8 @@ async function reply(
         txHash: string;
       }
     | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string }
-    | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string },
+    | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string }
+    | { kind: "aging"; netPnlEth: number; ageHours: number; thresholdPct: number; txHash: string },
   authorPayment: AuthorPaymentInfo | null = null,
   lotteryPayment: LotteryPaymentInfo | null = null,
 ): Promise<void> {
@@ -347,7 +410,8 @@ async function reply(
   // mustn't post a card claiming "shared / earned / burned" when none of that
   // has happened. Gate the card to fire exactly when settle() does.
   // Manual closes are always validated as profitable by the caller, so they
-  // always get a card.
+  // always get a card. Aging closes are always at a loss (the gate only fires
+  // sub-entry), so no card.
   const fullyClosed =
     (o.kind === "tp" && o.final && pos.realisedPnlEth > 0) ||
     (o.kind === "sl" && pos.realisedPnlEth > 0) ||
@@ -444,7 +508,8 @@ function buildClosingText(
         txHash: string;
       }
     | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string }
-    | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string },
+    | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string }
+    | { kind: "aging"; netPnlEth: number; ageHours: number; thresholdPct: number; txHash: string },
   authorPayment: AuthorPaymentInfo | null,
   lotteryPayment: LotteryPaymentInfo | null,
 ): string {
@@ -524,7 +589,8 @@ async function buildProfitCardPng(
         txHash: string;
       }
     | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string }
-    | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string },
+    | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string }
+    | { kind: "aging"; netPnlEth: number; ageHours: number; thresholdPct: number; txHash: string },
 ): Promise<Buffer> {
   const adapter = createBaseDataAdapter();
   const symbol = await adapter.getTokenSymbol(pos.order.contractAddress).catch(() => "");
@@ -573,8 +639,14 @@ async function buildProfitCardPng(
     exit = { kind: "tp", tier: o.tier, gainPct: o.gainPct, final: o.final };
   } else if (o.kind === "manual") {
     exit = { kind: "manual", tiersHit: o.tiersHit };
-  } else {
+  } else if (o.kind === "sl") {
     exit = { kind: "trail", tiersHit: o.tiersHit };
+  } else {
+    // Aging closes are always at a loss (the gate only fires sub-entry),
+    // so the card is never built for them — see fullyClosed in reply().
+    // This branch only exists to satisfy the type narrower; it should
+    // never actually execute in practice.
+    exit = { kind: "trail", tiersHit: 0 };
   }
 
   const data: ProfitCardData = {
