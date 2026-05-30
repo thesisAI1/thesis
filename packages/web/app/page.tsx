@@ -37,7 +37,7 @@ export default async function Home() {
 
   return (
     <>
-      <TopBar variant="site" />
+      <TopBar />
       <OrbField />
       <VerdictTape />
       <main>

@@ -9,7 +9,7 @@
  */
 import Link from "next/link";
 import type { Metadata } from "next";
-import { TopBar, type NavItem } from "@/components/shell/TopBar";
+import { TopBar } from "@/components/shell/TopBar";
 import { Footer } from "@/components/shell/Footer";
 import { Card } from "@/components/ui/Card";
 import { FacultyTable } from "./_components/FacultyTable";
@@ -24,13 +24,6 @@ export const metadata: Metadata = {
 
 const GITHUB_URL = "https://github.com/thesisAI1/thesis";
 const X_URL = "https://x.com/thesisonbase";
-
-/** Docs-mockup nav: Home · Dashboard ↗ · Docs (active) + Submit CTA. */
-const DOCS_NAV: NavItem[] = [
-  { label: "Home", href: "/" },
-  { label: "Dashboard ↗", href: "/dashboard" },
-  { label: "Docs", href: "/docs", tone: "active" },
-];
 
 const SECTIONS: NavSection[] = [
   { id: "what", label: "What is THESIS" },
@@ -86,7 +79,7 @@ const FAQ: { q: string; a: React.ReactNode }[] = [
 export default function DocsPage() {
   return (
     <>
-      <TopBar items={DOCS_NAV} cta={{ label: "Submit a thesis", href: "/#submit" }} />
+      <TopBar />
 
       <div className="mx-auto grid max-w-shell grid-cols-1 items-start gap-12 px-7 md:grid-cols-[212px_1fr]">
         <SectionNav sections={SECTIONS} />

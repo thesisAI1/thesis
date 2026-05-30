@@ -66,7 +66,7 @@ export default async function DashboardPage() {
 
   return (
     <>
-      <TopBar variant="dashboard" />
+      <TopBar />
       {dashboard ? (
         <main className="mx-auto max-w-shell px-6 pb-[90px]">
           <LiveDashboard
