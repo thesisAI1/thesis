@@ -42,6 +42,7 @@ ARCHITECTURE.md
 MERGE-GUIDE.md
 PR-REVIEW.md
 PR3-DESIGN.md
+AUDIT-FINDINGS.md
 
 # AI assistant local config / session state
 .claude/
