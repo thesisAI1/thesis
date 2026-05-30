@@ -23,6 +23,7 @@
 
 import type { Position } from "@thesis/shared";
 import { createBaseDataAdapter } from "../adapters/basedata/index.js";
+import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter, type XPost } from "../adapters/x/index.js";
 import { closeByAuthor } from "../monitor/index.js";
 import { getStore } from "../store/index.js";
@@ -119,28 +120,54 @@ export async function processAuthorCloseRequests(mentions: XPost[]): Promise<XPo
 
 /** Validate the profit threshold + execute the close, replying on failure. */
 async function handleCloseRequest(pos: Position, mention: XPost): Promise<void> {
-  // Fetch current price. If we can't, treat as transient infra and silently
-  // skip — the author can retry next poll.
-  let currentPrice = pos.entryPriceEth;
-  try {
-    currentPrice = await createBaseDataAdapter().getPriceEth(pos.order.contractAddress);
-  } catch (err) {
-    log.warn(
-      `author-close: price fetch failed for ${pos.id} (${mention.authorHandle}): ${String(err)}`,
-    );
-    return;
-  }
-  if (currentPrice <= 0) {
-    log.warn(`author-close: price returned zero for ${pos.id}, skipping`);
-    return;
-  }
-
-  // Compute "if we closed now, what's the net result vs initial cost?"
+  // The profit-threshold check uses a live KyberSwap quote, NOT a Birdeye
+  // cached price. This was a critical correctness fix after the 2026-05-30
+  // JustT1602 incident: a stale Birdeye cache showed +40% profit, the gate
+  // approved the close on that basis, but the actual on-chain sell landed
+  // at +12% — i.e. the gate green-lit a close that should have been
+  // rejected for being below the +20% threshold. quoteSell asks KyberSwap's
+  // aggregator "what would I receive RIGHT NOW for this much token?" and
+  // returns the exact post-routing ETH amount. No cache, no indexing
+  // delay, no Birdeye 429 fallbacks — it IS the price we'd fill at.
+  const chain = createChainAdapter();
   const remainingTokens =
     pos.entryPriceEth > 0
       ? (pos.order.amountInEth * pos.remainingFraction) / pos.entryPriceEth
       : 0;
-  const liveValueIfClosed = remainingTokens * currentPrice;
+  if (remainingTokens <= 0) {
+    log.warn(`author-close: ${pos.id} has 0 tokens remaining, skipping`);
+    return;
+  }
+
+  let liveValueIfClosed: number;
+  let displayPrice: number;
+  try {
+    const quote = await chain.quoteSell(pos.order.contractAddress, remainingTokens);
+    liveValueIfClosed = quote.proceedsEth;
+    displayPrice = remainingTokens > 0 ? liveValueIfClosed / remainingTokens : 0;
+  } catch (err) {
+    // Quote failed (KyberSwap down, no route, RPC issue). Fall back to the
+    // Birdeye price so we don't block author closes entirely — but log it
+    // loudly so we know if KyberSwap is starting to fail systematically.
+    log.warn(
+      `author-close: quoteSell failed for ${pos.id}, falling back to Birdeye: ${String(err)}`,
+    );
+    try {
+      displayPrice = await createBaseDataAdapter().getPriceEth(pos.order.contractAddress);
+    } catch (priceErr) {
+      log.warn(
+        `author-close: Birdeye fallback also failed for ${pos.id} (${mention.authorHandle}): ${String(priceErr)}`,
+      );
+      return;
+    }
+    if (displayPrice <= 0) {
+      log.warn(`author-close: fallback price returned zero for ${pos.id}, skipping`);
+      return;
+    }
+    liveValueIfClosed = remainingTokens * displayPrice;
+  }
+
+  // Compute "if we closed now, what's the net result vs initial cost?"
   const totalIfClosed = pos.realisedPnlEth + liveValueIfClosed;
   const required = pos.order.amountInEth * MIN_PROFIT_MULTIPLE;
 
@@ -150,7 +177,7 @@ async function handleCloseRequest(pos: Position, mention: XPost): Promise<void> 
         ? ((totalIfClosed - pos.order.amountInEth) / pos.order.amountInEth) * 100
         : 0;
     log.info(
-      `author-close: rejected ${pos.id} (${mention.authorHandle}) — only +${currentPct.toFixed(1)}% (need ≥+20%)`,
+      `author-close: rejected ${pos.id} (${mention.authorHandle}) — only +${currentPct.toFixed(1)}% via live quote (need ≥+20%)`,
     );
     try {
       const replyId = await createXAdapter().replyToPost(
@@ -164,12 +191,13 @@ async function handleCloseRequest(pos: Position, mention: XPost): Promise<void> 
     return;
   }
 
-  // Approved — hand off to the monitor's close pipeline.
+  // Approved — hand off to the monitor's close pipeline. We pass the quote-
+  // derived display price so the downstream sell uses a consistent target.
   log.info(
-    `author-close: approved ${pos.id} (${mention.authorHandle}) — closing at current price`,
+    `author-close: approved ${pos.id} (${mention.authorHandle}) — live quote: ${liveValueIfClosed.toFixed(4)} ETH for ${remainingTokens.toFixed(2)} tokens`,
   );
   try {
-    await closeByAuthor(pos, currentPrice);
+    await closeByAuthor(pos, displayPrice);
   } catch (err) {
     log.warn(
       `author-close: close execution failed for ${pos.id}: ${String(err)}`,

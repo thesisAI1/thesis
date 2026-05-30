@@ -268,6 +268,43 @@ export class RealChain implements ChainAdapter {
     return hash;
   }
 
+  /** Real-time on-chain quote without executing. Calls KyberSwap's /routes
+   *  endpoint with the same parameters a sell() would use, reads the
+   *  aggregator's returned amountOut, and converts it to ETH. The number
+   *  reflects the live LP state at the moment of the call — no caching
+   *  layer between us and the chain.
+   *
+   *  We apply the same 99.5% balance clamp as the default sell() so the
+   *  quote is what we'd *actually* fill at, accounting for transfer taxes
+   *  and the small safety margin we leave for Clanker/Bankr tokens. If
+   *  the balance read fails we fall back to the requested amount — still
+   *  more accurate than a Birdeye cached price, so the gate is not blocked
+   *  by a transient RPC blip. */
+  async quoteSell(
+    address: string,
+    amountTokens: number,
+  ): Promise<{ proceedsEth: number }> {
+    if (amountTokens <= 0) return { proceedsEth: 0 };
+    const requestedAmount = parseEther(amountTokens.toFixed(18));
+    let actualBalance: bigint;
+    try {
+      actualBalance = (await this.publicClient.readContract({
+        address: address as Address,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [this.account.address],
+      })) as bigint;
+    } catch {
+      actualBalance = requestedAmount;
+    }
+    const safeBalance = (actualBalance * 995n) / 1000n;
+    const amountIn = requestedAmount < safeBalance ? requestedAmount : safeBalance;
+    if (amountIn === 0n) return { proceedsEth: 0 };
+    const route = await this.fetchKyberRoute(address, ETH_SENTINEL, amountIn);
+    const proceedsEth = Number(formatEther(BigInt(route.routeSummary.amountOut)));
+    return { proceedsEth };
+  }
+
   async buybackAndBurn(amountInEth: number): Promise<{ txHash: string; tokensBurned: number }> {
     if (!config.chain.thesisToken) {
       throw new Error("THESIS_TOKEN_ADDRESS is not set — cannot run the buyback.");
