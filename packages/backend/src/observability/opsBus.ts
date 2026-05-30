@@ -5,7 +5,7 @@ import { EventEmitter } from "node:events";
 export type OpsEvent =
   | { type: "trade:buy"; at: string; positionId: string; handle: string; amountEth: number; contract: string }
   | { type: "trade:sell"; at: string; positionId: string; tier: number; proceedsEth: number; profitEth: number }
-  | { type: "position:close"; at: string; positionId: string; netPnlEth: number; reason: "tp" | "sl" | "manual" }
+  | { type: "position:close"; at: string; positionId: string; netPnlEth: number; reason: "tp" | "sl" | "manual" | "aging" }
   | { type: "payout:sent"; at: string; handle: string; amountEth: number; wallet: string; txHash: string }
   | { type: "payout:failed"; at: string; handle: string; amountEth: number; reason: string }
   | { type: "settle:done"; at: string; positionId: string; toAuthorEth: number; totalProfitEth: number }
