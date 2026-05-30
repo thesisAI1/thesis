@@ -55,7 +55,7 @@ export function Hero() {
         <Reveal delay={260}>
           <div className="flex flex-wrap gap-3">
             <Link
-              href="/#submit"
+              href="/pitch"
               className="inline-flex items-center gap-[9px] rounded-md border border-transparent bg-[linear-gradient(160deg,#f0b455,#e09a2e)] px-[22px] py-[13px] text-[14.5px] font-semibold text-[#1a1305] shadow-primary transition-transform hover:-translate-y-px"
             >
               Submit a thesis

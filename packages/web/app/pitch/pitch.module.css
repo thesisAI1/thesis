@@ -1,0 +1,79 @@
+/* ============================================================================
+   Pitch page — the two submission gates + the "tweet your thesis" CTA.
+   Recovered from the original static `pitch.html` (dropped when the redesign
+   replaced packages/website with this Next.js app) and rebuilt in the
+   Direction-B system; every colour/radius references tokens.css so it never
+   drifts. Page-specific styling only — shared surfaces (Card, Footer) come
+   from components.
+   ============================================================================ */
+
+/* Mono kicker above each gate title. Colour is set inline per gate so it can
+   echo the relevant Faculty member (Registrar = blue, Auditor = amber). */
+.kicker {
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+}
+
+.gateTitle {
+  margin: 9px 0 2px;
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--text);
+}
+
+/* A single requirement: the rule on top, the reasoning beneath. Rows are
+   divided by a hairline, with the first row flush to the title. */
+.rule {
+  padding: 13px 0;
+  border-top: 1px solid var(--border);
+}
+.rule:first-of-type {
+  border-top: none;
+  padding-top: 6px;
+}
+.ruleKey {
+  margin-bottom: 4px;
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--text);
+}
+.ruleWhy {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--muted);
+}
+
+/* Inline mono token — handles, keywords, the `0x...` placeholder. */
+.code {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+  background: var(--panel-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+/* The amber primary that opens X's composer with the thesis template loaded. */
+.tweetBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 24px;
+  border-radius: var(--r-md);
+  background: linear-gradient(160deg, #f0b455, #e09a2e);
+  color: #1a1305;
+  font-size: 14.5px;
+  font-weight: 600;
+  text-decoration: none;
+  box-shadow: var(--shadow-primary);
+  transition: transform var(--t-fast) var(--ease);
+}
+.tweetBtn:hover {
+  transform: translateY(-1px);
+}

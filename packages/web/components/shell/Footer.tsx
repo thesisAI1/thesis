@@ -19,6 +19,7 @@ interface FooterLink {
 
 const LINKS: FooterLink[] = [
   { label: "Home", href: "/" },
+  { label: "Pitch", href: "/pitch" },
   { label: "Docs", href: "/docs" },
   { label: "GitHub", href: GITHUB_URL, external: true },
   { label: "@thesisonbase", href: X_URL, external: true },
