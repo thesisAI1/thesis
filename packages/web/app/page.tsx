@@ -1,31 +1,58 @@
 /**
- * Foundation smoke page — verifies tokens, fonts, and the void background
- * render. The real Direction-B homepage (hero · pipeline · live Faculty Room ·
- * record · faculty · 25% split · $THESIS strip · CTA) is built next, on top of
- * this shell.
+ * THESIS homepage (Direction-B terminal).
+ *
+ * Server Component: fetches the live dashboard once at request time and passes
+ * it to The Record; a backend error degrades to a zero state rather than
+ * failing the page. Everything else is static server markup plus a few
+ * interactive/animated client children (verdict tape, count-ups, the live
+ * Faculty Room, copy). Section order mirrors the mockup: hero · pipeline · live
+ * Faculty Room · record · faculty · the 25% split · $THESIS strip · CTA.
  */
-export default function Home() {
-  return (
-    <main className="mx-auto max-w-shell px-6 py-[60px]">
-      <p className="t-section-tag">AUTONOMOUS · ON-CHAIN · BASE</p>
-      <h1 className="t-h1 mt-3">The committee trades your theses.</h1>
-      <p className="t-lede mt-4 max-w-xl">
-        Foundation scaffold — Direction B. Design tokens, self-hosted fonts
-        (Geist + JetBrains Mono), and the grid-and-glow void are wired. The
-        homepage, dashboard, and docs are built next.
-      </p>
+import { TopBar } from "@/components/shell/TopBar";
+import { Footer } from "@/components/shell/Footer";
+import { getDashboard, ThesisApiError, type DashboardData } from "@/lib/api";
+import { VerdictTape } from "./_home/VerdictTape";
+import { Hero } from "./_home/Hero";
+import { Pipeline } from "./_home/Pipeline";
+import { FacultyRoom } from "./_home/FacultyRoom";
+import { Record } from "./_home/Record";
+import { Faculty } from "./_home/Faculty";
+import { Split } from "./_home/Split";
+import { TokenStrip } from "./_home/TokenStrip";
+import { Cta } from "./_home/Cta";
 
-      <div className="mt-8 flex flex-wrap gap-4">
-        <span className="t-data rounded-md border border-border bg-panel px-3 py-2">
-          $THESIS · <span className="c-accent">Base</span>
-        </span>
-        <span className="t-data rounded-md border border-border bg-panel px-3 py-2">
-          <span className="c-up">+100%</span> → sell 50%
-        </span>
-        <span className="t-data rounded-md border border-border bg-panel px-3 py-2">
-          author share <span className="c-accent">25%</span>
-        </span>
-      </div>
-    </main>
+/** Fetch the dashboard, degrading to null (zero state) on any backend error. */
+async function loadDashboard(): Promise<DashboardData | null> {
+  try {
+    return await getDashboard();
+  } catch (error) {
+    if (error instanceof ThesisApiError) return null;
+    throw error;
+  }
+}
+
+export default async function Home() {
+  const dashboard = await loadDashboard();
+
+  return (
+    <>
+      <TopBar variant="site" />
+      <VerdictTape />
+      <main>
+        <Hero />
+        <Pipeline />
+        <FacultyRoom />
+        <Record data={dashboard} />
+        <Faculty />
+        <section id="token" className="py-[30px]">
+          <div className="mx-auto max-w-shell px-7">
+            <Split />
+            <TokenStrip />
+          </div>
+        </section>
+        <Cta />
+      </main>
+      <Footer />
+    </>
   );
 }
