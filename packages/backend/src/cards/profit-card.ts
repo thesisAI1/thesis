@@ -6,10 +6,17 @@
  * Returns a complete SVG string suitable for rasterisation via `./render.ts`.
  */
 
+import type { Chain } from "@thesis/shared";
+import { nativeSymbol } from "../util/chains.js";
+
 /** All the data the card needs. Keep this flat — easier to plug in from the
  *  monitor's exit-reply call site. */
 export interface ProfitCardData {
   tokenSymbol: string;
+  /** Chain the trade settled on — drives the native unit (ETH/SOL) and the
+   *  treasury-leg copy (Base burns $THESIS; Solana sends to a buyback wallet).
+   *  Optional for back-compat (absent ⇒ base). */
+  chain?: Chain;
   authorHandle: string;
   /** X profile image URL. Optional — fallback to initials when missing. */
   authorAvatarUrl?: string | null;
@@ -40,9 +47,12 @@ export function renderProfitCardSvg(data: ProfitCardData, avatarDataUri?: string
     : "@" + data.authorHandle;
   const initials = handle.replace(/^@/, "").slice(0, 2).toUpperCase();
 
+  const chain = data.chain ?? "base";
+  const sym = nativeSymbol(chain);
+  const isSolana = chain === "solana";
   const pnlEth = formatSignedEth(data.totalProfitEth);
   const pnlPct = formatPct(data.pnlPct);
-  const headline = buildHeadline(data, pnlEth);
+  const headline = buildHeadline(data, pnlEth, sym);
   const description = buildDescription(data, ticker);
 
   const entryToExit = formatMcArrow(data.entryMarketCapUsd, data.exitMarketCapUsd);
@@ -59,7 +69,7 @@ export function renderProfitCardSvg(data: ProfitCardData, avatarDataUri?: string
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg width="1200" height="675" viewBox="0 0 1200 675" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" role="img">
 <title>THESIS — ${escapeText(ticker)} closed in profit</title>
-<desc>Trade close share card. ${escapeText(handle)} earned ${pnlEth} ETH on ${escapeText(ticker)}.</desc>
+<desc>Trade close share card. ${escapeText(handle)} earned ${pnlEth} ${sym} on ${escapeText(ticker)}.</desc>
 <defs>
   <style><![CDATA[
     .text { fill: #EAEEF6; font-family: "Helvetica", "Arial", "Liberation Sans", "DejaVu Sans", sans-serif; }
@@ -79,7 +89,7 @@ export function renderProfitCardSvg(data: ProfitCardData, avatarDataUri?: string
   <circle cx="22" cy="22" r="20" fill="none" stroke="#E6A33E" stroke-width="2"/>
   <text x="22" y="32" class="accent serif" font-size="26" font-weight="700" text-anchor="middle">&#920;</text>
   <text x="58" y="20" class="text" font-size="22" font-weight="700">THESIS</text>
-  <text x="58" y="40" class="dim" font-size="11" letter-spacing="2">COMMITTEE · BASE</text>
+  <text x="58" y="40" class="dim" font-size="11" letter-spacing="2">COMMITTEE · ${isSolana ? "SOLANA" : "BASE"}</text>
 </g>
 
 <rect x="1015" y="62" width="125" height="32" rx="8" fill="#0E2820" stroke="#3FB984" stroke-width="1"/>
@@ -100,13 +110,13 @@ export function renderProfitCardSvg(data: ProfitCardData, avatarDataUri?: string
 
   <rect x="370" y="0" width="350" height="120" rx="14" fill="#11151F" stroke="#232B3A" stroke-width="1"/>
   <text x="392" y="32" class="dim" font-size="11" letter-spacing="2">AUTHOR EARNED</text>
-  <text x="392" y="78" class="green mono" font-size="26" font-weight="700">${escapeText(authorShare)} ETH</text>
+  <text x="392" y="78" class="green mono" font-size="26" font-weight="700">${escapeText(authorShare)} ${sym}</text>
   <text x="392" y="102" class="muted mono" font-size="14">25% of trade profit</text>
 
   <rect x="740" y="0" width="365" height="120" rx="14" fill="#11151F" stroke="#232B3A" stroke-width="1"/>
-  <text x="762" y="32" class="dim" font-size="11" letter-spacing="2">$THESIS BURNED</text>
-  <text x="762" y="78" class="accent mono" font-size="26" font-weight="700">${escapeText(buyback)} ETH</text>
-  <text x="762" y="102" class="muted mono" font-size="14">25% buyback &amp; burn</text>
+  <text x="762" y="32" class="dim" font-size="11" letter-spacing="2">${isSolana ? "TREASURY" : "$THESIS BURNED"}</text>
+  <text x="762" y="78" class="accent mono" font-size="26" font-weight="700">${escapeText(buyback)} ${sym}</text>
+  <text x="762" y="102" class="muted mono" font-size="14">${isSolana ? "25% to buyback wallet" : "25% buyback &amp; burn"}</text>
 </g>
 
 <g transform="translate(60, 605)">
@@ -119,31 +129,31 @@ export function renderProfitCardSvg(data: ProfitCardData, avatarDataUri?: string
 </svg>`;
 }
 
-function buildHeadline(d: ProfitCardData, pnlEth: string): {
+function buildHeadline(d: ProfitCardData, pnlEth: string, sym: string): {
   line1: string;
   line2Svg: string;
 } {
   if (d.exit.kind === "trail") {
     return {
       line1: "Trailing stop hit.",
-      line2Svg: `<tspan class="green">${escapeText(pnlEth)} ETH</tspan> banked.`,
+      line2Svg: `<tspan class="green">${escapeText(pnlEth)} ${sym}</tspan> banked.`,
     };
   }
   if (d.exit.kind === "manual") {
     return {
       line1: "Closed at author's call.",
-      line2Svg: `<tspan class="green">${escapeText(pnlEth)} ETH</tspan> banked.`,
+      line2Svg: `<tspan class="green">${escapeText(pnlEth)} ${sym}</tspan> banked.`,
     };
   }
   if (d.exit.final) {
     return {
       line1: "Full ladder cleared.",
-      line2Svg: `<tspan class="green">${escapeText(pnlEth)} ETH</tspan> total.`,
+      line2Svg: `<tspan class="green">${escapeText(pnlEth)} ${sym}</tspan> total.`,
     };
   }
   return {
     line1: `Take-profit TP${d.exit.tier} hit.`,
-    line2Svg: `<tspan class="green">${escapeText(pnlEth)} ETH</tspan> shared.`,
+    line2Svg: `<tspan class="green">${escapeText(pnlEth)} ${sym}</tspan> shared.`,
   };
 }
 

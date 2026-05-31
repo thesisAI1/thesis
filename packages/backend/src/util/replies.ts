@@ -158,15 +158,25 @@ export function exitReplyText(
     | { kind: "sl"; netPnlEth: number; tiersHit: number; txHash: string }
     | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string }
     | { kind: "aging"; netPnlEth: number; ageHours: number; thresholdPct: number; txHash: string },
+  chain: Chain = "base",
 ): string {
+  // Native unit + explorer + settlement wording are per chain. Solana has no
+  // $THESIS burn, so its settlement line reads "treasury split", not "burn".
+  const sym = nativeSymbol(chain);
+  const tx = (h: string): string => explorerTxUrl(chain, h);
+  const settledLine =
+    chain === "solana"
+      ? "Author share + treasury split settled — see the card."
+      : "Author share + buyback + burn settled — see the card.";
+
   if (o.kind === "manual") {
     const sign = o.netPnlEth >= 0 ? "+" : "";
     return [
       "Closed at your request.",
       `${o.tiersHit > 0 ? `${o.tiersHit} take-profit tier${o.tiersHit === 1 ? "" : "s"} banked profit before you called the close.` : "Position fully closed."}`,
-      `Net result on the position: ${sign}${o.netPnlEth.toFixed(4)} ETH.`,
-      "Author share + buyback + burn settled — see the card.",
-      bscTx(o.txHash),
+      `Net result on the position: ${sign}${o.netPnlEth.toFixed(4)} ${sym}.`,
+      settledLine,
+      tx(o.txHash),
     ].join("\n");
   }
   if (o.kind === "aging") {
@@ -175,14 +185,14 @@ export function exitReplyText(
     return [
       `Aging close — position open ${days} without hitting any take-profit tier.`,
       `Our time-tightened stop kicked in at -${o.thresholdPct}% to free capital for the next read.`,
-      `Net result on the position: ${sign}${o.netPnlEth.toFixed(4)} ETH.`,
+      `Net result on the position: ${sign}${o.netPnlEth.toFixed(4)} ${sym}.`,
       "Capital efficiency matters at this stage of the project — we cycle out stagnant bags to keep the agent funded for fresh opportunities.",
-      bscTx(o.txHash),
+      tx(o.txHash),
     ].join("\n");
   }
   if (o.kind === "sl") {
     const sign = o.netPnlEth >= 0 ? "+" : "";
-    const result = `Net result on the position: ${sign}${o.netPnlEth.toFixed(4)} ETH.`;
+    const result = `Net result on the position: ${sign}${o.netPnlEth.toFixed(4)} ${sym}.`;
     // Differentiate a pure loss (no tiers hit) from a partial-profit close where
     // some TPs already banked profit before the trailing stop closed the rest.
     if (o.tiersHit === 0) {
@@ -191,7 +201,7 @@ export function exitReplyText(
         "The price dropped 30% below entry before any take-profit tier fired.",
         result,
         "Better luck next time — sharper entries on the next thesis.",
-        bscTx(o.txHash),
+        tx(o.txHash),
       ].join("\n");
     }
     return [
@@ -199,23 +209,23 @@ export function exitReplyText(
       `${o.tiersHit} take-profit tier${o.tiersHit === 1 ? "" : "s"} banked profit before the trail stop took the remainder.`,
       result,
       "Thanks for the thesis — tag the committee again any time.",
-      bscTx(o.txHash),
+      tx(o.txHash),
     ].join("\n");
   }
 
   // Per-tier text is intentionally claim-free about "profit". A partial TP
-  // is just an on-chain swap — real settlement (author 25%, $THESIS burn,
-  // etc.) only runs at full close, where the final-close text + card carry
-  // the actual profit narrative. "Holding the rest" makes it obvious that
-  // the position is still open.
+  // is just an on-chain swap — real settlement (author 25%, treasury split)
+  // only runs at full close, where the final-close text + card carry the
+  // actual profit narrative. "Holding the rest" makes it obvious that the
+  // position is still open.
   const lines = [`Take-profit TP${o.tier} hit at +${o.gainPct}%.`];
   if (o.final) {
-    lines.push(`Sold the remaining ${o.sellPct}% — ${o.proceedsEth.toFixed(4)} ETH back.`);
+    lines.push(`Sold the remaining ${o.sellPct}% — ${o.proceedsEth.toFixed(4)} ${sym} back.`);
     lines.push("Final tier — every rung of the ladder cleared, position closed.");
   } else {
-    lines.push(`Sold ${o.sellPct}% — ${o.proceedsEth.toFixed(4)} ETH back. Holding the rest.`);
+    lines.push(`Sold ${o.sellPct}% — ${o.proceedsEth.toFixed(4)} ${sym} back. Holding the rest.`);
   }
-  lines.push(bscTx(o.txHash));
+  lines.push(tx(o.txHash));
   return lines.join("\n");
 }
 

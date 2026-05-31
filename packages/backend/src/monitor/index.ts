@@ -28,6 +28,7 @@ import { settlePosition } from "../pipeline/index.js";
 import { getStore } from "../store/index.js";
 import { withLock } from "../store/lock.js";
 import { log } from "../util/log.js";
+import { nativeGlyph } from "../util/chains.js";
 import { exitReplyText, payoutRequestText, payoutSentText } from "../util/replies.js";
 
 /** Check every open position once; act on take-profit tiers and the stop-loss.
@@ -199,7 +200,7 @@ async function takeTier(pos: Position): Promise<boolean> {
   // they happen, not only at full close.
   recordActivity({
     kind: "tp",
-    summary: `${pos.authorHandle} hit TP${tierNum} (+${gainPct}%) — +${sale.profit.toFixed(4)} Ξ`,
+    summary: `${pos.authorHandle} hit TP${tierNum} (+${gainPct}%) — +${sale.profit.toFixed(4)} ${nativeGlyph(pos.order.chain)}`,
     authorHandle: pos.authorHandle,
     positionId: pos.id,
     amountEth: sale.profit,
@@ -312,7 +313,7 @@ async function closeOutWithKind(
     kind,
     summary:
       `${pos.authorHandle} closed ${kind === "manual" ? "by request" : kind === "aging" ? "(aging)" : kind === "sl" ? "(SL)" : ""} ` +
-      `${total >= 0 ? "+" : ""}${total.toFixed(4)} Ξ`,
+      `${total >= 0 ? "+" : ""}${total.toFixed(4)} ${nativeGlyph(pos.order.chain)}`,
     authorHandle: pos.authorHandle,
     positionId: pos.id,
     amountEth: total,
@@ -643,7 +644,7 @@ function buildClosingText(
   authorPayment: AuthorPaymentInfo | null,
   lotteryPayment: LotteryPaymentInfo | null,
 ): string {
-  const base = exitReplyText(o);
+  const base = exitReplyText(o, pos.order.chain);
   const parts: string[] = [base];
 
   if (authorPayment) {
@@ -781,6 +782,7 @@ async function buildProfitCardPng(
 
   const data: ProfitCardData = {
     tokenSymbol: symbol,
+    chain: pos.order.chain,
     authorHandle: pos.authorHandle,
     authorAvatarUrl: pos.authorAvatarUrl,
     totalProfitEth,
