@@ -129,7 +129,7 @@ async function handleCloseRequest(pos: Position, mention: XPost): Promise<void> 
   // aggregator "what would I receive RIGHT NOW for this much token?" and
   // returns the exact post-routing ETH amount. No cache, no indexing
   // delay, no Birdeye 429 fallbacks — it IS the price we'd fill at.
-  const chain = createChainAdapter();
+  const chain = createChainAdapter(pos.order.chain);
   const remainingTokens =
     pos.entryPriceEth > 0
       ? (pos.order.amountInEth * pos.remainingFraction) / pos.entryPriceEth
@@ -153,7 +153,7 @@ async function handleCloseRequest(pos: Position, mention: XPost): Promise<void> 
       `author-close: quoteSell failed for ${pos.id}, falling back to Birdeye: ${String(err)}`,
     );
     try {
-      displayPrice = await createBaseDataAdapter().getPriceEth(pos.order.contractAddress);
+      displayPrice = await createBaseDataAdapter(pos.order.chain).getPriceEth(pos.order.contractAddress);
     } catch (priceErr) {
       log.warn(
         `author-close: Birdeye fallback also failed for ${pos.id} (${mention.authorHandle}): ${String(priceErr)}`,

@@ -15,7 +15,7 @@
  * net profit. Each exit is announced as a reply on the original X post.
  */
 
-import type { Position, SettlementProgress } from "@thesis/shared";
+import type { Chain, Position, SettlementProgress } from "@thesis/shared";
 import { createBaseDataAdapter } from "../adapters/basedata/index.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter } from "../adapters/x/index.js";
@@ -62,19 +62,31 @@ async function monitorTickInner(): Promise<void> {
   const open = await store.getOpenPositions();
   if (open.length === 0) return;
 
-  // Pull prices for ALL open positions in a single batched API call. This is
-  // what keeps us under the data-provider rate limit when N positions are
-  // open. With Birdeye's /defi/multi_price one tick = one HTTP request.
-  const addresses = Array.from(
-    new Set(open.map((p) => p.order.contractAddress.toLowerCase())),
-  );
-  let prices: Map<string, number>;
-  try {
-    prices = await createBaseDataAdapter().getPricesEth(addresses);
-  } catch (err) {
-    log.warn(`monitor: batch price fetch failed — skipping tick: ${String(err)}`);
-    return;
+  // Pull prices in ONE batched call PER CHAIN — each chain's data provider is
+  // distinct (DexScreener/Birdeye for Base, DexScreener Solana for Solana) and
+  // can't share a multi-price call. Grouping preserves the rate-limit property
+  // the monitor was designed around: one HTTP request per chain per tick, not
+  // per position. A failure on one chain is isolated — it skips that chain's
+  // positions this tick, never the others.
+  const byChain = new Map<Chain, string[]>();
+  for (const p of open) {
+    const list = byChain.get(p.order.chain) ?? [];
+    list.push(p.order.contractAddress.toLowerCase());
+    byChain.set(p.order.chain, list);
   }
+  const prices = new Map<string, number>();
+  await Promise.all(
+    [...byChain.entries()].map(async ([chain, addresses]) => {
+      try {
+        const chainPrices = await createBaseDataAdapter(chain).getPricesEth(
+          Array.from(new Set(addresses)),
+        );
+        for (const [addr, price] of chainPrices) prices.set(addr, price);
+      } catch (err) {
+        log.warn(`monitor: ${chain} batch price fetch failed — skipping its positions this tick: ${String(err)}`);
+      }
+    }),
+  );
 
   for (const pos of open) {
     const price = prices.get(pos.order.contractAddress.toLowerCase());
@@ -486,7 +498,7 @@ async function sell(
   // to keep trying through any transient Clanker anti-MEV / transfer-tax
   // reverts. TP/SL callers leave opts undefined and let the next monitor
   // tick re-attempt (faster recovery when price is moving).
-  const result = await createChainAdapter().sell(pos.order.contractAddress, tokens, opts);
+  const result = await createChainAdapter(pos.order.chain).sell(pos.order.contractAddress, tokens, opts);
   // result.amountOut is the ETH the wallet actually received from KyberSwap.
   // exitPrice is kept in the signature only so the call sites stay
   // self-documenting (which tier triggered us); we no longer multiply by it.
@@ -710,7 +722,7 @@ async function buildProfitCardPng(
     | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string }
     | { kind: "aging"; netPnlEth: number; ageHours: number; thresholdPct: number; txHash: string },
 ): Promise<Buffer> {
-  const adapter = createBaseDataAdapter();
+  const adapter = createBaseDataAdapter(pos.order.chain);
   const symbol = await adapter.getTokenSymbol(pos.order.contractAddress).catch(() => "");
 
   // We need an entry MC + an exit MC. The position stores entry MC at buy

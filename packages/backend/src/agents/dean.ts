@@ -43,6 +43,9 @@ export async function runDean(
 
   reasoning.push(`Reading the thesis submitted by ${submission.authorHandle}…`);
   reasoning.push(
+    `Token trades on ${tokenReport.chain}${tokenReport.launchpad ? ` via ${tokenReport.launchpad}` : ""}`,
+  );
+  reasoning.push(
     `Weighing the Registrar (${authorReport.score}) against the Auditor (${tokenReport.score})`,
   );
 
@@ -154,12 +157,12 @@ async function llmVerdict(
     "the token report more heavily. A thoughtful thesis on a healthy token",
     "from an unknown caller can still merit an A or B grade.",
     "",
-    'IMPORTANT context — "Clanker" and "Bankr" are the names of trusted',
-    "token launchpads on Base. They are proper nouns, not English words —",
-    '"Bankr" is NOT short for "bankrupt". A token launched via either uses',
-    "a standard, audited contract and LP setup, so contract-level honeypot",
-    "or rug risk is already mitigated. Treat the launchpad identity as a",
-    "positive signal, not a negative one.",
+    'IMPORTANT context — "Clanker" and "Bankr" (Base) and "pump.fun" (Solana)',
+    "are the names of trusted token launchpads. They are proper nouns, not",
+    'English words — "Bankr" is NOT short for "bankrupt". A token launched via',
+    "any of them uses a standard, audited contract and LP setup, so contract-",
+    "level honeypot or rug risk is already mitigated. Treat the launchpad",
+    "identity as a positive signal, not a negative one.",
     "",
     UNTRUSTED_INSTRUCTION,
     "",
@@ -171,7 +174,7 @@ async function llmVerdict(
     `AUTHOR: score ${author.score}/100, likely bot ${author.isLikelyBot}, ` +
       `smart followers ${author.smartFollowerCount}, past hit-rate ` +
       `${(author.pastHitRate * 100).toFixed(0)}%, flags: ${flags(author.flags)}`,
-    `TOKEN: score ${token.score}/100, liquidity $${token.liquidityUsd}, ` +
+    `TOKEN: chain ${token.chain}, score ${token.score}/100, liquidity $${token.liquidityUsd}, ` +
       `honeypot ${token.isHoneypot}, launchpad ${token.launchpad ?? "unknown"}, ` +
       `flags: ${flags(token.flags)}`,
   ].join("\n");

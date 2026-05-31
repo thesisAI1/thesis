@@ -47,6 +47,7 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Chain } from "@thesis/shared";
 import { checkAdmin } from "./admin-auth.js";
 import { getRecentActivity } from "../activity.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
@@ -560,7 +561,7 @@ async function adminRebuyPosition(req: IncomingMessage, res: ServerResponse): Pr
 
   let buy;
   try {
-    buy = await createChainAdapter().buy(pos.order.contractAddress, amountInEth);
+    buy = await createChainAdapter(pos.order.chain).buy(pos.order.contractAddress, amountInEth);
   } catch (err) {
     log.error(`admin: rebuy-position buy failed — ${String(err)}`);
     return sendJson(res, 500, { ok: false, error: "internal error" });
@@ -738,7 +739,7 @@ async function adminForceClosePosition(
   // re-check, so concurrent monitor ticks won't race us.
   let currentPrice: number;
   try {
-    currentPrice = await createBaseDataAdapter().getPriceEth(pos.order.contractAddress);
+    currentPrice = await createBaseDataAdapter(pos.order.chain).getPriceEth(pos.order.contractAddress);
   } catch (err) {
     log.error(`admin: force-close price fetch failed — ${String(err)}`);
     return sendJson(res, 502, { ok: false, error: "upstream fetch failed" });
@@ -1058,17 +1059,26 @@ async function buildDashboardPayload(): Promise<object> {
   // to entry-time prices for every position that couldn't be priced. The
   // batched call is the same one the monitor uses and cuts the dashboard
   // build from ~10s to <1s with effectively zero Birdeye pressure.
-  const openAddresses = Array.from(
-    new Set(open.map((p) => p.order.contractAddress.toLowerCase())),
-  );
-  let livePrices = new Map<string, number>();
-  if (openAddresses.length > 0) {
-    try {
-      livePrices = await createBaseDataAdapter().getPricesEth(openAddresses);
-    } catch (err) {
-      log.warn(`dashboard: batch price fetch failed — falling back to entry prices for all positions: ${String(err)}`);
-    }
+  // One batched price call PER CHAIN (Base + Solana data providers differ and
+  // can't share a multi-price call) — mirrors the monitor's grouping so the
+  // dashboard PnL is correct for Solana positions too.
+  const addrsByChain = new Map<Chain, string[]>();
+  for (const p of open) {
+    const list = addrsByChain.get(p.order.chain) ?? [];
+    list.push(p.order.contractAddress.toLowerCase());
+    addrsByChain.set(p.order.chain, list);
   }
+  const livePrices = new Map<string, number>();
+  await Promise.all(
+    [...addrsByChain.entries()].map(async ([c, addrs]) => {
+      try {
+        const got = await createBaseDataAdapter(c).getPricesEth(Array.from(new Set(addrs)));
+        for (const [addr, price] of got) livePrices.set(addr, price);
+      } catch (err) {
+        log.warn(`dashboard: ${c} batch price fetch failed — entry-price fallback for its positions: ${String(err)}`);
+      }
+    }),
+  );
 
   let balanceEth = 0;
   let walletAddress = "";

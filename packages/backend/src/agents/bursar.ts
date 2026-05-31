@@ -73,8 +73,23 @@ export async function runBursar(verdict: Verdict): Promise<BursarResult> {
   }
 
   // --- Size and execute --------------------------------------------------
-  const chain = createChainAdapter();
-  const portfolioEth = await chain.getWalletBalanceEth();
+  // Buy on the AUTHORITATIVE chain resolved by the Auditor (DexScreener), not
+  // the submission's address-shape guess — so we always trade the correct token
+  // on the correct chain and size off that chain's wallet (ETH on Base, SOL on
+  // Solana; the `*Eth` fields are native-per-chain).
+  const tradeChain = verdict.tokenReport.chain;
+  const chain = createChainAdapter(tradeChain);
+  let portfolioEth: number;
+  try {
+    portfolioEth = await chain.getWalletBalanceEth();
+  } catch (err) {
+    // e.g. a Solana win on a Base-only live deployment with no Solana wallet
+    // configured — skip cleanly rather than crash the review loop.
+    return {
+      position: null,
+      skippedReason: `cannot read ${tradeChain} wallet: ${String(err)}`,
+    };
+  }
   const amountInEth = portfolioEth * verdict.positionSizePct;
   if (amountInEth <= 0) {
     return { position: null, skippedReason: "trading portfolio is empty" };
@@ -82,7 +97,7 @@ export async function runBursar(verdict: Verdict): Promise<BursarResult> {
 
   const order: TradeOrder = {
     contractAddress: verdict.submission.contractAddress,
-    chain: verdict.submission.chain,
+    chain: tradeChain,
     amountInEth,
     takeProfits: config.trading.takeProfitTiers.map((t) => ({
       priceX: 1 + t.gainPct / 100,
