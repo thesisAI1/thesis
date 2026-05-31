@@ -939,6 +939,9 @@ async function apiStatus(res: ServerResponse): Promise<void> {
 interface OpenPositionView {
   id: string;
   contractAddress: string;
+  /** Chain the position trades on — lets the (new) frontend branch native-unit
+   *  labels and explorer links (Solscan vs BaseScan). */
+  chain: Chain;
   /** Token ticker — e.g. "DEGEN". Empty when DexScreener doesn't know it yet. */
   tokenSymbol: string;
   /** Token logo URL from DexScreener's info.imageUrl (populated when the
@@ -1118,6 +1121,7 @@ async function buildDashboardPayload(): Promise<object> {
     openPositions.push({
       id: p.id,
       contractAddress: p.order.contractAddress,
+      chain: p.order.chain,
       tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
       tokenLogoUrl: logoCache.get(p.order.contractAddress.toLowerCase()) ?? null,
       authorHandle: p.authorHandle,
@@ -1172,6 +1176,7 @@ async function buildDashboardPayload(): Promise<object> {
       return {
         id: p.id,
         contractAddress: p.order.contractAddress,
+        chain: p.order.chain,
         tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
         tokenLogoUrl: logoCache.get(p.order.contractAddress.toLowerCase()) ?? null,
         authorHandle: p.authorHandle,
