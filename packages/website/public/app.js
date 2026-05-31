@@ -491,7 +491,7 @@ function renderClosed(rows) {
   $("#closed-empty").hidden = rows.length > 0;
   $("#closed-rows").innerHTML = rows.map((c) => `<tr>
     <td data-label="Token">${tokenCell(c.tokenSymbol, c.contractAddress)}</td>
-    <td data-label="Author">${esc(c.authorHandle)}</td>
+    <td data-label="Author">${authorCell(c)}</td>
     <td class="num" data-label="Size">${fmtEth(c.amountInEth)}</td>
     <td class="num" data-label="Entry">${esc(fmtMcap(c.entryMarketCapUsd))}</td>
     <td class="num" data-label="Exit">${esc(fmtMcap(c.exitMarketCapUsd))}</td>

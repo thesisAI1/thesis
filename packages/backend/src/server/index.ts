@@ -1060,6 +1060,7 @@ async function buildDashboardPayload(): Promise<object> {
         contractAddress: p.order.contractAddress,
         tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
         authorHandle: p.authorHandle,
+        authorAvatarUrl: p.authorAvatarUrl ?? null,
         postUrl: postUrlByPosition.get(p.id) ?? null,
         amountInEth: p.order.amountInEth,
         entryPriceEth: p.entryPriceEth,
