@@ -1044,24 +1044,38 @@ async function buildDashboardPayload(): Promise<object> {
   });
 
   const closedPositions = closed
-    .map((p) => ({
-      id: p.id,
-      contractAddress: p.order.contractAddress,
-      tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
-      authorHandle: p.authorHandle,
-      postUrl: postUrlByPosition.get(p.id) ?? null,
-      amountInEth: p.order.amountInEth,
-      entryPriceEth: p.entryPriceEth,
-      exitPriceEth: p.lastExitPriceEth ?? 0,
-      realisedPnlEth: p.realisedPnlEth,
-      realisedPct:
-        p.order.amountInEth > 0 ? (p.realisedPnlEth / p.order.amountInEth) * 100 : 0,
-      tiersHit: p.tiersHit,
-      openedAt: p.openedAt,
-      closedAt: p.closedAt ?? "",
-      entryTxHash: p.entryTxHash,
-      exitTxHash: p.lastExitTxHash ?? "",
-    }))
+    .map((p) => {
+      // Derive exit MC from entry MC × (exit price / entry price). Supply is
+      // constant for Clanker/Bankr deploys, so the price ratio is a clean MC
+      // proxy — same approach as the open-positions table and the profit card.
+      // Positions opened BEFORE marketCapAtEntryUsd was persisted have null
+      // entry MC and therefore null exit MC too; the frontend renders a dash.
+      const entryMcUsd = p.marketCapAtEntryUsd ?? null;
+      const exitMcUsd =
+        entryMcUsd !== null && p.entryPriceEth > 0 && p.lastExitPriceEth != null
+          ? entryMcUsd * (p.lastExitPriceEth / p.entryPriceEth)
+          : null;
+      return {
+        id: p.id,
+        contractAddress: p.order.contractAddress,
+        tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
+        authorHandle: p.authorHandle,
+        postUrl: postUrlByPosition.get(p.id) ?? null,
+        amountInEth: p.order.amountInEth,
+        entryPriceEth: p.entryPriceEth,
+        exitPriceEth: p.lastExitPriceEth ?? 0,
+        entryMarketCapUsd: entryMcUsd,
+        exitMarketCapUsd: exitMcUsd,
+        realisedPnlEth: p.realisedPnlEth,
+        realisedPct:
+          p.order.amountInEth > 0 ? (p.realisedPnlEth / p.order.amountInEth) * 100 : 0,
+        tiersHit: p.tiersHit,
+        openedAt: p.openedAt,
+        closedAt: p.closedAt ?? "",
+        entryTxHash: p.entryTxHash,
+        exitTxHash: p.lastExitTxHash ?? "",
+      };
+    })
     // Sort by close time (most recent first), not by creation order —
     // the dashboard surfaces "what just closed" not "what was opened
     // earliest". Without this an old position that just closed manually

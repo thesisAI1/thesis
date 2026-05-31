@@ -493,8 +493,8 @@ function renderClosed(rows) {
     <td data-label="Token">${tokenCell(c.tokenSymbol, c.contractAddress)}</td>
     <td data-label="Author">${esc(c.authorHandle)}</td>
     <td class="num" data-label="Size">${fmtEth(c.amountInEth)}</td>
-    <td class="num" data-label="Entry">${esc(fmtPrice(c.entryPriceEth))}</td>
-    <td class="num" data-label="Exit">${esc(fmtPrice(c.exitPriceEth))}</td>
+    <td class="num" data-label="Entry">${esc(fmtMcap(c.entryMarketCapUsd))}</td>
+    <td class="num" data-label="Exit">${esc(fmtMcap(c.exitMarketCapUsd))}</td>
     <td class="num ${pnlClass(c.realisedPnlEth)}" data-label="Realised PnL">${fmtEth(c.realisedPnlEth)} (${fmtPct(c.realisedPct)})</td>
     <td data-label="Closed">${esc(timeAgo(c.closedAt))}</td></tr>`).join("");
 }
