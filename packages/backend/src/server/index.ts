@@ -48,6 +48,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkAdmin } from "./admin-auth.js";
+import { getRecentActivity } from "../activity.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createBaseDataAdapter, type BaseDataAdapter } from "../adapters/basedata/index.js";
 import { MockBaseData } from "../adapters/basedata/mock.js";
@@ -109,6 +110,53 @@ const symbolCache = new Map<string, string>();
 const dexScreenerFallback: BaseDataAdapter = useMock()
   ? new MockBaseData()
   : new RealBaseData();
+
+/** In-memory cache for token logos pulled from DexScreener's "Token Info"
+ *  data — the picture creators upload after paying for socials/profile
+ *  enhancement. We use the `info.imageUrl` field from the pair endpoint.
+ *
+ *  Map value of null means "checked, no logo available" (caches the
+ *  negative result for a shorter TTL so newly-uploaded logos surface
+ *  within minutes rather than hours). Map value of string is the URL.
+ *  Map value undefined means "never checked, go fetch". */
+const logoCache = new Map<string, string | null>();
+const logoCacheExpiry = new Map<string, number>();
+const LOGO_TTL_POSITIVE_MS = 60 * 60 * 1000; // 1h
+const LOGO_TTL_NEGATIVE_MS = 10 * 60 * 1000; // 10m
+async function getLogoCached(address: string): Promise<string | null> {
+  const key = address.toLowerCase();
+  const expiry = logoCacheExpiry.get(key) ?? 0;
+  if (Date.now() < expiry) {
+    return logoCache.get(key) ?? null;
+  }
+  let logoUrl: string | null = null;
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
+    if (res.ok) {
+      const json = (await res.json()) as {
+        pairs?: Array<{ info?: { imageUrl?: string } }>;
+      };
+      // Take the first pair that has an imageUrl — DexScreener returns
+      // multiple pairs (one per liquidity pool) but token-level info is
+      // identical across them, so first hit is fine.
+      for (const pair of json.pairs ?? []) {
+        if (pair.info?.imageUrl) {
+          logoUrl = pair.info.imageUrl;
+          break;
+        }
+      }
+    }
+  } catch {
+    /* network/parse error — cache as null with negative TTL and retry next cycle */
+  }
+  logoCache.set(key, logoUrl);
+  logoCacheExpiry.set(
+    key,
+    Date.now() + (logoUrl ? LOGO_TTL_POSITIVE_MS : LOGO_TTL_NEGATIVE_MS),
+  );
+  return logoUrl;
+}
+
 async function getSymbolCached(address: string): Promise<string> {
   const key = address.toLowerCase();
   const hit = symbolCache.get(key);
@@ -134,6 +182,32 @@ async function getSymbolCached(address: string): Promise<string> {
   // Only persist non-empty results so a later resolution can still overwrite.
   if (sym) symbolCache.set(key, sym);
   return sym;
+}
+
+/** Periodic snapshot of total portfolio value (wallet + open positions
+ *  valued at live price). Drives the cumulative portfolio sparkline on the
+ *  hero. Recorded opportunistically inside the dashboard build — if the
+ *  last snapshot is older than SNAPSHOT_INTERVAL_MS, we append; otherwise
+ *  we skip. Kept in memory only; loses history on restart, but that's
+ *  acceptable for a rolling N-hour window display. */
+interface PortfolioSnapshot {
+  at: string; // ISO
+  totalValueEth: number;
+  walletEth: number;
+  openPositionsValueEth: number;
+}
+const SNAPSHOT_INTERVAL_MS = 30 * 60 * 1000; // every 30 min
+const SNAPSHOT_BUFFER_SIZE = 96; // 48h of 30min snapshots
+const portfolioSnapshots: PortfolioSnapshot[] = [];
+function recordPortfolioSnapshot(snap: Omit<PortfolioSnapshot, "at">): void {
+  const last = portfolioSnapshots[portfolioSnapshots.length - 1];
+  if (last && Date.now() - new Date(last.at).getTime() < SNAPSHOT_INTERVAL_MS) {
+    return;
+  }
+  portfolioSnapshots.push({ ...snap, at: new Date().toISOString() });
+  if (portfolioSnapshots.length > SNAPSHOT_BUFFER_SIZE) {
+    portfolioSnapshots.shift();
+  }
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -866,6 +940,9 @@ interface OpenPositionView {
   contractAddress: string;
   /** Token ticker — e.g. "DEGEN". Empty when DexScreener doesn't know it yet. */
   tokenSymbol: string;
+  /** Token logo URL from DexScreener's info.imageUrl (populated when the
+   *  creator paid for the socials/profile upgrade). null when unavailable. */
+  tokenLogoUrl: string | null;
   authorHandle: string;
   /** X profile image URL of the author (display only). */
   authorAvatarUrl: string | null;
@@ -963,10 +1040,35 @@ async function buildDashboardPayload(): Promise<object> {
   );
 
   // Pre-warm the ticker cache for every position address (parallel; cached).
+  // Same for DexScreener logos — paid socials-upgrade tokens carry an
+  // imageUrl in their pair info which we surface next to the ticker in
+  // both the Open Positions and Closed Trades tables.
   const uniqueAddresses = Array.from(
     new Set(positions.map((p) => p.order.contractAddress.toLowerCase())),
   );
-  await Promise.all(uniqueAddresses.map((a) => getSymbolCached(a)));
+  await Promise.all([
+    ...uniqueAddresses.map((a) => getSymbolCached(a)),
+    ...uniqueAddresses.map((a) => getLogoCached(a)),
+  ]);
+
+  // Batched price fetch for all open positions in ONE Birdeye request,
+  // instead of one HTTP call per position serialised in the loop. With 60+
+  // open positions the per-loop pattern was hammering Birdeye and triggering
+  // /defi/multi_price 429s, which cascaded into the dashboard falling back
+  // to entry-time prices for every position that couldn't be priced. The
+  // batched call is the same one the monitor uses and cuts the dashboard
+  // build from ~10s to <1s with effectively zero Birdeye pressure.
+  const openAddresses = Array.from(
+    new Set(open.map((p) => p.order.contractAddress.toLowerCase())),
+  );
+  let livePrices = new Map<string, number>();
+  if (openAddresses.length > 0) {
+    try {
+      livePrices = await createBaseDataAdapter().getPricesEth(openAddresses);
+    } catch (err) {
+      log.warn(`dashboard: batch price fetch failed — falling back to entry prices for all positions: ${String(err)}`);
+    }
+  }
 
   let balanceEth = 0;
   let walletAddress = "";
@@ -988,12 +1090,8 @@ async function buildDashboardPayload(): Promise<object> {
   // small "wallet only" number we used to show).
   let openPositionsValueEth = 0;
   for (const p of open) {
-    let currentPriceEth = p.entryPriceEth;
-    try {
-      currentPriceEth = await chain.getTokenPriceEth(p.order.contractAddress);
-    } catch {
-      /* keep the entry price */
-    }
+    const cached = livePrices.get(p.order.contractAddress.toLowerCase());
+    const currentPriceEth = cached && cached > 0 ? cached : p.entryPriceEth;
     // Unrealised PnL is measured on the slice still held.
     const remainingCost = p.order.amountInEth * p.remainingFraction;
     const remainingTokens = p.entryPriceEth > 0 ? remainingCost / p.entryPriceEth : 0;
@@ -1011,6 +1109,7 @@ async function buildDashboardPayload(): Promise<object> {
       id: p.id,
       contractAddress: p.order.contractAddress,
       tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
+      tokenLogoUrl: logoCache.get(p.order.contractAddress.toLowerCase()) ?? null,
       authorHandle: p.authorHandle,
       authorAvatarUrl: p.authorAvatarUrl ?? null,
       grade: gradeByPosition.get(p.id) ?? null,
@@ -1049,33 +1148,40 @@ async function buildDashboardPayload(): Promise<object> {
   });
 
   const closedPositions = closed
-    .map((p) => ({
-      id: p.id,
-      contractAddress: p.order.contractAddress,
-      tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
-      authorHandle: p.authorHandle,
-      postUrl: postUrlByPosition.get(p.id) ?? null,
-      amountInEth: p.order.amountInEth,
-      entryPriceEth: p.entryPriceEth,
-      exitPriceEth: p.lastExitPriceEth ?? 0,
-      // Entry market cap, and exit MC derived from the price ratio (same
-      // derivation the profit card uses): exit MC = entry MC × exitPrice/entryPrice.
-      // The closed-trades table shows these instead of the raw per-token prices,
-      // which are unreadable at memecoin scale (e.g. 6.01e-10).
-      marketCapAtEntryUsd: p.marketCapAtEntryUsd ?? null,
-      exitMarketCapUsd:
-        p.marketCapAtEntryUsd != null && p.entryPriceEth > 0 && p.lastExitPriceEth != null
-          ? p.marketCapAtEntryUsd * (p.lastExitPriceEth / p.entryPriceEth)
-          : null,
-      realisedPnlEth: p.realisedPnlEth,
-      realisedPct:
-        p.order.amountInEth > 0 ? (p.realisedPnlEth / p.order.amountInEth) * 100 : 0,
-      tiersHit: p.tiersHit,
-      openedAt: p.openedAt,
-      closedAt: p.closedAt ?? "",
-      entryTxHash: p.entryTxHash,
-      exitTxHash: p.lastExitTxHash ?? "",
-    }))
+    .map((p) => {
+      // Derive exit MC from entry MC × (exit price / entry price). Supply is
+      // constant for Clanker/Bankr deploys, so the price ratio is a clean MC
+      // proxy — same approach as the open-positions table and the profit card.
+      // Positions opened BEFORE marketCapAtEntryUsd was persisted have null
+      // entry MC and therefore null exit MC too; the frontend renders a dash.
+      const entryMcUsd = p.marketCapAtEntryUsd ?? null;
+      const exitMcUsd =
+        entryMcUsd !== null && p.entryPriceEth > 0 && p.lastExitPriceEth != null
+          ? entryMcUsd * (p.lastExitPriceEth / p.entryPriceEth)
+          : null;
+      return {
+        id: p.id,
+        contractAddress: p.order.contractAddress,
+        tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
+        tokenLogoUrl: logoCache.get(p.order.contractAddress.toLowerCase()) ?? null,
+        authorHandle: p.authorHandle,
+        authorAvatarUrl: p.authorAvatarUrl ?? null,
+        postUrl: postUrlByPosition.get(p.id) ?? null,
+        amountInEth: p.order.amountInEth,
+        entryPriceEth: p.entryPriceEth,
+        exitPriceEth: p.lastExitPriceEth ?? 0,
+        entryMarketCapUsd: entryMcUsd,
+        exitMarketCapUsd: exitMcUsd,
+        realisedPnlEth: p.realisedPnlEth,
+        realisedPct:
+          p.order.amountInEth > 0 ? (p.realisedPnlEth / p.order.amountInEth) * 100 : 0,
+        tiersHit: p.tiersHit,
+        openedAt: p.openedAt,
+        closedAt: p.closedAt ?? "",
+        entryTxHash: p.entryTxHash,
+        exitTxHash: p.lastExitTxHash ?? "",
+      };
+    })
     // Sort by close time (most recent first), not by creation order —
     // the dashboard surfaces "what just closed" not "what was opened
     // earliest". Without this an old position that just closed manually
@@ -1101,6 +1207,53 @@ async function buildDashboardPayload(): Promise<object> {
   // as "show only the ETH figure" and tries again on next refresh.
   const ethUsdPrice = await getEthUsdRate();
   const totalPortfolioValueEth = balanceEth + openPositionsValueEth;
+
+  // Opportunistic snapshot of total portfolio value — drives the hero
+  // sparkline. Internal guard ensures we only persist at most one snapshot
+  // per 30min regardless of dashboard request rate.
+  recordPortfolioSnapshot({
+    totalValueEth: totalPortfolioValueEth,
+    walletEth: balanceEth,
+    openPositionsValueEth,
+  });
+
+  // Recent wins highlight strip (last 24h). Filters closed positions by
+  // closedAt and sums realised profit / counts wins for emotional pull.
+  const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const recentClosed = closed.filter((p) => {
+    if (!p.closedAt) return false;
+    return new Date(p.closedAt).getTime() >= dayAgo;
+  });
+  const recentWinsCount = recentClosed.filter((p) => p.realisedPnlEth > 0).length;
+  const recentWinsProfitEth = recentClosed
+    .filter((p) => p.realisedPnlEth > 0)
+    .reduce((s, p) => s + p.realisedPnlEth, 0);
+
+  // 7-day rolling win rate — fresher signal than the all-time number,
+  // and matches what authors care about ("is this thing winning right now?").
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const recentWeekClosed = closed.filter(
+    (p) => p.closedAt && new Date(p.closedAt).getTime() >= weekAgo,
+  );
+  const recentWeekWins = recentWeekClosed.filter((p) => p.realisedPnlEth > 0).length;
+  const winRate7d =
+    recentWeekClosed.length > 0 ? recentWeekWins / recentWeekClosed.length : 0;
+
+  // Per-author stats — wins/total/winRate. Computed once here so the
+  // frontend can decorate every row without N extra lookups. Keyed by
+  // lowercased handle (authors sometimes drift between cases on X).
+  const authorStats: Record<string, { wins: number; total: number; winRate: number }> = {};
+  for (const p of closed) {
+    const key = (p.authorHandle || "").toLowerCase();
+    if (!key) continue;
+    if (!authorStats[key]) authorStats[key] = { wins: 0, total: 0, winRate: 0 };
+    authorStats[key].total += 1;
+    if (p.realisedPnlEth > 0) authorStats[key].wins += 1;
+  }
+  for (const k in authorStats) {
+    const s = authorStats[k];
+    s.winRate = s.total > 0 ? s.wins / s.total : 0;
+  }
 
   return {
     mode: config.mode,
@@ -1141,6 +1294,30 @@ async function buildDashboardPayload(): Promise<object> {
     openPositions,
     closedPositions: closedPositions.slice(0, 25),
     recentReviews: reviews.slice(-20).reverse(),
+    /** Cumulative running totals — drive the hero counters card. Each value
+     *  here is ETH "ever distributed to this leg" since launch. */
+    counters: {
+      authorsTotalEth: dist.toAuthors,
+      lotteryTotalEth: dist.toTeam, // toTeam holds the lottery slice post-rename
+      buybackTotalEth: dist.toBuyback, // proxy for "$THESIS burned ever"
+      portfolioTotalEth: dist.toPortfolio,
+      winRate7d,
+      winRate7dCount: recentWeekClosed.length,
+    },
+    /** Last 24h highlight — small punchy strip near the top. */
+    recentWins: {
+      count24h: recentWinsCount,
+      profitEth24h: recentWinsProfitEth,
+      closedCount24h: recentClosed.length,
+    },
+    /** Per-author stats keyed by LOWERCASED handle. The frontend looks up
+     *  each row's author here to render inline win/total stats. */
+    authorStats,
+    /** Last 50 ticker events (newest first). Drives the live activity tape. */
+    recentActivity: getRecentActivity(50),
+    /** Rolling 48h of portfolio-value snapshots (≤30min resolution). Drives
+     *  the hero sparkline. Empty array on first server run; fills over time. */
+    portfolioSnapshots: portfolioSnapshots.slice(),
   };
 }
 

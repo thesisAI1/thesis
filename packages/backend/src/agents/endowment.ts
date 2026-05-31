@@ -20,6 +20,7 @@
  */
 
 import type { Distribution, Position, RegistryEntry, SettlementProgress } from "@thesis/shared";
+import { recordActivity } from "../activity.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter } from "../adapters/x/index.js";
 import { config, useMock } from "../config.js";
@@ -175,6 +176,16 @@ export async function runEndowment(
       lotteryPayment = result;
       teamPaidEth = result.paid.reduce((s, p) => s + p.amountEth, 0);
       buybackBudget += result.undistributedEth;
+      if (result.paid.length > 0) {
+        // Feed the dashboard ticker — lottery payouts are a visible
+        // "community wins" signal that should surface in the live feed.
+        recordActivity({
+          kind: "lottery",
+          summary: `🎲 ${result.paid.length} $THESIS holders won ${result.paid[0].amountEth.toFixed(4)} Ξ each`,
+          positionId: position.id,
+          amountEth: teamPaidEth,
+        });
+      }
     } else if (useMock() || config.chain.teamWallet) {
       teamOk = await runLeg("pay team", () =>
         chain.sendEth(config.chain.teamWallet, quarter),
@@ -196,6 +207,14 @@ export async function runEndowment(
       if (ok) {
         progress.buybackDone = true;
         await saveProgress();
+        // Ticker activity for the burn — the deflationary narrative deserves
+        // a visible event each time the wallet permanently removes supply.
+        recordActivity({
+          kind: "burn",
+          summary: `🔥 Buyback + burn ${buybackBudget.toFixed(4)} Ξ of $THESIS`,
+          positionId: position.id,
+          amountEth: buybackBudget,
+        });
       }
     } else {
       // Not applicable in this config — mark done so settlement can finalise.

@@ -225,11 +225,12 @@ function renderDashboard(d) {
   // dashboard refresh; tickLiveStatus keeps the "updated Xs ago" copy
   // fresh in between.
   renderHeroStats(r, di);
+  // Paid-to-authors and buyback-burned moved into the Counters card above
+  // (counters-card section, populated by renderCounters). Keep only the
+  // pipeline-throughput metrics here that aren't shown elsewhere.
   $("#stat-row").innerHTML = [
     mini(String(r.total), "theses reviewed"),
     mini(`${r.buys} / ${r.skips}`, "bought / skipped"),
-    mini(fmtEth(di.toAuthors) + " ETH", "paid to authors"),
-    mini(fmtEth(di.toBuyback) + " ETH", "$THESIS bought back & burned"),
   ].join("");
 
   const f = d.funnel || {};
@@ -239,10 +240,127 @@ function renderDashboard(d) {
     `<b>${f.reviewed || 0}</b> fully reviewed  ·  ` +
     `<b>${f.queued || 0}</b> waiting in the queue`;
 
-  renderOpen(d.openPositions || []);
-  renderClosed(d.closedPositions || []);
+  renderTicker(d.recentActivity || []);
+  renderCounters(d.counters || null);
+  renderRecentWins(d.recentWins || null);
+  renderSparkline(d.portfolioSnapshots || []);
+  renderOpen(d.openPositions || [], d.authorStats || {});
+  renderClosed(d.closedPositions || [], d.authorStats || {});
   renderFeed(d.recentReviews || []);
   renderDist(di);
+}
+
+/** Render the live ticker tape — scrolling marquee of recent activity.
+ *  Items come from the backend in-memory ring buffer (last 50), newest
+ *  first. We duplicate them in the DOM so the CSS @keyframes marquee
+ *  can scroll seamlessly without a gap at the end. */
+function renderTicker(items) {
+  const wrap = $("#ticker-tape");
+  const track = $("#ticker-track");
+  if (!wrap || !track) return;
+  if (!items || items.length === 0) {
+    wrap.hidden = true;
+    return;
+  }
+  wrap.hidden = false;
+  // Cap to 30 items — long marquees just slow the scroll without adding
+  // signal, since by item 30 you've cycled past relevance.
+  const top = items.slice(0, 30);
+  const renderOne = (it) => {
+    const kindClass = {
+      buy: "tk-buy", tp: "tk-tp", sl: "tk-sl", manual: "tk-manual",
+      aging: "tk-aging", lottery: "tk-lottery", burn: "tk-burn", skip: "tk-skip",
+    }[it.kind] || "";
+    return `<span class="tk-item ${kindClass}">${esc(it.summary)}</span>`;
+  };
+  // Duplicate the list so the marquee can loop without a visible gap.
+  const html = top.map(renderOne).join('<span class="tk-dot">·</span>');
+  track.innerHTML = html + '<span class="tk-dot">·</span>' + html;
+}
+
+/** Render the cumulative running counters card. */
+function renderCounters(c) {
+  const card = $("#counters-card");
+  if (!card) return;
+  if (!c) { card.hidden = true; return; }
+  card.hidden = false;
+  $("#counter-buyback").textContent = fmtEth(c.buybackTotalEth || 0) + " Ξ";
+  $("#counter-authors").textContent = fmtEth(c.authorsTotalEth || 0) + " Ξ";
+  $("#counter-lottery").textContent = fmtEth(c.lotteryTotalEth || 0) + " Ξ";
+  const wr = c.winRate7d || 0;
+  $("#counter-winrate").textContent = (wr * 100).toFixed(0) + "%";
+  $("#counter-winrate-sub").textContent =
+    c.winRate7dCount > 0 ? `over ${c.winRate7dCount} closes` : "no closes yet";
+}
+
+/** Render the recent wins highlight strip. */
+function renderRecentWins(rw) {
+  const card = $("#recent-wins");
+  if (!card) return;
+  if (!rw || rw.count24h === 0) { card.hidden = true; return; }
+  card.hidden = false;
+  $("#rw-headline").innerHTML =
+    `<b>${rw.count24h} win${rw.count24h === 1 ? "" : "s"}</b>, ` +
+    `<span class="rw-profit">+${fmtEth(rw.profitEth24h)} Ξ</span> banked`;
+  $("#rw-sub").textContent =
+    `last 24h · ${rw.closedCount24h} total close${rw.closedCount24h === 1 ? "" : "s"}`;
+}
+
+/** Render the portfolio value sparkline from periodic snapshots. */
+function renderSparkline(snaps) {
+  const card = $("#sparkline-card");
+  const svg = $("#sp-chart");
+  if (!card || !svg) return;
+  if (!snaps || snaps.length < 2) { card.hidden = true; return; }
+  card.hidden = false;
+  const values = snaps.map((s) => Number(s.totalValueEth) || 0);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = max - min || 1;
+  const W = 280, H = 50, PAD = 4;
+  const innerW = W - PAD * 2, innerH = H - PAD * 2;
+  const pts = values.map((v, i) => {
+    const x = PAD + (i / (values.length - 1)) * innerW;
+    const y = PAD + innerH - ((v - min) / span) * innerH;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const polyline = pts.join(" ");
+  const lastV = values[values.length - 1];
+  const firstV = values[0];
+  const trend = lastV >= firstV ? "up" : "down";
+  const color = trend === "up" ? "#3FB984" : "#E0653E";
+  svg.innerHTML =
+    `<polygon points="${polyline} ${W - PAD},${H - PAD} ${PAD},${H - PAD}" fill="${color}" opacity="0.10"/>` +
+    `<polyline points="${polyline}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`;
+}
+
+/** Compact "age" formatter: "2d 4h", "8h", "32m" — for the open positions
+ *  Age column. Same vibe as timeAgo() but in shorter "Xd Yh" form. */
+function fmtAge(iso) {
+  if (!iso) return "—";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!isFinite(ms) || ms < 0) return "—";
+  const min = Math.floor(ms / 60000);
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  const remH = h % 24;
+  return remH > 0 ? `${d}d ${remH}h` : `${d}d`;
+}
+
+/** Compute TP proximity string: how far is current price from the next
+ *  unreached take-profit target. Returns null when no next TP (all hit). */
+function tpProximity(o) {
+  const targets = Array.isArray(o.tierTargets) ? o.tierTargets : [];
+  const tiersHit = Number(o.tiersHit) || 0;
+  if (tiersHit >= targets.length) return null;
+  const nextTarget = targets[tiersHit]; // {gainPct, sellPct}
+  const gainPct = Number(o.unrealizedPct);
+  if (!isFinite(gainPct)) return null;
+  const distance = nextTarget.gainPct - gainPct;
+  if (distance <= 0) return null;
+  return { tier: tiersHit + 1, distance };
 }
 
 /** Inline-SVG icon set used by the Live Performance stat cards. Kept as
@@ -317,23 +435,35 @@ function mini(value, label) {
     <div class="mini-label">${esc(label)}</div></div>`;
 }
 
-function renderOpen(rows) {
+function renderOpen(rows, authorStats) {
   $("#open-count").textContent = rows.length;
   $("#open-empty").hidden = rows.length > 0;
   $("#open-rows").innerHTML = rows
     .map((o) => {
       // data-label is consumed by the mobile card-view CSS (@media ≤600px)
       // to prefix each value with its column name. Desktop ignores it.
+      const stats = authorStats[(o.authorHandle || "").toLowerCase()];
       return `<tr>
-    <td data-label="Token">${tokenCell(o.tokenSymbol, o.contractAddress)}</td>
-    <td data-label="Author">${authorCell(o)}</td>
+    <td data-label="Token">${tokenCell(o.tokenSymbol, o.contractAddress, o.tokenLogoUrl)}</td>
+    <td data-label="Author">${authorCell(o)}${authorStatsBadge(stats)}</td>
     <td data-label="Grade">${gradeBadge(o.grade)}</td>
     <td data-label="Stage">${tierProgressCell(o)}</td>
     <td class="num" data-label="Size">${fmtEth(o.amountInEth)}</td>
     <td class="num" data-label="Market cap">${mcapCell(o.marketCapAtEntryUsd, o.marketCapNowUsd)}</td>
+    <td class="num" data-label="Age">${esc(fmtAge(o.openedAt))}</td>
     <td class="num ${pnlClass(o.unrealizedPnlEth)}" data-label="Unrealised">${fmtEth(o.unrealizedPnlEth)} (${fmtPct(o.unrealizedPct)})</td></tr>`;
     })
     .join("");
+}
+
+/** Small "(5/8 wins)" badge next to the author handle, decorating tables
+ *  with the author's track record on the project. Returns empty string for
+ *  authors with no closed trades yet (no signal to surface). */
+function authorStatsBadge(stats) {
+  if (!stats || !stats.total) return "";
+  const rate = (stats.winRate || 0) * 100;
+  const klass = rate >= 50 ? "as-good" : "as-mid";
+  return `<span class="author-stats ${klass}" title="${stats.wins} wins of ${stats.total} closed">(${stats.wins}/${stats.total})</span>`;
 }
 
 /**
@@ -397,10 +527,17 @@ function tierProgressCell(o) {
     left = `<span class="tp-good">TP${tiersHit} &middot; +${lastHit}%</span>`;
     right = `&rarr; TP${tiersHit + 1} +${targets[tiersHit].gainPct}%`;
   }
+  // TP proximity hint — how far to the next take-profit. When the distance
+  // is small (< 10%) we accent it green to telegraph "imminent fire".
+  const prox = tpProximity(o);
+  const proxLine = prox
+    ? `<div class="tp-proximity ${prox.distance < 10 ? "tp-prox-hot" : "tp-prox-far"}">TP${prox.tier} in +${prox.distance < 10 ? prox.distance.toFixed(1) : Math.round(prox.distance)}%</div>`
+    : "";
   return (
     `<div class="tp-cell">` +
     `<div class="tp-bar">${segments.join("")}</div>` +
     `<div class="tp-caption"><span>${left}</span><span class="tp-dim">${right}</span></div>` +
+    proxLine +
     `</div>`
   );
 }
@@ -415,7 +552,7 @@ function fmtSignedPct(n) {
 }
 
 /** Render the token cell: $TICKER link to DexScreener + copy-CA icon button. */
-function tokenCell(symbol, address) {
+function tokenCell(symbol, address, logoUrl) {
   const label = symbol ? "$" + symbol : shortAddr(address);
   const dexUrl = dexscreenerUrl(address);
   const addrAttr = esc(address);
@@ -425,8 +562,15 @@ function tokenCell(symbol, address) {
     '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
     '<path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>' +
     '</svg>';
+  // Token logo from DexScreener (populated when the project paid for their
+  // socials/profile upgrade). Falls back gracefully — when no logo, the row
+  // renders just the ticker + copy button as before.
+  const logo = logoUrl
+    ? `<img class="tok-logo" src="${esc(logoUrl)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()" />`
+    : "";
   return (
     `<div class="tok-cell">` +
+    logo +
     `<a class="tok" href="${dexUrl}" target="_blank" rel="noopener noreferrer" title="${addrAttr}">${esc(label)}</a>` +
     `<button class="tok-copy" type="button" data-copy="${addrAttr}" onclick="copyCA(this)" title="Copy contract address" aria-label="Copy contract address">${copyIcon}</button>` +
     `</div>`
@@ -486,17 +630,20 @@ function fmtMcap(usd) {
   if (usd >= 1_000) return "$" + Math.round(usd / 1_000) + "K";
   return "$" + Math.round(usd);
 }
-function renderClosed(rows) {
+function renderClosed(rows, authorStats) {
   $("#closed-count").textContent = rows.length;
   $("#closed-empty").hidden = rows.length > 0;
-  $("#closed-rows").innerHTML = rows.map((c) => `<tr>
-    <td data-label="Token">${tokenCell(c.tokenSymbol, c.contractAddress)}</td>
-    <td data-label="Author">${esc(c.authorHandle)}</td>
+  $("#closed-rows").innerHTML = rows.map((c) => {
+    const stats = authorStats[(c.authorHandle || "").toLowerCase()];
+    return `<tr>
+    <td data-label="Token">${tokenCell(c.tokenSymbol, c.contractAddress, c.tokenLogoUrl)}</td>
+    <td data-label="Author">${authorCell(c)}${authorStatsBadge(stats)}</td>
     <td class="num" data-label="Size">${fmtEth(c.amountInEth)}</td>
-    <td class="num" data-label="Entry MC">${esc(fmtMcap(c.marketCapAtEntryUsd))}</td>
+    <td class="num" data-label="Entry MC">${esc(fmtMcap(c.entryMarketCapUsd))}</td>
     <td class="num" data-label="Exit MC">${esc(fmtMcap(c.exitMarketCapUsd))}</td>
     <td class="num ${pnlClass(c.realisedPnlEth)}" data-label="Realised PnL">${fmtEth(c.realisedPnlEth)} (${fmtPct(c.realisedPct)})</td>
-    <td data-label="Closed">${esc(timeAgo(c.closedAt))}</td></tr>`).join("");
+    <td data-label="Closed">${esc(timeAgo(c.closedAt))}</td></tr>`;
+  }).join("");
 }
 function renderFeed(rows) {
   $("#feed-empty").hidden = rows.length > 0;

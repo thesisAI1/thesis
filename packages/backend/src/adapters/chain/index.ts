@@ -43,6 +43,21 @@ export interface ChainAdapter {
   ): Promise<SwapResult>;
   /** Spot price in ETH per token. */
   getTokenPriceEth(address: string): Promise<number>;
+  /** Real-time on-chain quote: what ETH amount would we actually receive
+   *  if we sold `amountTokens` right now via the aggregator?
+   *
+   *  Critical for money-relevant decisions (manual close gate, force-close
+   *  endpoint) where a stale Birdeye cache could approve a close at the
+   *  wrong profit level — see the 2026-05-30 JustT1602 incident where the
+   *  gate saw +40% profit from a cached price but the actual sell landed
+   *  at +12%. KyberSwap's route endpoint returns the exact post-routing
+   *  amountOut for a given input, with no caching layer between us and
+   *  the live LP state, so the gate's math matches what the sell will
+   *  actually fill at (modulo a few seconds of normal market drift).
+   *
+   *  Costs nothing — KyberSwap aggregator is a free public endpoint and
+   *  we already use it for every buy/sell. */
+  quoteSell(address: string, amountTokens: number): Promise<{ proceedsEth: number }>;
   /** Send ETH to an address — author and team payouts. Returns the tx hash. */
   sendEth(toAddress: string, amountEth: number): Promise<string>;
   /** Buy $THESIS with `amountInEth` and send it straight to the burn address. */

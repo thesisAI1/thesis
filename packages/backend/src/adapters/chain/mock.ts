@@ -49,6 +49,13 @@ export class MockChain implements ChainAdapter {
     return current;
   }
 
+  async quoteSell(
+    address: string,
+    amountTokens: number,
+  ): Promise<{ proceedsEth: number }> {
+    return { proceedsEth: amountTokens * priceOf(address) };
+  }
+
   async sendEth(_toAddress: string, _amountEth: number): Promise<string> {
     return "0xMOCKsendtx";
   }
