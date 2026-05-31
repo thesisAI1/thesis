@@ -19,7 +19,7 @@
  * Every on-chain leg is gated (LIVE_TRADING_ARMED) and mock-safe.
  */
 
-import type { Distribution, Position, RegistryEntry, SettlementProgress } from "@thesis/shared";
+import type { Chain, Distribution, Position, RegistryEntry, SettlementProgress } from "@thesis/shared";
 import { recordActivity } from "../activity.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter } from "../adapters/x/index.js";
@@ -76,6 +76,21 @@ export interface EndowmentResult {
  * (legacy path posts the author tweet inline). All current callers pass
  * true; the option is kept for backwards compat / future flexibility.
  */
+/**
+ * Per-chain settlement policy for the team + buyback quarters.
+ *
+ *   Base   — the $THESIS holder lottery (when enabled) + buyback-and-burn of
+ *            $THESIS (the deflationary mechanic).
+ *   Solana — NO holder lottery (it enumerates Base $THESIS holders) and NO
+ *            $THESIS burn (there is no $THESIS on Solana). Both the team slice
+ *            and the buyback-substitute slice are sent in SOL to
+ *            SOLANA_BUYBACK_WALLET — the operator's designated Solana wallet.
+ */
+export function settlementPolicy(chain: Chain): { useLottery: boolean; useBurn: boolean } {
+  if (chain === "solana") return { useLottery: false, useBurn: false };
+  return { useLottery: config.holderLottery.enabled, useBurn: true };
+}
+
 export async function runEndowment(
   position: Position,
   profitEth: number,
@@ -85,7 +100,10 @@ export async function runEndowment(
 
   const quarter = profitEth / 4;
   const store = getStore();
-  const chain = createChainAdapter();
+  // Settle on the position's own chain — SOL legs for a Solana win, ETH for Base.
+  const chain = createChainAdapter(position.order.chain);
+  const policy = settlementPolicy(position.order.chain);
+  const isSolana = position.order.chain === "solana";
   const entry = await store.getRegistryEntry(position.authorXId);
 
   // PR3 — idempotent settlement. Each leg is gated on a persisted marker, and
@@ -167,7 +185,8 @@ export async function runEndowment(
   let buybackBudget = quarter; // base buyback slice; may be topped up below
   if (!progress.teamDone) {
     let teamOk = true;
-    if (config.holderLottery.enabled) {
+    if (policy.useLottery) {
+      // Base only — the lottery enumerates Base $THESIS holders.
       // runHolderLottery only throws BEFORE any winner is paid (a drawLottery
       // failure); that propagates, leaving teamDone false → safe to retry.
       // Partial winner-send failures are caught inside and rolled into the
@@ -186,6 +205,14 @@ export async function runEndowment(
           amountEth: teamPaidEth,
         });
       }
+    } else if (isSolana) {
+      // Solana team slice — no lottery; pay SOL to the operator's Solana wallet.
+      if (useMock() || config.solana.buybackWallet) {
+        teamOk = await runLeg("pay team (SOL)", () =>
+          chain.sendEth(config.solana.buybackWallet, quarter),
+        );
+        teamPaidEth = teamOk ? quarter : 0;
+      }
     } else if (useMock() || config.chain.teamWallet) {
       teamOk = await runLeg("pay team", () =>
         chain.sendEth(config.chain.teamWallet, quarter),
@@ -198,9 +225,30 @@ export async function runEndowment(
     }
   }
 
-  // 25% (+ any undistributed lottery ETH) — buy back $THESIS and burn it.
+  // 25% (+ any undistributed lottery ETH) — buy back $THESIS and burn it (Base),
+  // or send the buyback-substitute slice in SOL to the Solana wallet (Solana —
+  // no $THESIS exists there to burn).
   if (!progress.buybackDone) {
-    if (useMock() || config.chain.thesisToken) {
+    if (isSolana) {
+      if (useMock() || config.solana.buybackWallet) {
+        const ok = await runLeg("solana buyback → wallet (SOL)", () =>
+          chain.sendEth(config.solana.buybackWallet, buybackBudget),
+        );
+        if (ok) {
+          progress.buybackDone = true;
+          await saveProgress();
+          recordActivity({
+            kind: "burn",
+            summary: `◎ ${buybackBudget.toFixed(4)} SOL → buyback wallet (no $THESIS on Solana to burn)`,
+            positionId: position.id,
+            amountEth: buybackBudget,
+          });
+        }
+      } else {
+        progress.buybackDone = true;
+        await saveProgress();
+      }
+    } else if (useMock() || config.chain.thesisToken) {
       const ok = await runLeg("buyback & burn $THESIS", () =>
         chain.buybackAndBurn(buybackBudget).then((r) => r.txHash),
       );
