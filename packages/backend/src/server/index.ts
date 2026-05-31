@@ -98,6 +98,53 @@ const symbolCache = new Map<string, string>();
  *  indexes new pools within seconds of pool creation, so it tends to pick
  *  up tokens that Birdeye is still catching up to. */
 const dexScreenerFallback = new RealBaseData();
+
+/** In-memory cache for token logos pulled from DexScreener's "Token Info"
+ *  data — the picture creators upload after paying for socials/profile
+ *  enhancement. We use the `info.imageUrl` field from the pair endpoint.
+ *
+ *  Map value of null means "checked, no logo available" (caches the
+ *  negative result for a shorter TTL so newly-uploaded logos surface
+ *  within minutes rather than hours). Map value of string is the URL.
+ *  Map value undefined means "never checked, go fetch". */
+const logoCache = new Map<string, string | null>();
+const logoCacheExpiry = new Map<string, number>();
+const LOGO_TTL_POSITIVE_MS = 60 * 60 * 1000; // 1h
+const LOGO_TTL_NEGATIVE_MS = 10 * 60 * 1000; // 10m
+async function getLogoCached(address: string): Promise<string | null> {
+  const key = address.toLowerCase();
+  const expiry = logoCacheExpiry.get(key) ?? 0;
+  if (Date.now() < expiry) {
+    return logoCache.get(key) ?? null;
+  }
+  let logoUrl: string | null = null;
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
+    if (res.ok) {
+      const json = (await res.json()) as {
+        pairs?: Array<{ info?: { imageUrl?: string } }>;
+      };
+      // Take the first pair that has an imageUrl — DexScreener returns
+      // multiple pairs (one per liquidity pool) but token-level info is
+      // identical across them, so first hit is fine.
+      for (const pair of json.pairs ?? []) {
+        if (pair.info?.imageUrl) {
+          logoUrl = pair.info.imageUrl;
+          break;
+        }
+      }
+    }
+  } catch {
+    /* network/parse error — cache as null with negative TTL and retry next cycle */
+  }
+  logoCache.set(key, logoUrl);
+  logoCacheExpiry.set(
+    key,
+    Date.now() + (logoUrl ? LOGO_TTL_POSITIVE_MS : LOGO_TTL_NEGATIVE_MS),
+  );
+  return logoUrl;
+}
+
 async function getSymbolCached(address: string): Promise<string> {
   const key = address.toLowerCase();
   const hit = symbolCache.get(key);
@@ -846,6 +893,9 @@ interface OpenPositionView {
   contractAddress: string;
   /** Token ticker — e.g. "DEGEN". Empty when DexScreener doesn't know it yet. */
   tokenSymbol: string;
+  /** Token logo URL from DexScreener's info.imageUrl (populated when the
+   *  creator paid for the socials/profile upgrade). null when unavailable. */
+  tokenLogoUrl: string | null;
   authorHandle: string;
   /** X profile image URL of the author (display only). */
   authorAvatarUrl: string | null;
@@ -943,10 +993,16 @@ async function buildDashboardPayload(): Promise<object> {
   );
 
   // Pre-warm the ticker cache for every position address (parallel; cached).
+  // Same for DexScreener logos — paid socials-upgrade tokens carry an
+  // imageUrl in their pair info which we surface next to the ticker in
+  // both the Open Positions and Closed Trades tables.
   const uniqueAddresses = Array.from(
     new Set(positions.map((p) => p.order.contractAddress.toLowerCase())),
   );
-  await Promise.all(uniqueAddresses.map((a) => getSymbolCached(a)));
+  await Promise.all([
+    ...uniqueAddresses.map((a) => getSymbolCached(a)),
+    ...uniqueAddresses.map((a) => getLogoCached(a)),
+  ]);
 
   // Batched price fetch for all open positions in ONE Birdeye request,
   // instead of one HTTP call per position serialised in the loop. With 60+
@@ -1006,6 +1062,7 @@ async function buildDashboardPayload(): Promise<object> {
       id: p.id,
       contractAddress: p.order.contractAddress,
       tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
+      tokenLogoUrl: logoCache.get(p.order.contractAddress.toLowerCase()) ?? null,
       authorHandle: p.authorHandle,
       authorAvatarUrl: p.authorAvatarUrl ?? null,
       grade: gradeByPosition.get(p.id) ?? null,
@@ -1059,6 +1116,7 @@ async function buildDashboardPayload(): Promise<object> {
         id: p.id,
         contractAddress: p.order.contractAddress,
         tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
+        tokenLogoUrl: logoCache.get(p.order.contractAddress.toLowerCase()) ?? null,
         authorHandle: p.authorHandle,
         authorAvatarUrl: p.authorAvatarUrl ?? null,
         postUrl: postUrlByPosition.get(p.id) ?? null,

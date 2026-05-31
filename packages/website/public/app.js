@@ -325,7 +325,7 @@ function renderOpen(rows) {
       // data-label is consumed by the mobile card-view CSS (@media ≤600px)
       // to prefix each value with its column name. Desktop ignores it.
       return `<tr>
-    <td data-label="Token">${tokenCell(o.tokenSymbol, o.contractAddress)}</td>
+    <td data-label="Token">${tokenCell(o.tokenSymbol, o.contractAddress, o.tokenLogoUrl)}</td>
     <td data-label="Author">${authorCell(o)}</td>
     <td data-label="Grade">${gradeBadge(o.grade)}</td>
     <td data-label="Stage">${tierProgressCell(o)}</td>
@@ -415,7 +415,7 @@ function fmtSignedPct(n) {
 }
 
 /** Render the token cell: $TICKER link to DexScreener + copy-CA icon button. */
-function tokenCell(symbol, address) {
+function tokenCell(symbol, address, logoUrl) {
   const label = symbol ? "$" + symbol : shortAddr(address);
   const dexUrl = dexscreenerUrl(address);
   const addrAttr = esc(address);
@@ -425,8 +425,15 @@ function tokenCell(symbol, address) {
     '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
     '<path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>' +
     '</svg>';
+  // Token logo from DexScreener (populated when the project paid for their
+  // socials/profile upgrade). Falls back gracefully — when no logo, the row
+  // renders just the ticker + copy button as before.
+  const logo = logoUrl
+    ? `<img class="tok-logo" src="${esc(logoUrl)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()" />`
+    : "";
   return (
     `<div class="tok-cell">` +
+    logo +
     `<a class="tok" href="${dexUrl}" target="_blank" rel="noopener noreferrer" title="${addrAttr}">${esc(label)}</a>` +
     `<button class="tok-copy" type="button" data-copy="${addrAttr}" onclick="copyCA(this)" title="Copy contract address" aria-label="Copy contract address">${copyIcon}</button>` +
     `</div>`
@@ -490,7 +497,7 @@ function renderClosed(rows) {
   $("#closed-count").textContent = rows.length;
   $("#closed-empty").hidden = rows.length > 0;
   $("#closed-rows").innerHTML = rows.map((c) => `<tr>
-    <td data-label="Token">${tokenCell(c.tokenSymbol, c.contractAddress)}</td>
+    <td data-label="Token">${tokenCell(c.tokenSymbol, c.contractAddress, c.tokenLogoUrl)}</td>
     <td data-label="Author">${authorCell(c)}</td>
     <td class="num" data-label="Size">${fmtEth(c.amountInEth)}</td>
     <td class="num" data-label="Entry">${esc(fmtMcap(c.entryMarketCapUsd))}</td>

@@ -567,6 +567,14 @@ code { font-family: var(--mono); }
  * `tok-copy` not `copy-btn` — `copy-btn` is already taken by the header's
  * "copy contract address" button with very different sizing rules. */
 .tok-cell { display: inline-flex; align-items: center; gap: 8px; }
+.tok-logo {
+  width: 20px; height: 20px; min-width: 20px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  object-fit: cover;
+  border: 1px solid var(--border-2);
+  flex-shrink: 0;
+}
 .tok-copy {
   display: inline-flex; align-items: center; justify-content: center;
   width: 24px; height: 24px; min-width: 24px;
