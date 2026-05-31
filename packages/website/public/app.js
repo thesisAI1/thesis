@@ -225,11 +225,12 @@ function renderDashboard(d) {
   // dashboard refresh; tickLiveStatus keeps the "updated Xs ago" copy
   // fresh in between.
   renderHeroStats(r, di);
+  // Paid-to-authors and buyback-burned moved into the Counters card above
+  // (counters-card section, populated by renderCounters). Keep only the
+  // pipeline-throughput metrics here that aren't shown elsewhere.
   $("#stat-row").innerHTML = [
     mini(String(r.total), "theses reviewed"),
     mini(`${r.buys} / ${r.skips}`, "bought / skipped"),
-    mini(fmtEth(di.toAuthors) + " ETH", "paid to authors"),
-    mini(fmtEth(di.toBuyback) + " ETH", "$THESIS bought back & burned"),
   ].join("");
 
   const f = d.funnel || {};
