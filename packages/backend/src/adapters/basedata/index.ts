@@ -15,6 +15,8 @@ import { config, useMock } from "../../config.js";
 import { BirdeyeBaseData } from "./birdeye.js";
 import { MockBaseData } from "./mock.js";
 import { RealBaseData } from "./real.js";
+import { MockSolanaData } from "./solana.mock.js";
+import { RealSolanaData } from "./solana.real.js";
 
 /** On-chain snapshot of a token. */
 export interface TokenOnChain {
@@ -48,7 +50,16 @@ export interface BaseDataAdapter {
 }
 
 let _adapterLogged = false;
-export function createBaseDataAdapter(): BaseDataAdapter {
+/**
+ * Token-data adapter for `chain`. Defaults to "base" so every arg-less caller
+ * is unchanged. Solana routes to the Solana data path (DexScreener Solana pairs
+ * + GoPlus Solana + pump.fun detection); everything else uses the Base path
+ * (Mock / Birdeye / DexScreener) exactly as before.
+ */
+export function createBaseDataAdapter(chain: Chain = "base"): BaseDataAdapter {
+  if (chain === "solana") {
+    return useMock() ? new MockSolanaData() : new RealSolanaData();
+  }
   if (useMock()) {
     if (!_adapterLogged) {
       console.log("[basedata] using MockBaseData");
