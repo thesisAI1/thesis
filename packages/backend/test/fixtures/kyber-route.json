@@ -1,0 +1,25 @@
+{
+  "__synthetic": "SYNTHETIC — shape inferred from the parser; replace with a real captured response from production keys",
+  "code": 0,
+  "message": "successfully",
+  "data": {
+    "routeSummary": {
+      "tokenIn": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+      "amountIn": "100000000000000000",
+      "tokenOut": "0xaabbccddaabbccddaabbccddaabbccddaabbccdd",
+      "amountOut": "5000000000000000000",
+      "route": [
+        [
+          {
+            "pool": "0xpool1",
+            "tokenIn": "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE",
+            "tokenOut": "0xaabbccddaabbccddaabbccddaabbccddaabbccdd",
+            "exchange": "uniswapv4",
+            "amountOut": "5000000000000000000"
+          }
+        ]
+      ]
+    },
+    "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5"
+  }
+}

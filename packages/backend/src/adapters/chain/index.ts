@@ -49,6 +49,20 @@ export interface ChainAdapter {
   buybackAndBurn(amountInEth: number): Promise<{ txHash: string; tokensBurned: number }>;
 }
 
+let _testOverride: ChainAdapter | null = null;
+
+/** TEST ONLY — force a specific chain adapter (e.g. one that simulates a failing
+ *  send) so settlement-retry behaviour can be exercised deterministically.
+ *  Throws in production so it can never be used to hijack the live wallet. Pass
+ *  null to clear the override. */
+export function __setChainForTest(adapter: ChainAdapter | null): void {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("__setChainForTest is not available in production");
+  }
+  _testOverride = adapter;
+}
+
 export function createChainAdapter(): ChainAdapter {
+  if (_testOverride) return _testOverride;
   return useMock() ? new MockChain() : new RealChain();
 }

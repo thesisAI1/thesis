@@ -100,6 +100,9 @@ export async function reviewSubmission(submission: Submission): Promise<ReviewRe
 export async function settlePosition(
   position: Position,
   profitEth: number,
+  options: { silentAuthorTweet?: boolean } = {},
 ): Promise<EndowmentResult | null> {
-  return runEndowment(position, profitEth, { silentAuthorTweet: true });
+  return runEndowment(position, profitEth, {
+    silentAuthorTweet: options.silentAuthorTweet ?? true,
+  });
 }

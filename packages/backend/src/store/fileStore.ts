@@ -8,12 +8,13 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Distribution, Position, RegistryEntry, ReviewRecord } from "@thesis/shared";
-import type { EscrowEntry, Funnel, PayoutRequest, QueueItem, Store } from "./index.js";
+import type { EscrowEntry, Funnel, PayoutRequest, PendingBuy, QueueItem, Store } from "./index.js";
 
 interface Data {
   registry: Record<string, RegistryEntry>;
   positions: Position[];
   buyLog: string[];
+  pendingBuys: PendingBuy[];
   escrow: Record<string, EscrowEntry>;
   payoutRequests: Record<string, PayoutRequest>;
   processed: string[];
@@ -21,12 +22,22 @@ interface Data {
   distributions: Distribution[];
   queue: QueueItem[];
   funnel: Funnel;
+  /** On-disk schema version, for one-time migrations on load. ABSENT on files
+   *  written before migrations existed (treated as 0). Deliberately NOT in
+   *  EMPTY — if it were, the {...EMPTY, ...parsed} merge would mask a legacy
+   *  file's missing version and skip its migration. */
+  schemaVersion?: number;
 }
+
+/** Current persisted-schema version. Bump when a load-time migration is added.
+ *  v1: durable settlement (Position.settledAt + per-leg settlement markers). */
+const SCHEMA_VERSION = 1;
 
 const EMPTY: Data = {
   registry: {},
   positions: [],
   buyLog: [],
+  pendingBuys: [],
   escrow: {},
   payoutRequests: {},
   processed: [],
@@ -66,8 +77,56 @@ export class FileStore implements Store {
     this.file = join(dir, "thesis-data.json");
     this.tmpFile = this.file + ".tmp";
     this.bakFile = this.file + ".bak";
-    this.data = this.loadOrRecover();
+    this.data = this.migrate(this.loadOrRecover());
     this.persist();
+  }
+
+  /**
+   * One-time, idempotent load-time migrations, keyed by schemaVersion.
+   *
+   * v1 — durable settlement. Positions written before this change have neither
+   * `settledAt` nor `settlement`. Every such CLOSED position was already
+   * settled INLINE by the old close path, so we must stamp it terminally
+   * settled here — otherwise the monitor's resume pass
+   * (`getUnsettledClosedPositions` = `closed && !settledAt`) would treat every
+   * historical closed trade as unsettled and RE-RUN settlement on the first
+   * tick after the upgrade, re-paying the author + team + buyback for trades
+   * that were paid long ago. That would be a real, large double-spend on merge.
+   *
+   * We conservatively stamp ALL pre-v1 closed positions (not just profitable
+   * ones): a loss-close has no payout to re-run, and stamping is harmless. If a
+   * historical author was genuinely left unpaid by the old settle-once bug,
+   * recover them manually via /admin/settle-stuck-payout — we do NOT auto-pay
+   * here, to keep the upgrade predictable (no surprise payouts on boot).
+   *
+   * Gated on schemaVersion so it runs EXACTLY once: post-migration closed
+   * positions that legitimately need a settlement retry are never touched.
+   */
+  private migrate(data: Data): Data {
+    if ((data.schemaVersion ?? 0) < 1) {
+      let stamped = 0;
+      for (const p of data.positions) {
+        if (p.status === "closed" && !p.settledAt) {
+          p.settledAt = p.closedAt ?? new Date().toISOString();
+          p.settlement = {
+            authorDone: true,
+            teamDone: true,
+            buybackDone: true,
+            distributionDone: true,
+          };
+          stamped += 1;
+        }
+      }
+      if (stamped > 0) {
+        console.warn(
+          `[FileStore] schema v1 migration: stamped ${stamped} pre-existing closed ` +
+            `position(s) as already-settled (prevents re-paying historical trades on ` +
+            `upgrade). Genuinely-unpaid historical authors: use /admin/settle-stuck-payout.`,
+        );
+      }
+      data.schemaVersion = 1;
+    }
+    return data;
   }
 
   /** Try the main file, then the .bak fallback, then EMPTY. Logs which path
@@ -139,6 +198,27 @@ export class FileStore implements Store {
 
   async getAllPositions(): Promise<Position[]> {
     return [...this.data.positions];
+  }
+
+  async getUnsettledClosedPositions(): Promise<Position[]> {
+    return this.data.positions.filter((p) => p.status === "closed" && !p.settledAt);
+  }
+
+  async recordPendingBuy(buy: PendingBuy): Promise<void> {
+    // Replace any existing marker for the same post (idempotent re-attempt).
+    this.data.pendingBuys = this.data.pendingBuys.filter((b) => b.postId !== buy.postId);
+    this.data.pendingBuys.push(buy);
+    this.persist();
+  }
+
+  async getPendingBuys(): Promise<PendingBuy[]> {
+    return [...this.data.pendingBuys];
+  }
+
+  async clearPendingBuy(postId: string): Promise<void> {
+    const before = this.data.pendingBuys.length;
+    this.data.pendingBuys = this.data.pendingBuys.filter((b) => b.postId !== postId);
+    if (this.data.pendingBuys.length !== before) this.persist();
   }
 
   async recordBuy(isoAt: string): Promise<void> {
@@ -226,6 +306,17 @@ export class FileStore implements Store {
       }
     }
     if (changed) this.persist();
+  }
+
+  async clearPayout(xUserId: string): Promise<void> {
+    // Clear the escrow AND every open payout request for this author in ONE
+    // atomic persist, so a completed payout never leaves a half-cleared state
+    // (escrow gone but a request lingering, which a re-poll would re-process).
+    delete this.data.escrow[xUserId];
+    for (const [id, req] of Object.entries(this.data.payoutRequests)) {
+      if (req.xUserId === xUserId) delete this.data.payoutRequests[id];
+    }
+    this.persist();
   }
 
   async enqueue(item: QueueItem): Promise<void> {

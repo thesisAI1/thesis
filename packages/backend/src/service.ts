@@ -220,32 +220,59 @@ export async function runOnce(): Promise<void> {
   for (let i = 0; i < 3; i++) await pollCycle();
 }
 
+/**
+ * F1 startup reconcile — a pending-buy marker that survived to startup means a
+ * buy was initiated but its Position was never persisted (a crash mid-buy). We
+ * MAY be holding tokens with no monitored position (silent loss), so log each
+ * one loudly for manual recovery. We do NOT auto-clear: the alert should persist
+ * across restarts until the operator reconciles against the on-chain balance.
+ */
+async function reconcilePendingBuys(): Promise<void> {
+  try {
+    const orphans = await getStore().getPendingBuys();
+    for (const b of orphans) {
+      log.error(
+        `bursar: ORPHANED BUY — ${b.amountInEth} ETH for ${b.contractAddress} (post ${b.postId}, ` +
+          `recorded ${b.at}) has NO saved position. The buy MAY have executed on-chain and the bot ` +
+          `is NOT monitoring those tokens. Check the wallet balance for that token, then recover via ` +
+          `/admin/rebuy-position or open a position manually.`,
+      );
+    }
+  } catch (err) {
+    log.warn(`service: pending-buy reconcile failed — ${String(err)}`);
+  }
+}
+
 /** Start the continuous service loops. Returns a stop() handle. */
 export function startService(): () => void {
   let stopped = false;
+  // F1 — surface any buy initiated without a saved position (a crash mid-buy).
+  void reconcilePendingBuys();
   // Mock mode polls fast for a lively local demo; live mode uses the config.
   const pollMs = useMock() ? 25_000 : config.service.pollIntervalSec * 1000;
+  const reviewMs = config.service.reviewIntervalSec * 1000;
+  const monitorMs = config.service.monitorIntervalSec * 1000;
 
-  const pollLoop = async (): Promise<void> => {
-    if (stopped) return;
-    try {
-      await pollCycle();
-    } catch (err) {
-      log.error(`poll loop: ${String(err)}`);
-    }
-    if (!stopped) setTimeout(() => void pollLoop(), pollMs);
+  // Self-rescheduling loop: the next tick is scheduled only AFTER the current
+  // one settles, so a slow tick can never overlap itself. (A bare setInterval
+  // fires on a fixed clock regardless of whether the previous tick finished —
+  // that overlap is what let two monitor ticks double-settle a position.)
+  const loop = (label: string, fn: () => Promise<void>, intervalMs: number): void => {
+    const tick = async (): Promise<void> => {
+      if (stopped) return;
+      try {
+        await fn();
+      } catch (err) {
+        log.error(`${label} loop: ${String(err)}`);
+      }
+      if (!stopped) setTimeout(() => void tick(), intervalMs);
+    };
+    void tick();
   };
-  void pollLoop();
 
-  const review = setInterval(
-    () => void reviewTick(),
-    config.service.reviewIntervalSec * 1000,
-  );
-  void runMonitorTick();
-  const monitor = setInterval(
-    () => void runMonitorTick(),
-    config.service.monitorIntervalSec * 1000,
-  );
+  loop("poll", pollCycle, pollMs);
+  loop("review", reviewTick, reviewMs);
+  loop("monitor", runMonitorTick, monitorMs);
 
   log.info(
     `service: poll ${Math.round(pollMs / 1000)}s · review ${config.service.reviewIntervalSec}s · ` +
@@ -253,8 +280,6 @@ export function startService(): () => void {
   );
   return () => {
     stopped = true;
-    clearInterval(review);
-    clearInterval(monitor);
   };
 }
 

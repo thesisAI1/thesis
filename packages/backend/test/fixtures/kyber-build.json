@@ -1,0 +1,12 @@
+{
+  "__synthetic": "SYNTHETIC — shape inferred from the parser; replace with a real captured response from production keys",
+  "code": 0,
+  "message": "successfully",
+  "data": {
+    "amountIn": "100000000000000000",
+    "amountOut": "5000000000000000000",
+    "data": "0xabcdef1234567890abcdef1234567890",
+    "routerAddress": "0x6131B5fae19EA4f9D964eAc0408E4408b66337b5",
+    "transactionValue": "100000000000000000"
+  }
+}

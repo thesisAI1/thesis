@@ -18,14 +18,16 @@
  * A reply from anyone else — even with a matching @handle — is ignored.
  */
 
+import { isAddress } from "viem";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter, type XPost } from "../adapters/x/index.js";
 import { getStore, type PayoutRequest } from "../store/index.js";
 import { log } from "../util/log.js";
 import { payoutSentText } from "../util/replies.js";
 
-/** A Base/EVM wallet address, isolated so a 64-hex tx hash is not mis-matched. */
-const ADDRESS_RE = /\b0x[a-fA-F0-9]{40}\b/;
+/** A Base/EVM wallet address, isolated (word boundaries) so a 64-hex tx hash is
+ *  not mis-matched. Global so we can detect an ambiguous multi-address reply. */
+const ADDRESS_RE = /\b0x[a-fA-F0-9]{40}\b/g;
 
 /**
  * Pull wallet-reply answers out of a batch of mentions, pay them, and return
@@ -71,10 +73,33 @@ async function handleWalletReply(post: XPost, req: PayoutRequest): Promise<void>
     return;
   }
 
-  const wallet = post.text.match(ADDRESS_RE)?.[0];
+  // Extract the payout wallet. We send real, irreversible ETH, so reject the
+  // two ways a reply can be wrong rather than guessing:
+  //   - MORE THAN ONE distinct address ("not 0xWRONG, I mean 0xRIGHT") → don't
+  //     guess which to pay; wait for an unambiguous reply.
+  //   - a malformed / bad-EIP-55-checksum address → reject. isAddress accepts
+  //     all-lowercase and a valid checksum, but rejects a mistyped mixed-case
+  //     address — catching a fat-fingered char before ETH leaves the wallet.
+  const found = post.text.match(ADDRESS_RE) ?? [];
+  const distinct = [...new Set(found.map((a) => a.toLowerCase()))];
+  if (distinct.length > 1) {
+    log.warn(
+      `payout: reply from ${req.handle} on ${req.requestTweetId} had ${distinct.length} ` +
+        `distinct addresses — ignoring (won't guess which to pay)`,
+    );
+    return;
+  }
+  const wallet = found[0];
   if (!wallet) {
     log.info(
       `payout: reply from ${req.handle} on ${req.requestTweetId} had no 0x address — waiting`,
+    );
+    return;
+  }
+  if (!isAddress(wallet)) {
+    log.warn(
+      `payout: reply from ${req.handle} on ${req.requestTweetId} had an invalid address ` +
+        `(${wallet}) — failed EIP-55 checksum, ignoring`,
     );
     return;
   }
@@ -104,8 +129,12 @@ async function handleWalletReply(post: XPost, req: PayoutRequest): Promise<void>
     return;
   }
 
-  await store.clearEscrow(req.xUserId);
-  await store.clearPayoutRequestsForUser(req.xUserId);
+  // Atomically clear the escrow AND the open requests in a single write, so a
+  // re-poll cannot re-pay (no half-cleared state). The only residual — a crash
+  // between the confirmed on-chain send above and this write — is the same
+  // accepted at-least-once window the settlement path documents; the escrow-
+  // empty guard at the top of this function neutralises a same-batch re-reply.
+  await store.clearPayout(req.xUserId);
   log.info(
     `payout: paid ${req.handle} ${owed.toFixed(4)} ETH to ${wallet} — tx ${txHash}`,
   );

@@ -9,6 +9,7 @@
 import type { Position, TradeOrder, Verdict } from "@thesis/shared";
 import { config } from "../config.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
+import { evaluateBuyGate } from "../domain/gate.js";
 import { getStore } from "../store/index.js";
 
 export interface BursarResult {
@@ -24,7 +25,34 @@ export async function runBursar(verdict: Verdict): Promise<BursarResult> {
     return { position: null, skippedReason: "verdict is SKIP" };
   }
 
+  // Final deterministic pre-spend check on the external-submission path. Even
+  // if a BUY verdict reaches us via a future code path or an upstream bug, the
+  // gate runs again here before any real ETH moves. (The gate exempts the
+  // $THESIS self-token by design; operator /admin spends are a separate,
+  // secret-gated path that does not flow through here.)
+  const gate = evaluateBuyGate(verdict.submission.contractAddress, verdict.tokenReport);
+  if (!gate.allowed) {
+    return { position: null, skippedReason: `hard gate: ${gate.reason}` };
+  }
+
   const store = getStore();
+
+  // --- Never double-expose to the same contract (L8) --------------------
+  // Two theses about the same token (or a re-post) must not open a second
+  // position: that doubles our exposure and splits the exit logic across two
+  // positions the monitor tracks independently. Contract-scoped — a different
+  // token is unaffected. Safe as a check-then-act because the poll loop is
+  // single-flight (PR2 self-rescheduling loop), so no two buys race here.
+  const contract = verdict.submission.contractAddress.toLowerCase();
+  const alreadyHeld = (await store.getOpenPositions()).some(
+    (p) => p.order.contractAddress.toLowerCase() === contract,
+  );
+  if (alreadyHeld) {
+    return {
+      position: null,
+      skippedReason: "already holding an open position in this contract",
+    };
+  }
 
   // --- Anti-spam rate limit ---------------------------------------------
   const since = new Date(Date.now() - DAY_MS).toISOString();
@@ -63,7 +91,24 @@ export async function runBursar(verdict: Verdict): Promise<BursarResult> {
     stopLossX: 1 - config.trading.stopLossPct / 100,
   };
 
-  const fill = await chain.buy(order.contractAddress, order.amountInEth);
+  // F1 — write-ahead the buy intent so a crash BETWEEN the on-chain buy and the
+  // savePosition below can't leave us with bought tokens and no Position record
+  // (which would never be monitored — a silent, permanent loss). The service
+  // logs any leftover marker on startup for manual reconciliation.
+  await store.recordPendingBuy({
+    postId: verdict.submission.postId,
+    contractAddress: order.contractAddress,
+    amountInEth,
+    at: new Date().toISOString(),
+  });
+  let fill: Awaited<ReturnType<typeof chain.buy>>;
+  try {
+    fill = await chain.buy(order.contractAddress, order.amountInEth);
+  } catch (err) {
+    // Swap reverted before any tokens moved — drop the intent and propagate.
+    await store.clearPendingBuy(verdict.submission.postId);
+    throw err;
+  }
   const now = new Date().toISOString();
   await store.recordBuy(now);
 
@@ -87,6 +132,8 @@ export async function runBursar(verdict: Verdict): Promise<BursarResult> {
     openedAt: now,
   };
   await store.savePosition(position);
+  // Position durably persisted — the buy intent is fulfilled, drop the marker.
+  await store.clearPendingBuy(verdict.submission.postId);
 
   return { position };
 }

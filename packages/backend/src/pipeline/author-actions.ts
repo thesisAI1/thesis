@@ -51,7 +51,7 @@ const MAX_CLOSE_INTENT_WORDS = 5;
  *  "close the position", "tp now", "take profit", "dump now", "sell all"
  *  while ignoring prose like "I might close this thing eventually maybe"
  *  (too many words) and "don't close" (negated). */
-function isCloseRequest(text: string): boolean {
+export function isCloseRequest(text: string): boolean {
   const cleaned = text
     .replace(/^(?:\s*@\w+\s*)+/i, "")
     .replace(/\s+/g, " ")
@@ -119,8 +119,9 @@ export async function processAuthorCloseRequests(mentions: XPost[]): Promise<XPo
 
 /** Validate the profit threshold + execute the close, replying on failure. */
 async function handleCloseRequest(pos: Position, mention: XPost): Promise<void> {
-  // Fetch current price. If we can't, treat as transient infra and silently
-  // skip — the author can retry next poll.
+  // Fetch current price. If we can't, reply to the author so they know to
+  // retry — the cooldown was already set, so without a reply the request
+  // would vanish with zero feedback.
   let currentPrice = pos.entryPriceEth;
   try {
     currentPrice = await createBaseDataAdapter().getPriceEth(pos.order.contractAddress);
@@ -128,10 +129,26 @@ async function handleCloseRequest(pos: Position, mention: XPost): Promise<void> 
     log.warn(
       `author-close: price fetch failed for ${pos.id} (${mention.authorHandle}): ${String(err)}`,
     );
+    try {
+      await createXAdapter().replyToPost(
+        mention.postId,
+        "Couldn't check the current price right now (transient data issue). Position is still open — try again in a minute.",
+      );
+    } catch (replyErr) {
+      log.warn(`x: price-fail reply failed for ${mention.postId}: ${String(replyErr)}`);
+    }
     return;
   }
   if (currentPrice <= 0) {
     log.warn(`author-close: price returned zero for ${pos.id}, skipping`);
+    try {
+      await createXAdapter().replyToPost(
+        mention.postId,
+        "Couldn't check the current price right now (transient data issue). Position is still open — try again in a minute.",
+      );
+    } catch (replyErr) {
+      log.warn(`x: price-zero reply failed for ${mention.postId}: ${String(replyErr)}`);
+    }
     return;
   }
 

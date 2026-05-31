@@ -45,13 +45,15 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
-import { dirname, extname, join, normalize, resolve } from "node:path";
+import { dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkAdmin } from "./admin-auth.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
-import { createBaseDataAdapter } from "../adapters/basedata/index.js";
+import { createBaseDataAdapter, type BaseDataAdapter } from "../adapters/basedata/index.js";
+import { MockBaseData } from "../adapters/basedata/mock.js";
 import { RealBaseData } from "../adapters/basedata/real.js";
 import { createXAdapter } from "../adapters/x/index.js";
-import { config } from "../config.js";
+import { config, useMock } from "../config.js";
 import { subscribe, type StreamEvent } from "../events.js";
 import { closeByAuthor } from "../monitor/index.js";
 import { getStore } from "../store/index.js";
@@ -96,8 +98,17 @@ const symbolCache = new Map<string, string>();
 /** Stateless fallback adapter — DexScreener directly. Used only when the
  *  primary adapter (likely Birdeye) returned an empty symbol; DexScreener
  *  indexes new pools within seconds of pool creation, so it tends to pick
- *  up tokens that Birdeye is still catching up to. */
-const dexScreenerFallback = new RealBaseData();
+ *  up tokens that Birdeye is still catching up to.
+ *
+ *  Mock-aware: a hardcoded `new RealBaseData()` here would let a mock run that
+ *  happens to have a BIRDEYE_API_KEY in its env leak a real DexScreener call
+ *  (the fallback branch below is gated on that key). Honour useMock() so the
+ *  mock pipeline can never touch the network; in live mode this stays
+ *  DexScreener-direct, distinct from the Birdeye primary, which is the whole
+ *  point of this secondary lookup. */
+const dexScreenerFallback: BaseDataAdapter = useMock()
+  ? new MockBaseData()
+  : new RealBaseData();
 async function getSymbolCached(address: string): Promise<string> {
   const key = address.toLowerCase();
   const hit = symbolCache.get(key);
@@ -146,12 +157,20 @@ export function startServer(): void {
       if (!res.headersSent) sendJson(res, 500, { error: "internal error" });
     });
   });
+  // Bound slow-loris-style attacks: a client can't hold a connection open
+  // indefinitely dribbling headers/body. SSE responses are server→client
+  // writes and aren't affected by requestTimeout.
+  server.headersTimeout = 20_000;
+  server.requestTimeout = 30_000;
   server.listen(config.server.port, () => {
     log.info(`server: listening on ${config.server.publicBaseUrl}`);
   });
 }
 
-async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+// Exported as a test seam: admin-route-wiring.test.ts drives this router with
+// stub req/res to assert every /admin/* path is gated by checkAdmin. No
+// behaviour change — startServer() still calls it exactly as before.
+export async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const url = new URL(req.url ?? "/", config.server.publicBaseUrl);
   const path = url.pathname;
 
@@ -190,16 +209,8 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
  * Returns: { ok, txHash, amountOut, priceEth, basescanUrl }
  */
 async function adminTestSwap(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const secret = config.server.adminSecret;
-  if (!secret) {
-    return sendJson(res, 503, {
-      ok: false,
-      error: "ADMIN_SECRET is not set — test endpoint disabled.",
-    });
-  }
-  if (req.headers["x-admin-secret"] !== secret) {
-    return sendJson(res, 401, { ok: false, error: "unauthorized" });
-  }
+  const gate = checkAdmin(req);
+  if (!gate.ok) return sendJson(res, gate.status, { ok: false, error: gate.error });
   let body: { tokenAddress?: string; amountEth?: number };
   try {
     body = JSON.parse(await readBody(req)) as typeof body;
@@ -230,7 +241,7 @@ async function adminTestSwap(req: IncomingMessage, res: ServerResponse): Promise
     });
   } catch (err) {
     log.error(`admin: test-swap failed — ${String(err)}`);
-    sendJson(res, 500, { ok: false, error: String(err) });
+    sendJson(res, 500, { ok: false, error: "internal error" });
   }
 }
 
@@ -260,13 +271,8 @@ async function adminTestSwap(req: IncomingMessage, res: ServerResponse): Promise
  * Returns: { ok, txHash, amountEth, basescanUrl, replyId? }
  */
 async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const secret = config.server.adminSecret;
-  if (!secret) {
-    return sendJson(res, 503, { ok: false, error: "ADMIN_SECRET is not set — endpoint disabled." });
-  }
-  if (req.headers["x-admin-secret"] !== secret) {
-    return sendJson(res, 401, { ok: false, error: "unauthorized" });
-  }
+  const gate = checkAdmin(req);
+  if (!gate.ok) return sendJson(res, gate.status, { ok: false, error: gate.error });
   let body: {
     xUserId?: string;
     wallet?: string;
@@ -321,7 +327,7 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
     txHash = await createChainAdapter().sendEth(wallet, amountEth);
   } catch (err) {
     log.error(`admin: settle-stuck-payout sendEth failed — ${String(err)}`);
-    return sendJson(res, 500, { ok: false, error: String(err) });
+    return sendJson(res, 500, { ok: false, error: "internal error" });
   }
 
   // Persist the wallet and clear all owed state so future settlements pay direct.
@@ -373,13 +379,8 @@ async function adminResetPositionState(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  const secret = config.server.adminSecret;
-  if (!secret) {
-    return sendJson(res, 503, { ok: false, error: "ADMIN_SECRET is not set" });
-  }
-  if (req.headers["x-admin-secret"] !== secret) {
-    return sendJson(res, 401, { ok: false, error: "unauthorized" });
-  }
+  const gate = checkAdmin(req);
+  if (!gate.ok) return sendJson(res, gate.status, { ok: false, error: gate.error });
   let body: { positionId?: string };
   try {
     body = JSON.parse(await readBody(req)) as typeof body;
@@ -446,11 +447,8 @@ async function adminResetPositionState(
  * Returns: { ok, positionId, oldEntryPriceEth, newEntryPriceEth, txHash, basescanUrl }
  */
 async function adminRebuyPosition(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const secret = config.server.adminSecret;
-  if (!secret) return sendJson(res, 503, { ok: false, error: "ADMIN_SECRET is not set" });
-  if (req.headers["x-admin-secret"] !== secret) {
-    return sendJson(res, 401, { ok: false, error: "unauthorized" });
-  }
+  const gate = checkAdmin(req);
+  if (!gate.ok) return sendJson(res, gate.status, { ok: false, error: gate.error });
   let body: { positionId?: string };
   try {
     body = JSON.parse(await readBody(req)) as typeof body;
@@ -465,6 +463,21 @@ async function adminRebuyPosition(req: IncomingMessage, res: ServerResponse): Pr
   const pos = positions.find((p) => p.id === positionId);
   if (!pos) return sendJson(res, 404, { ok: false, error: "position not found" });
 
+  // L8 (admin path): preserve the "at most one open position per contract"
+  // invariant that runBursar enforces. Re-opening this position must not
+  // collide with another already-open one, and re-buying an ALREADY-open
+  // position would double-spend + wipe its live tracking state. Reject either.
+  const contract = pos.order.contractAddress.toLowerCase();
+  const conflict = positions.find(
+    (p) => p.status === "open" && p.order.contractAddress.toLowerCase() === contract,
+  );
+  if (conflict) {
+    return sendJson(res, 409, {
+      ok: false,
+      error: `an open position (${conflict.id}) already holds this contract`,
+    });
+  }
+
   const amountInEth = pos.order.amountInEth;
   const oldEntryPriceEth = pos.entryPriceEth;
   log.info(
@@ -476,7 +489,7 @@ async function adminRebuyPosition(req: IncomingMessage, res: ServerResponse): Pr
     buy = await createChainAdapter().buy(pos.order.contractAddress, amountInEth);
   } catch (err) {
     log.error(`admin: rebuy-position buy failed — ${String(err)}`);
-    return sendJson(res, 500, { ok: false, error: String(err) });
+    return sendJson(res, 500, { ok: false, error: "internal error" });
   }
 
   pos.entryPriceEth = buy.priceEth;
@@ -521,11 +534,8 @@ async function adminBackfillEntryMc(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  const secret = config.server.adminSecret;
-  if (!secret) return sendJson(res, 503, { ok: false, error: "ADMIN_SECRET is not set" });
-  if (req.headers["x-admin-secret"] !== secret) {
-    return sendJson(res, 401, { ok: false, error: "unauthorized" });
-  }
+  const gate = checkAdmin(req);
+  if (!gate.ok) return sendJson(res, gate.status, { ok: false, error: gate.error });
   if (!config.x.agentUserId) {
     return sendJson(res, 503, { ok: false, error: "X_AGENT_USER_ID is not set" });
   }
@@ -544,7 +554,8 @@ async function adminBackfillEntryMc(
   try {
     timeline = await x.getUserTimeline(config.x.agentUserId);
   } catch (err) {
-    return sendJson(res, 502, { ok: false, error: `timeline fetch failed: ${String(err)}` });
+    log.error(`admin: backfill timeline fetch failed — ${String(err)}`);
+    return sendJson(res, 502, { ok: false, error: "upstream fetch failed" });
   }
 
   // Index our timeline by the post we were replying to. A single original
@@ -629,11 +640,8 @@ async function adminForceClosePosition(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  const secret = config.server.adminSecret;
-  if (!secret) return sendJson(res, 503, { ok: false, error: "ADMIN_SECRET is not set" });
-  if (req.headers["x-admin-secret"] !== secret) {
-    return sendJson(res, 401, { ok: false, error: "unauthorized" });
-  }
+  const gate = checkAdmin(req);
+  if (!gate.ok) return sendJson(res, gate.status, { ok: false, error: gate.error });
   let body: { positionId?: string };
   try {
     body = JSON.parse(await readBody(req)) as typeof body;
@@ -658,7 +666,8 @@ async function adminForceClosePosition(
   try {
     currentPrice = await createBaseDataAdapter().getPriceEth(pos.order.contractAddress);
   } catch (err) {
-    return sendJson(res, 502, { ok: false, error: `price fetch failed: ${String(err)}` });
+    log.error(`admin: force-close price fetch failed — ${String(err)}`);
+    return sendJson(res, 502, { ok: false, error: "upstream fetch failed" });
   }
   if (currentPrice <= 0) {
     return sendJson(res, 502, { ok: false, error: "price provider returned 0" });
@@ -674,7 +683,7 @@ async function adminForceClosePosition(
     return sendJson(res, 500, {
       ok: false,
       positionId,
-      error: String(err),
+      error: "internal error",
       message:
         "Close pipeline exhausted retries — see logs. The token's transfer hooks " +
         "are likely blocking us across every route. Position remains open.",
@@ -718,11 +727,8 @@ async function adminRepostCloseAnnouncement(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  const secret = config.server.adminSecret;
-  if (!secret) return sendJson(res, 503, { ok: false, error: "ADMIN_SECRET is not set" });
-  if (req.headers["x-admin-secret"] !== secret) {
-    return sendJson(res, 401, { ok: false, error: "unauthorized" });
-  }
+  const gate = checkAdmin(req);
+  if (!gate.ok) return sendJson(res, gate.status, { ok: false, error: gate.error });
   let body: { positionId?: string };
   try {
     body = JSON.parse(await readBody(req)) as typeof body;
@@ -777,7 +783,7 @@ async function adminRepostCloseAnnouncement(
     log.info(`admin: repost-close — tweeted reply ${replyId}`);
   } catch (err) {
     log.error(`admin: repost-close failed for ${positionId} — ${String(err)}`);
-    return sendJson(res, 502, { ok: false, error: String(err) });
+    return sendJson(res, 502, { ok: false, error: "upstream post failed" });
   }
 
   if (isEscrowed) {
@@ -823,10 +829,24 @@ function parseEntryMcFromReply(text: string): number | null {
   return value * mult;
 }
 
+/** Admin request bodies are tiny JSON objects. Cap the reader so a malicious
+ *  client can't stream unbounded data into memory. Auth runs BEFORE this in
+ *  every handler, so only authenticated callers reach it — defence-in-depth. */
+const MAX_BODY_BYTES = 1_000_000; // 1 MB
+
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolveBody, rejectBody) => {
     const chunks: Buffer[] = [];
-    req.on("data", (c: Buffer) => chunks.push(c));
+    let total = 0;
+    req.on("data", (c: Buffer) => {
+      total += c.length;
+      if (total > MAX_BODY_BYTES) {
+        req.destroy();
+        rejectBody(new Error(`request body exceeds ${MAX_BODY_BYTES} bytes`));
+        return;
+      }
+      chunks.push(c);
+    });
     req.on("end", () => resolveBody(Buffer.concat(chunks).toString("utf8")));
     req.on("error", rejectBody);
   });
@@ -1038,6 +1058,15 @@ async function buildDashboardPayload(): Promise<object> {
       amountInEth: p.order.amountInEth,
       entryPriceEth: p.entryPriceEth,
       exitPriceEth: p.lastExitPriceEth ?? 0,
+      // Entry market cap, and exit MC derived from the price ratio (same
+      // derivation the profit card uses): exit MC = entry MC × exitPrice/entryPrice.
+      // The closed-trades table shows these instead of the raw per-token prices,
+      // which are unreadable at memecoin scale (e.g. 6.01e-10).
+      marketCapAtEntryUsd: p.marketCapAtEntryUsd ?? null,
+      exitMarketCapUsd:
+        p.marketCapAtEntryUsd != null && p.entryPriceEth > 0 && p.lastExitPriceEth != null
+          ? p.marketCapAtEntryUsd * (p.lastExitPriceEth / p.entryPriceEth)
+          : null,
       realisedPnlEth: p.realisedPnlEth,
       realisedPct:
         p.order.amountInEth > 0 ? (p.realisedPnlEth / p.order.amountInEth) * 100 : 0,
@@ -1248,8 +1277,21 @@ async function apiLeaderboard(res: ServerResponse): Promise<void> {
   });
 }
 
+/** Cap concurrent SSE connections so an attacker can't exhaust file
+ *  descriptors / memory by opening unbounded /api/stream connections (each
+ *  holds an open socket, an event-bus listener, and a ping interval). The cap
+ *  is generous — far above any real dashboard audience. */
+const MAX_SSE_CONNECTIONS = 200;
+let sseConnections = 0;
+
 /** Server-Sent Events — the live agent stream the Faculty Room subscribes to. */
 function apiStream(req: IncomingMessage, res: ServerResponse): void {
+  if (sseConnections >= MAX_SSE_CONNECTIONS) {
+    sendJson(res, 503, { error: "stream capacity reached — try again shortly" });
+    return;
+  }
+  sseConnections += 1;
+
   res.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache",
@@ -1260,7 +1302,11 @@ function apiStream(req: IncomingMessage, res: ServerResponse): void {
     res.write(`data: ${JSON.stringify(event)}\n\n`);
   });
   const ping = setInterval(() => res.write(": ping\n\n"), 15000);
+  let closed = false;
   req.on("close", () => {
+    if (closed) return;
+    closed = true;
+    sseConnections -= 1;
     clearInterval(ping);
     unsubscribe();
   });
@@ -1270,9 +1316,23 @@ function apiStream(req: IncomingMessage, res: ServerResponse): void {
 
 async function serveStatic(path: string, res: ServerResponse): Promise<void> {
   // Drop a query string before resolving the file (used for cache-busting).
-  const clean = (path.split("?")[0] ?? path) || "/";
+  const stripped = (path.split("?")[0] ?? path) || "/";
+  let clean: string;
+  try {
+    clean = decodeURIComponent(stripped);
+  } catch {
+    // Malformed percent-encoding (e.g. a lone %) — reject rather than throw.
+    sendJson(res, 404, { error: "not found" });
+    return;
+  }
   const full = normalize(join(WEBROOT, clean === "/" ? "/index.html" : clean));
-  if (!full.startsWith(WEBROOT) || !existsSync(full)) {
+  // Robust containment: `full` must be WEBROOT itself or sit strictly beneath
+  // it. The trailing-separator check closes the prefix-confusion hole — a
+  // bare startsWith(WEBROOT) would also accept a sibling like
+  // "<WEBROOT>-secrets". path.relative handles the separator correctly.
+  const rel = relative(WEBROOT, full);
+  const contained = full === WEBROOT || (rel !== "" && !rel.startsWith("..") && !rel.startsWith(sep));
+  if (!contained || !existsSync(full)) {
     sendJson(res, 404, { error: "not found" });
     return;
   }

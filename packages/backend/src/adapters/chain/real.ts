@@ -14,6 +14,14 @@ import { config } from "../../config.js";
 import { log } from "../../util/log.js";
 import { createBaseDataAdapter } from "../basedata/index.js";
 import type { ChainAdapter, SwapResult } from "./index.js";
+import { measureEthProceeds } from "./proceeds.js";
+import {
+  parseKyberRoute,
+  parseKyberBuild,
+  type KyberApiResponse,
+  type KyberRouteData,
+  type KyberBuildData,
+} from "./kyber-parse.js";
 
 /** KyberSwap Aggregator API on Base — free public endpoint, no API key required. */
 const KYBER_API = "https://aggregator-api.kyberswap.com/base/api/v1";
@@ -132,6 +140,12 @@ export class RealChain implements ChainAdapter {
     const route = await this.fetchKyberRoute(ETH_SENTINEL, address, amountIn);
     const built = await this.buildKyberTx(route);
     const txHash = await this.sendSwap(built, /* hasEthInput */ true);
+    // NOTE (deliberate asymmetry vs sell's L5 fix): buy() amountOut is the Kyber
+    // QUOTE of tokens out, not a measured delta. It is informational only — it
+    // feeds the buyback's tokensBurned LOG line and is NEVER stored on the
+    // Position or used to size a sell (sells size off amountInEth/entryPriceEth
+    // and then clamp to the live on-chain balance). PnL/settlement money-math
+    // flows exclusively through sell() proceeds, which L5 measures on-chain.
     const amountOut = Number(formatEther(BigInt(built.amountOut)));
     log.info(`chain: buy via KyberSwap — ${describeRoute(route)} — tx ${txHash}`);
     return { txHash, amountOut, priceEth: price };
@@ -229,8 +243,14 @@ export class RealChain implements ChainAdapter {
           built.routerAddress as Address,
           amountIn,
         );
-        const txHash = await this.sendSwap(built, /* hasEthInput */ false);
-        const amountOut = Number(formatEther(BigInt(built.amountOut)));
+        // L5: record the ACTUAL ETH received (measured wallet delta), NOT
+        // built.amountOut (the KyberSwap quote, which overstates by slippage and
+        // over-draws principal in settlement). sendSwap awaits the receipt and
+        // the store lock serializes wallet ops, so the delta is this swap alone.
+        const { txHash, amountOut } = await measureEthProceeds(
+          () => this.publicClient.getBalance({ address: this.account.address }),
+          () => this.sendSwap(built, /* hasEthInput */ false),
+        );
         log.info(
           `chain: sell via KyberSwap — ${describeRoute(route)} — tx ${txHash}` +
             (attempt > 0 ? ` (on retry ${attempt + 1}/${maxAttempts})` : ""),
@@ -388,12 +408,7 @@ export class RealChain implements ChainAdapter {
       throw new Error(`KyberSwap /routes ${res.status}: ${await res.text()}`);
     }
     const json = (await res.json()) as KyberApiResponse<KyberRouteData>;
-    if (json.code !== 0 || !json.data?.routeSummary) {
-      throw new Error(
-        `KyberSwap: no liquidity for ${tokenIn} -> ${tokenOut} (code ${json.code}: ${json.message ?? "unknown"}).`,
-      );
-    }
-    return json.data;
+    return parseKyberRoute(json);
   }
 
   /** Turn the route summary into ready-to-send calldata. */
@@ -420,12 +435,7 @@ export class RealChain implements ChainAdapter {
       throw new Error(`KyberSwap /route/build ${res.status}: ${await res.text()}`);
     }
     const json = (await res.json()) as KyberApiResponse<KyberBuildData>;
-    if (json.code !== 0 || !json.data?.data) {
-      throw new Error(
-        `KyberSwap: build failed (code ${json.code}: ${json.message ?? "unknown"}).`,
-      );
-    }
-    return json.data;
+    return parseKyberBuild(json);
   }
 
   /** Make sure `spender` (the KyberSwap router) is approved to spend at least
@@ -490,52 +500,6 @@ export class RealChain implements ChainAdapter {
   }
 }
 
-interface KyberApiResponse<T> {
-  code: number;
-  message?: string;
-  data?: T;
-}
-
-interface KyberFill {
-  pool?: string;
-  tokenIn?: string;
-  tokenOut?: string;
-  swapAmount?: string;
-  amountOut?: string;
-  exchange?: string;
-  poolType?: string;
-}
-
-interface KyberRouteSummary {
-  tokenIn: string;
-  amountIn: string;
-  amountInUsd?: string;
-  tokenOut: string;
-  amountOut: string;
-  amountOutUsd?: string;
-  gas?: string;
-  gasPrice?: string;
-  gasUsd?: string;
-  route?: KyberFill[][];
-}
-
-interface KyberRouteData {
-  routeSummary: KyberRouteSummary;
-  routerAddress: string;
-}
-
-interface KyberBuildData {
-  amountIn: string;
-  amountInUsd?: string;
-  amountOut: string;
-  amountOutUsd?: string;
-  gas?: string;
-  gasUsd?: string;
-  data: string;
-  routerAddress: string;
-  /** For native-ETH input swaps, the wei value to attach to the transaction. */
-  transactionValue?: string;
-}
 
 /** Human-readable summary of the DEXes KyberSwap routed through, for logging. */
 function describeRoute(route: KyberRouteData): string {

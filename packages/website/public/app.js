@@ -287,7 +287,7 @@ function portfolioValueCard(p) {
   // Main figure: USD when known, fall back to ETH on the cold-start tick.
   const mainValue = totalUsd > 0 ? fmtUsd(totalUsd) : fmtEth(totalEth) + " ETH";
   // Sub-line: ETH total + breakdown. Reads naturally as a sentence.
-  const ethTotalStr = fmtEth(totalEth) + " Ξ";
+  const ethTotalStr = fmtEth(totalEth) + " ETH";
   const breakdown =
     openCount > 0
       ? `wallet ${fmtEth(walletEth)} + ${fmtEth(openValueEth)} in ${openCount} open`
@@ -493,8 +493,8 @@ function renderClosed(rows) {
     <td data-label="Token">${tokenCell(c.tokenSymbol, c.contractAddress)}</td>
     <td data-label="Author">${esc(c.authorHandle)}</td>
     <td class="num" data-label="Size">${fmtEth(c.amountInEth)}</td>
-    <td class="num" data-label="Entry">${esc(fmtPrice(c.entryPriceEth))}</td>
-    <td class="num" data-label="Exit">${esc(fmtPrice(c.exitPriceEth))}</td>
+    <td class="num" data-label="Entry MC">${esc(fmtMcap(c.marketCapAtEntryUsd))}</td>
+    <td class="num" data-label="Exit MC">${esc(fmtMcap(c.exitMarketCapUsd))}</td>
     <td class="num ${pnlClass(c.realisedPnlEth)}" data-label="Realised PnL">${fmtEth(c.realisedPnlEth)} (${fmtPct(c.realisedPct)})</td>
     <td data-label="Closed">${esc(timeAgo(c.closedAt))}</td></tr>`).join("");
 }
@@ -553,7 +553,7 @@ function renderActivityStrip(latest) {
     `<span class="act-when">${esc(timeAgo(latest.closedAt))}</span>` +
     `<span class="act-verb">Closed</span>` +
     `<span class="act-token">${ticker}</span>` +
-    `<span class="${amountClass}">${sign}${fmtEth(pnl)} Ξ</span>` +
+    `<span class="${amountClass}">${sign}${fmtEth(pnl)} ETH</span>` +
     `<span class="act-tail">for <span class="act-handle">${esc(latest.authorHandle || "")}</span></span>` +
     `<span class="act-arrow">→</span>`;
 }
@@ -590,8 +590,8 @@ function renderHeroStats(reviews, distributions) {
   const elPaid = $("#hero-paid");
   const elBurned = $("#hero-burned");
   if (elFunded) elFunded.textContent = `${funded} ${funded === 1 ? "thesis" : "theses"}`;
-  if (elPaid) elPaid.textContent = `${fmtEth(paidEth)} Ξ`;
-  if (elBurned) elBurned.textContent = `${fmtEth(buybackEth)} Ξ`;
+  if (elPaid) elPaid.textContent = `${fmtEth(paidEth)} ETH`;
+  if (elBurned) elBurned.textContent = `${fmtEth(buybackEth)} ETH`;
   wrap.hidden = false;
 }
 
