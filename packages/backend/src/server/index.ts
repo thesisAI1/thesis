@@ -48,6 +48,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Chain } from "@thesis/shared";
+import { nativeSymbol, explorerTxUrl } from "../util/chains.js";
 import { checkAdmin } from "./admin-auth.js";
 import { getRecentActivity } from "../activity.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
@@ -821,33 +822,40 @@ async function adminRepostCloseAnnouncement(
     return sendJson(res, 409, { ok: false, error: `position is ${pos.status}, expected closed` });
   }
 
-  // Check escrow — if the author hasn't been paid (no wallet on file), we
-  // turn this repost INTO a payout request so they can claim.
-  const escrow = await store.getEscrow(pos.authorXId);
+  // Check escrow (per chain) — if the author hasn't been paid (no wallet on
+  // file), we turn this repost INTO a payout request so they can claim.
+  const chain = pos.order.chain;
+  const sym = nativeSymbol(chain);
+  const escrow = await store.getEscrow(pos.authorXId, chain);
   const isEscrowed = Boolean(escrow && escrow.amountEth > 0);
 
   // Build a tight, address-free announcement. Repost intentionally skips the
   // card image and the per-winner lottery block — both of those tripped X's
-  // crypto-address filter the first time. The BaseScan tx link is the one
+  // crypto-address filter the first time. The explorer tx link is the one
   // reliable receipt for on-chain delivery.
   const sign = pos.realisedPnlEth >= 0 ? "+" : "";
   const lines: string[] = [
     `Closing summary for the thesis above.`,
-    `Net result: ${sign}${pos.realisedPnlEth.toFixed(4)} ETH.`,
+    `Net result: ${sign}${pos.realisedPnlEth.toFixed(4)} ${sym}.`,
   ];
   if (pos.realisedPnlEth > 0) {
-    lines.push(`Author share: 25% of profit. Buyback + holder lottery + portfolio split — all settled on-chain.`);
+    lines.push(
+      chain === "solana"
+        ? `Author share: 25% of profit. Treasury split + portfolio — all settled on-chain.`
+        : `Author share: 25% of profit. Buyback + holder lottery + portfolio split — all settled on-chain.`,
+    );
   }
   if (isEscrowed && escrow) {
+    const walletHint = chain === "solana" ? "Solana wallet (base58)" : "Base wallet (0x…)";
     lines.push("");
     lines.push(
-      `${pos.authorHandle} — reply to THIS tweet with your Base wallet (0x…) to claim your ${escrow.amountEth.toFixed(4)} ETH share.`,
+      `${pos.authorHandle} — reply to THIS tweet with your ${walletHint} to claim your ${escrow.amountEth.toFixed(4)} ${sym} share.`,
     );
     lines.push("Only the original thesis author can claim — replies from other accounts are ignored.");
   }
   if (pos.lastExitTxHash) {
     lines.push("");
-    lines.push(`https://basescan.org/tx/${pos.lastExitTxHash}`);
+    lines.push(explorerTxUrl(chain, pos.lastExitTxHash));
   }
   const text = lines.join("\n");
 
