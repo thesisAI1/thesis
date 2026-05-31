@@ -228,8 +228,11 @@ export interface RegistryEntry {
   xUserId: string;
   /** @handle at the time of linking (display only). */
   handle: string;
-  /** The payout wallet address. */
+  /** The payout wallet address (0x… on Base, base58 on Solana). */
   wallet: string;
+  /** Chain this wallet is for — an author can register one wallet per chain.
+   *  Optional for back-compat with pre-Solana entries on disk (absent ⇒ base). */
+  chain?: Chain;
   /** ISO timestamp the link was created. */
   linkedAt: string;
 }

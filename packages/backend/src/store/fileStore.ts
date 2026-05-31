@@ -7,8 +7,15 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import type { Distribution, Position, RegistryEntry, ReviewRecord } from "@thesis/shared";
+import type { Chain, Distribution, Position, RegistryEntry, ReviewRecord } from "@thesis/shared";
 import type { EscrowEntry, Funnel, PayoutRequest, PendingBuy, QueueItem, Store } from "./index.js";
+
+/** Per-(author, chain) storage key for escrow + registry. Base keeps the raw
+ *  xUserId (byte-identical to pre-Solana data — no migration needed); other
+ *  chains get a namespaced key so ETH and SOL escrow/wallets never collide. */
+function acctKey(xUserId: string, chain: Chain = "base"): string {
+  return chain === "base" ? xUserId : `${xUserId}:${chain}`;
+}
 
 interface Data {
   registry: Record<string, RegistryEntry>;
@@ -177,12 +184,12 @@ export class FileStore implements Store {
   }
 
   async linkWallet(entry: RegistryEntry): Promise<void> {
-    this.data.registry[entry.xUserId] = entry;
+    this.data.registry[acctKey(entry.xUserId, entry.chain)] = entry;
     this.persist();
   }
 
-  async getRegistryEntry(xUserId: string): Promise<RegistryEntry | null> {
-    return this.data.registry[xUserId] ?? null;
+  async getRegistryEntry(xUserId: string, chain: Chain = "base"): Promise<RegistryEntry | null> {
+    return this.data.registry[acctKey(xUserId, chain)] ?? null;
   }
 
   async savePosition(position: Position): Promise<void> {
@@ -235,19 +242,26 @@ export class FileStore implements Store {
     return this.data.buyLog.reduce((a, b) => (a > b ? a : b));
   }
 
-  async addEscrow(xUserId: string, handle: string, amountEth: number): Promise<void> {
-    const existing = this.data.escrow[xUserId];
-    this.data.escrow[xUserId] = {
+  async addEscrow(
+    xUserId: string,
+    handle: string,
+    amountEth: number,
+    chain: Chain = "base",
+  ): Promise<void> {
+    const key = acctKey(xUserId, chain);
+    const existing = this.data.escrow[key];
+    this.data.escrow[key] = {
       xUserId,
       handle,
       amountEth: (existing?.amountEth ?? 0) + amountEth,
+      chain,
       updatedAt: new Date().toISOString(),
     };
     this.persist();
   }
 
-  async getEscrow(xUserId: string): Promise<EscrowEntry | null> {
-    return this.data.escrow[xUserId] ?? null;
+  async getEscrow(xUserId: string, chain: Chain = "base"): Promise<EscrowEntry | null> {
+    return this.data.escrow[acctKey(xUserId, chain)] ?? null;
   }
 
   async isProcessed(postId: string): Promise<boolean> {
@@ -283,8 +297,8 @@ export class FileStore implements Store {
     return [...this.data.distributions];
   }
 
-  async clearEscrow(xUserId: string): Promise<void> {
-    delete this.data.escrow[xUserId];
+  async clearEscrow(xUserId: string, chain: Chain = "base"): Promise<void> {
+    delete this.data.escrow[acctKey(xUserId, chain)];
     this.persist();
   }
 
@@ -297,10 +311,11 @@ export class FileStore implements Store {
     return Object.values(this.data.payoutRequests);
   }
 
-  async clearPayoutRequestsForUser(xUserId: string): Promise<void> {
+  async clearPayoutRequestsForUser(xUserId: string, chain?: Chain): Promise<void> {
     let changed = false;
     for (const [id, req] of Object.entries(this.data.payoutRequests)) {
-      if (req.xUserId === xUserId) {
+      const matchesChain = chain === undefined || (req.chain ?? "base") === chain;
+      if (req.xUserId === xUserId && matchesChain) {
         delete this.data.payoutRequests[id];
         changed = true;
       }
@@ -308,13 +323,16 @@ export class FileStore implements Store {
     if (changed) this.persist();
   }
 
-  async clearPayout(xUserId: string): Promise<void> {
-    // Clear the escrow AND every open payout request for this author in ONE
-    // atomic persist, so a completed payout never leaves a half-cleared state
-    // (escrow gone but a request lingering, which a re-poll would re-process).
-    delete this.data.escrow[xUserId];
+  async clearPayout(xUserId: string, chain: Chain = "base"): Promise<void> {
+    // Clear the escrow AND every open payout request for this author ON THIS
+    // CHAIN in ONE atomic persist, so a completed payout never leaves a half-
+    // cleared state (escrow gone but a request lingering, which a re-poll would
+    // re-process). Per-chain so a Base payout doesn't wipe a pending Solana one.
+    delete this.data.escrow[acctKey(xUserId, chain)];
     for (const [id, req] of Object.entries(this.data.payoutRequests)) {
-      if (req.xUserId === xUserId) delete this.data.payoutRequests[id];
+      if (req.xUserId === xUserId && (req.chain ?? "base") === chain) {
+        delete this.data.payoutRequests[id];
+      }
     }
     this.persist();
   }

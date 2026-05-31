@@ -104,7 +104,7 @@ export async function runEndowment(
   const chain = createChainAdapter(position.order.chain);
   const policy = settlementPolicy(position.order.chain);
   const isSolana = position.order.chain === "solana";
-  const entry = await store.getRegistryEntry(position.authorXId);
+  const entry = await store.getRegistryEntry(position.authorXId, position.order.chain);
 
   // PR3 — idempotent settlement. Each leg is gated on a persisted marker, and
   // progress is saved after each leg, so a settlement interrupted by a transient
@@ -140,7 +140,7 @@ export async function runEndowment(
         options.silentAuthorTweet === true,
       );
     } else {
-      await store.addEscrow(position.authorXId, position.authorHandle, quarter);
+      await store.addEscrow(position.authorXId, position.authorHandle, quarter, position.order.chain);
       // addEscrow ADDS to the author's running escrow total, so it must never
       // run twice. Persist authorDone in the very next write — BEFORE the
       // payout-request tweet and the getEscrow read below — so a crash can't let
@@ -156,7 +156,7 @@ export async function runEndowment(
       // The escrow amount in the payout-request copy is the CUMULATIVE total
       // (this close + any prior unanswered closes) — that's what the author
       // actually has waiting, not just the latest tranche.
-      const updated = await store.getEscrow(position.authorXId);
+      const updated = await store.getEscrow(position.authorXId, position.order.chain);
       const totalOwed = updated?.amountEth ?? quarter;
       authorPayment = {
         kind: "escrowed",
@@ -366,7 +366,7 @@ async function payAuthorDirect(
 ): Promise<AuthorPaymentInfo> {
   let txHash: string;
   try {
-    txHash = await createChainAdapter().sendEth(entry.wallet, amountEth);
+    txHash = await createChainAdapter(position.order.chain).sendEth(entry.wallet, amountEth);
   } catch (err) {
     const reason = String(err);
     log.error(`endowment: author payout failed for ${entry.handle} — ${reason}`);
@@ -399,13 +399,17 @@ async function payAuthorDirect(
  */
 async function requestAuthorPayout(position: Position): Promise<void> {
   const store = getStore();
-  const escrow = await store.getEscrow(position.authorXId);
+  const escrow = await store.getEscrow(position.authorXId, position.order.chain);
   const owed = escrow?.amountEth ?? 0;
 
   try {
     const requestTweetId = await createXAdapter().replyToPost(
       position.postId,
-      payoutRequestText({ handle: position.authorHandle, amountEth: owed }),
+      payoutRequestText({
+        handle: position.authorHandle,
+        amountEth: owed,
+        chain: position.order.chain,
+      }),
     );
     await store.addPayoutRequest({
       requestTweetId,
@@ -413,6 +417,7 @@ async function requestAuthorPayout(position: Position): Promise<void> {
       handle: position.authorHandle,
       threadPostId: position.postId,
       requestedAt: new Date().toISOString(),
+      chain: position.order.chain,
     });
     log.info(
       `endowment: ${position.authorHandle} payout request posted — total escrow ${owed.toFixed(4)} ETH (tweet ${requestTweetId})`,

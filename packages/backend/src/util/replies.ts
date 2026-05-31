@@ -1,5 +1,8 @@
 /** Composes the X reply texts the agent posts on a buy and on each exit. */
 
+import type { Chain } from "@thesis/shared";
+import { nativeSymbol, explorerTxUrl } from "./chains.js";
+
 function bscTx(hash: string): string {
   return `https://basescan.org/tx/${hash}`;
 }
@@ -220,13 +223,21 @@ export function exitReplyText(
  * The reply asking an unregistered author to send a payout wallet.
  *
  * It is posted in-thread on the author's own thesis. The author claims their
- * share by REPLYING to this tweet with a 0x address — and only a reply from
- * the original author's account is honoured, so the payout cannot be hijacked.
+ * share by REPLYING to this tweet with a wallet address (0x… on Base, base58 on
+ * Solana) — and only a reply from the original author's account is honoured, so
+ * the payout cannot be hijacked.
  */
-export function payoutRequestText(o: { handle: string; amountEth: number }): string {
+export function payoutRequestText(o: {
+  handle: string;
+  amountEth: number;
+  chain?: Chain;
+}): string {
+  const chain = o.chain ?? "base";
+  const sym = nativeSymbol(chain);
+  const walletHint = chain === "solana" ? "Solana wallet address (base58)" : "Base wallet address (0x…)";
   return [
-    `${o.handle} — your thesis closed in profit. Your 25% author share is ${o.amountEth.toFixed(4)} ETH.`,
-    "Reply to THIS tweet with your Base wallet address (0x…) and the committee sends it on-chain.",
+    `${o.handle} — your thesis closed in profit. Your 25% author share is ${o.amountEth.toFixed(4)} ${sym}.`,
+    `Reply to THIS tweet with your ${walletHint} and the committee sends it on-chain.`,
     "Only the account that posted the original thesis can claim it — any other reply is ignored.",
   ].join("\n");
 }
@@ -242,10 +253,12 @@ export function payoutSentText(o: {
   amountEth: number;
   wallet: string;
   txHash: string;
+  chain?: Chain;
 }): string {
+  const chain = o.chain ?? "base";
   return [
-    `${o.handle} — author share paid: ${o.amountEth.toFixed(4)} ETH delivered on-chain.`,
+    `${o.handle} — author share paid: ${o.amountEth.toFixed(4)} ${nativeSymbol(chain)} delivered on-chain.`,
     "Thanks for the thesis. Tag the committee again any time.",
-    bscTx(o.txHash),
+    explorerTxUrl(chain, o.txHash),
   ].join("\n");
 }
