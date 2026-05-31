@@ -15,11 +15,15 @@ import {
   gradeClass,
   tokenLabel,
 } from "./format";
+import { Pager, usePagination } from "./Pager";
 import styles from "./dashboard.module.css";
 
 export interface OpenPositionsTableProps {
   positions: OpenPositionView[];
 }
+
+/** Rows per page. Tunable — 10 keeps the ledger scannable without scrolling. */
+const PAGE_SIZE = 10;
 
 type FlashDir = "up" | "dn" | null;
 
@@ -121,6 +125,8 @@ function OpenRow({ pos }: { pos: OpenPositionView }) {
 }
 
 export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
+  const pg = usePagination(positions, PAGE_SIZE);
+
   return (
     <div className={styles.card}>
       <div className={styles.tblWrap}>
@@ -138,7 +144,7 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
           </thead>
           <tbody>
             {positions.length ? (
-              positions.map((pos) => <OpenRow key={pos.id} pos={pos} />)
+              pg.pageItems.map((pos) => <OpenRow key={pos.id} pos={pos} />)
             ) : (
               <tr className={styles.emptyRow}>
                 <td colSpan={7}>No open positions.</td>
@@ -147,6 +153,7 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
           </tbody>
         </table>
       </div>
+      <Pager p={pg} noun="open positions" />
     </div>
   );
 }

@@ -365,7 +365,7 @@ export function Office() {
               ) : null}
 
               <Link
-                href="/dashboard"
+                href="/dashboard?from=archive"
                 className={styles.archive}
                 style={{
                   left: `${ARCHIVE.left}%`,

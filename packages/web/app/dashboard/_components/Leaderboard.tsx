@@ -1,7 +1,10 @@
 /**
  * Section 04 — Author Leaderboard (mockup `#leaderboard`). Server-rendered table
- * ranked by realised author share. Top-3 ranks get the medal tints; the avatar
- * falls back to the author's initials when no image is on file.
+ * ranked by realised author share. The full roster lives in the DOM but is
+ * capped to ~10 visible rows inside a scroll box (`.tblScroll`) with a sticky
+ * header, so a long list scrolls in place instead of stretching the page.
+ * Top-3 ranks get the medal tints; the avatar falls back to the author's
+ * initials when no image is on file.
  */
 import type { LeaderboardEntry } from "@/lib/api";
 import { fmtPct, fmtRate, initials } from "./format";
@@ -21,7 +24,7 @@ function rankClass(rank: number): string {
 export function Leaderboard({ entries }: LeaderboardProps) {
   return (
     <div className={styles.card}>
-      <div className={styles.tblWrap}>
+      <div className={`${styles.tblWrap} ${styles.tblScroll}`}>
         <table className={styles.table}>
           <thead>
             <tr>

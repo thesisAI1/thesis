@@ -27,6 +27,8 @@
   margin: 34px 0 18px;
   padding-bottom: 13px;
   border-bottom: 1px solid var(--border);
+  /* drawer-tab jumps land below the sticky TopBar (~60px) + drawer bar (~64px) */
+  scroll-margin-top: 130px;
 }
 .secIdx {
   font-family: var(--mono);
@@ -49,6 +51,304 @@
   font-size: 11px;
   color: var(--dim);
   letter-spacing: 0.6px;
+}
+
+/* ---- Archive masthead (the handshake with the Faculty Office) ------------ */
+.masthead {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 26px 0 2px;
+}
+.mastMark {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border-2);
+  background: linear-gradient(160deg, #1d2433, #11151f);
+  font-family: var(--serif);
+  font-size: 25px;
+  font-weight: 700;
+  color: var(--accent);
+  box-shadow: var(--glow-mark);
+}
+.mastText {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+}
+.mastPlate {
+  /* echoes the office room .nameTag — dark mono pill, faculty hairline */
+  align-self: flex-start;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 2.5px;
+  color: var(--text);
+  padding: 3px 11px;
+  border-radius: 999px;
+  background: rgba(8, 11, 16, 0.74);
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+}
+.mastSub {
+  max-width: 54ch;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.mastFile {
+  margin-left: auto;
+  align-self: flex-start;
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 1px;
+  color: var(--dim);
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-xs);
+}
+
+/* ---- Filing drawers (sticky section jump-nav, "tabs = drawers") ---------- */
+.drawerNav {
+  position: sticky;
+  top: 60px;
+  z-index: 40;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 18px 0 6px;
+  padding: 9px;
+  border-radius: var(--r-lg);
+  border: 1px solid var(--border);
+  /* the drawer rail: a faint metal-edge highlight up top, over the card field */
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 42%),
+    linear-gradient(180deg, #131825 0%, #0e1219 100%);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(8px);
+}
+.drawer {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 130px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 13px 15px;
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, #161c28, #11151f);
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+  transition: transform var(--t-base) var(--ease), border-color var(--t-base) var(--ease),
+    color var(--t-base) var(--ease), background var(--t-base) var(--ease),
+    box-shadow var(--t-base) var(--ease);
+}
+.drawer:hover {
+  border-color: var(--border-hi);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+.drawerOn {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+  background: linear-gradient(180deg, #1b2230, #141a26);
+  transform: translateY(-3px); /* the active drawer is "pulled open" a touch */
+  box-shadow: 0 10px 26px -16px rgba(230, 163, 62, 0.55);
+}
+.drawerIdx {
+  flex: none;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  letter-spacing: 1px;
+  color: var(--accent);
+  background: rgba(230, 163, 62, 0.1);
+  border: 1px solid rgba(230, 163, 62, 0.25);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+.drawerLabel {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: -0.1px;
+}
+/* the drawer pull — a short rounded handle on the bottom edge */
+.drawerPull {
+  position: absolute;
+  left: 50%;
+  bottom: 5px;
+  transform: translateX(-50%);
+  width: 34px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--border-2);
+  transition: background var(--t-base) var(--ease), width var(--t-base) var(--ease);
+}
+.drawer:hover .drawerPull {
+  background: var(--border-hi);
+}
+.drawerOn .drawerPull {
+  width: 46px;
+  background: color-mix(in srgb, var(--accent) 70%, transparent);
+}
+
+/* ============================================================================
+   THE DIVE — the overlay played when entering through the office Archive door.
+   ----------------------------------------------------------------------------
+   ▸▸ FEEL KNOB ◂◂  ArchiveEntrance.tsx decides WHEN this plays; the keyframes
+   below decide HOW. Default: the "void" splits like a drawer parting to reveal
+   the record. Tune the three @keyframes (and --dive) to taste — e.g. a single
+   downward drawer slide, a horizontal wipe, or a longer cinematic hold. Keep
+   the longest duration <= DIVE_MS (920ms) in the component.
+   ============================================================================ */
+.entrance {
+  --dive: 820ms;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  overflow: hidden;
+}
+.entranceHalf {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 50%;
+  background: linear-gradient(180deg, #0c0f16, #080a10);
+}
+.entranceTop {
+  top: 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  animation: archiveDiveTop var(--dive) var(--ease) forwards;
+}
+.entranceBottom {
+  bottom: 0;
+  border-top: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  animation: archiveDiveBottom var(--dive) var(--ease) forwards;
+}
+.entrancePlate {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 3px;
+  color: var(--accent);
+  white-space: nowrap;
+  animation: archiveDivePlate var(--dive) var(--ease) forwards;
+}
+
+/* —— tune these three —— */
+@keyframes archiveDiveTop {
+  0% { transform: translateY(0); }
+  18% { transform: translateY(0); } /* brief hold — the drawer "catches" */
+  100% { transform: translateY(-100%); } /* then slides up and away */
+}
+@keyframes archiveDiveBottom {
+  0% { transform: translateY(0); }
+  18% { transform: translateY(0); }
+  100% { transform: translateY(100%); }
+}
+@keyframes archiveDivePlate {
+  0% { opacity: 0; letter-spacing: 8px; }
+  22% { opacity: 1; letter-spacing: 3px; }
+  58% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* Belt-and-suspenders: the component already skips the dive under reduced
+   motion, but hide the overlay outright too. */
+@media (prefers-reduced-motion: reduce) {
+  .entrance {
+    display: none;
+  }
+}
+
+/* ---- table pager (trade tables) ----------------------------------------- */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-top: 1px solid var(--border);
+}
+.pagerInfo {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  letter-spacing: 0.3px;
+  color: var(--dim);
+}
+.pagerInfo b {
+  font-weight: 600;
+  color: var(--muted);
+}
+.pagerCtl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pagerPage {
+  min-width: 58px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.pagerBtn {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text);
+  padding: 6px 11px;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border-2);
+  background: linear-gradient(180deg, #161c28, #11151f);
+  cursor: pointer;
+  transition: border-color var(--t-base) var(--ease), color var(--t-base) var(--ease),
+    opacity var(--t-base) var(--ease);
+}
+.pagerBtn:hover:not(:disabled) {
+  border-color: var(--border-hi);
+}
+.pagerBtn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---- inner-scroll containers (cap visible rows, scroll the rest) --------- */
+/* Decision Log — ~5 cards tall, then scroll inside. */
+.logScroll {
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+/* Leaderboard — ~10 rows tall with a sticky header, then scroll inside. */
+.tblScroll {
+  max-height: 640px;
+  overflow-y: auto;
+}
+.tblScroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  /* solid (not the base translucent) so scrolling rows don't bleed through */
+  background: #0d111a;
+}
+.logScroll::-webkit-scrollbar,
+.tblScroll::-webkit-scrollbar {
+  width: 8px;
+}
+.logScroll::-webkit-scrollbar-thumb,
+.tblScroll::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 4px;
 }
 
 /* ---- card base ----------------------------------------------------------- */

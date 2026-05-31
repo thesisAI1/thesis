@@ -5,10 +5,11 @@
  * filter by result (win/loss); grade is not on ClosedPositionView so we expose
  * the win/loss chips the data supports plus the free-text search.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ClosedPositionView } from "@/lib/api";
 import { fmtEthSigned, fmtPct, timeAgo, tokenLabel } from "./format";
 import { SearchIcon } from "./icons";
+import { Pager, usePagination } from "./Pager";
 import styles from "./dashboard.module.css";
 
 export interface HistoryTableProps {
@@ -22,6 +23,9 @@ const RESULTS: Array<{ key: Result; label: string }> = [
   { key: "win", label: "WIN" },
   { key: "loss", label: "LOSS" },
 ];
+
+/** Rows per page. Tunable — matches the Open table for a consistent ledger. */
+const PAGE_SIZE = 10;
 
 export function HistoryTable({ positions }: HistoryTableProps) {
   const [search, setSearch] = useState("");
@@ -39,6 +43,13 @@ export function HistoryTable({ positions }: HistoryTableProps) {
       return true;
     });
   }, [positions, search, result]);
+
+  const pg = usePagination(rows, PAGE_SIZE);
+  const { setPage } = pg;
+  // A new search/filter is a new query — start at the first page.
+  useEffect(() => {
+    setPage(0);
+  }, [search, result, setPage]);
 
   return (
     <>
@@ -83,7 +94,7 @@ export function HistoryTable({ positions }: HistoryTableProps) {
             </thead>
             <tbody>
               {rows.length ? (
-                rows.map((p) => {
+                pg.pageItems.map((p) => {
                   const up = p.realisedPnlEth >= 0;
                   return (
                     <tr key={p.id}>
@@ -117,6 +128,7 @@ export function HistoryTable({ positions }: HistoryTableProps) {
             </tbody>
           </table>
         </div>
+        <Pager p={pg} noun="trades" />
       </div>
     </>
   );

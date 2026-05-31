@@ -50,7 +50,7 @@ export function DecisionsSection({ reviews }: DecisionsSectionProps) {
         </div>
       </div>
 
-      <div className={styles.log}>
+      <div className={`${styles.log} ${styles.logScroll}`}>
         {rows.length ? (
           rows.map((r) => (
             <div className={styles.logItem} key={`${r.postId}-${r.reviewedAt}`}>

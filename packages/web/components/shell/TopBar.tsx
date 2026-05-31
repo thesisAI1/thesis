@@ -4,7 +4,7 @@
  * The site nav (design `.bar`) — one solid, consistent bar on every page.
  *
  * A fixed, opaque sticky header: the ΘTHESIS wordmark, a single route-based
- * link set (Home · The Record · Pitch · Docs · $THESIS), the GitHub + X icon
+ * link set (Home · The Archive · Pitch · Docs · $THESIS), the GitHub + X icon
  * links and the amber "Submit a thesis" CTA. The active page is derived from
  * the current route via `usePathname`, so the same nav renders identically on
  * the home page, the live record, the pitch page and the docs — no per-page
@@ -26,11 +26,11 @@ interface NavLink {
   match?: string;
 }
 
-/** The single, canonical nav. Order: Home · The Record · Pitch · Docs · $THESIS. */
+/** The single, canonical nav. Order: Home · The Archive · Pitch · Docs · $THESIS. */
 const NAV: NavLink[] = [
   { label: "Home", href: "/", match: "/" },
   { label: "Faculty", href: "/faculty", match: "/faculty" },
-  { label: "The Record", href: "/dashboard", match: "/dashboard" },
+  { label: "The Archive", href: "/dashboard", match: "/dashboard" },
   { label: "Pitch", href: "/pitch", match: "/pitch" },
   { label: "Docs", href: "/docs", match: "/docs" },
   { label: "$THESIS", href: "/#token" },
