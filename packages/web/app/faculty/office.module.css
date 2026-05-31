@@ -69,7 +69,7 @@
   overflow: hidden;
   border: 1px solid var(--border-2);
   border-radius: var(--r-lg);
-  background: #0a0d13 url("/faculty/office.png") center / cover no-repeat;
+  background: #0a0d13 url("/faculty/office.png?v=3") center / cover no-repeat;
   box-shadow: 0 30px 80px -42px rgba(0, 0, 0, 0.9);
 }
 .overlay {
@@ -78,38 +78,50 @@
   pointer-events: none;
 }
 
-/* the active office is marked by a "beeping" radar orb in the agent's colour —
-   a glowing core with two staggered expanding rings. Anchored at the office's
-   floor centre, so when characters arrive it hovers over the active one. */
-.beep {
+/* the cast — generated pixel-art sprites composited onto the office floor. Each
+   agent is bottom-centre anchored at their desk; swapping the background-image
+   (idle↔type) changes pose, and the box is pre-sized by the idle aspect so it
+   never reflows. Working agents bob as if typing and glow in their colour. */
+.char {
   position: absolute;
-  transform: translate(-50%, -50%);
-  z-index: 5;
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: radial-gradient(circle at 35% 30%, #fff, var(--c) 62%);
-  animation: beepGlow 1.6s var(--ease) infinite;
+  transform: translate(-50%, -100%);
+  background-size: contain;
+  background-position: bottom center;
+  background-repeat: no-repeat;
+  image-rendering: pixelated;
+  pointer-events: none;
+  z-index: 3;
+  opacity: 0;
+  filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.5));
+  transition: opacity 0.28s var(--ease);
 }
-.beep::before,
-.beep::after {
-  content: "";
-  position: absolute;
-  inset: -3px;
-  border-radius: 999px;
-  border: 2px solid var(--c);
-  animation: ping 1.6s var(--ease) infinite;
+.char[data-show="true"] {
+  opacity: 1;
 }
-.beep::after {
-  animation-delay: 0.8s;
+/* the seated "at the terminal" layer bobs as if typing and glows in its colour */
+.working[data-show="true"] {
+  filter: drop-shadow(0 0 7px var(--c)) drop-shadow(0 3px 3px rgba(0, 0, 0, 0.55));
+  animation: typeBob 0.44s steps(2, end) infinite;
 }
-@keyframes ping {
-  0% { transform: scale(1); opacity: 0.7; }
-  100% { transform: scale(3.4); opacity: 0; }
+/* the Dean never sits — while deliberating he glows and rocks as he weighs it */
+.char[data-on="true"] {
+  filter: drop-shadow(0 0 7px var(--c)) drop-shadow(0 3px 3px rgba(0, 0, 0, 0.55));
+  animation: typeBob 0.6s steps(2, end) infinite;
 }
-@keyframes beepGlow {
-  0%, 100% { box-shadow: 0 0 14px 2px color-mix(in srgb, var(--c) 80%, transparent); }
-  50% { box-shadow: 0 0 22px 5px color-mix(in srgb, var(--c) 92%, transparent); }
+@keyframes typeBob {
+  0% { transform: translate(-50%, -100%); }
+  50% { transform: translate(-50%, calc(-100% - 2.5px)); }
+  100% { transform: translate(-50%, -100%); }
+}
+
+/* the author waits in the lobby; lights up and hops when the Endowment pays out */
+.author {
+  z-index: 4;
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.55));
+}
+.author[data-paid="true"] {
+  filter: drop-shadow(0 0 9px var(--c)) drop-shadow(0 3px 4px rgba(0, 0, 0, 0.55));
+  animation: typeBob 0.5s steps(2, end) infinite;
 }
 
 /* always-on room nameplate so each office is identifiable; brightens when active */
@@ -466,6 +478,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ticket, .coin, .pulse, .stamp, .intake, .beep, .feedBlock { animation: none; }
-  .beep::before, .beep::after { animation: none; opacity: 0; }
+  .ticket, .coin, .pulse, .stamp, .intake, .feedBlock { animation: none; }
+  .char, .working { animation: none; }
 }

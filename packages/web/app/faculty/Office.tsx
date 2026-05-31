@@ -73,6 +73,50 @@ const MONITOR: Record<AgentName, Spot> = {
 /** The Records Archive (bottom-right room) — the clickable hotspot. */
 const ARCHIVE: Rect = { left: 62, top: 62.4, w: 33.8, h: 28.2 };
 
+/* The cast (public/faculty/cast/*.png). Each agent stands at their desk, feet on
+   the floor just below the monitor; the Author waits in the central lobby. STAND
+   is the feet point (sprites are bottom-centre anchored). CHAR_ASPECT is each
+   idle sprite's measured w/h, so the container box never reflows on idle↔type. */
+const STAND: Record<AgentName, Spot> = {
+  registrar: { x: 13.9, y: 26 },
+  auditor: { x: 13.9, y: 55 },
+  bursar: { x: 13.8, y: 84 },
+  dean: { x: 50.1, y: 48.3 },
+  endowment: { x: 75.7, y: 55 },
+};
+const AUTHOR_SPOT: Spot = { x: 50, y: 86.3 };
+const CHAR_ASPECT: Record<AgentName, number> = {
+  registrar: 0.389,
+  auditor: 0.397,
+  dean: 0.517,
+  bursar: 0.4,
+  endowment: 0.343,
+};
+const AUTHOR_ASPECT = 0.43;
+const CHAR_H = 15; // standing sprite height as % of the square stage
+
+/* When a computer-using office goes active the agent sits down at the terminal —
+   a seated sprite turned to face LEFT toward the screen (the monitor sits left of
+   the stool in every room), planted on the stool below the desk. SIT is the seat
+   point; sprites are bottom-centre anchored. The Dean has no terminal — he only
+   stamps — so he keeps his standing pose and is absent here. */
+type Typist = Exclude<AgentName, "dean">;
+const SIT: Record<Typist, Spot> = {
+  registrar: { x: 18.1, y: 25.2 },
+  auditor: { x: 17.4, y: 55.2 },
+  bursar: { x: 17.2, y: 84.9 },
+  endowment: { x: 79.7, y: 55.5 },
+};
+// Each seated sprite now includes its own stool (the office art's stools were
+// removed), so it's one rigid unit anchored by the stool's base on the floor.
+const WORK_ASPECT: Record<Typist, number> = {
+  registrar: 0.549,
+  auditor: 0.53,
+  bursar: 0.525,
+  endowment: 0.537,
+};
+const WORK_H = 16; // seated sprite (incl. stool) height as % of the square stage
+
 const GRADE_COLOR: Record<Grade, string> = {
   A: "var(--green)",
   B: "var(--blue)",
@@ -192,18 +236,56 @@ export function Office() {
                 const r = ROOMS[agent];
                 const lit = a.phase !== "idle";
                 const color = AGENT_COLOR[agent];
-                // Every agent beeps on their monitor screen; only the Dean
-                // (central office, no desk screen) beeps at the floor centre.
-                const orb = agent === "dean" ? DESK[agent] : MONITOR[agent];
                 // the Endowment's left wall is a doorway, so nudge its tag right
                 const nameDx = agent === "endowment" ? 5 : 1.5;
-                // the Endowment settles straight to "done", so also beep it while
+                // the agent is "at work" (sits down + glows) while active; the
+                // Endowment settles straight to "done", so also count it while
                 // it's paying out in-session (it never passes through "active").
                 const beeping =
                   a.phase === "active" ||
                   (agent === "endowment" && room.inSession && a.lines.length > 0);
+                const stand = STAND[agent];
+                const isDean = agent === "dean";
                 return (
                   <div key={agent}>
+                    {/* Standing pose, facing you. For the four typists this is the
+                        idle layer (fades out when they sit to work). The Dean
+                        never sits — he keeps this pose and just glows + stamps. */}
+                    <span
+                      className={styles.char}
+                      data-show={isDean || !beeping ? "true" : undefined}
+                      data-on={isDean && beeping ? "true" : undefined}
+                      aria-hidden="true"
+                      style={
+                        {
+                          left: `${stand.x}%`,
+                          top: `${stand.y}%`,
+                          height: `${CHAR_H}%`,
+                          width: `${CHAR_H * CHAR_ASPECT[agent]}%`,
+                          backgroundImage: `url(/faculty/cast/${agent}-idle.png)`,
+                          ["--c" as string]: color,
+                        } as CSSProperties
+                      }
+                    />
+                    {/* Active: seated at the terminal, facing left toward the
+                        screen, typing — bobs and glows in the agent's colour. */}
+                    {!isDean ? (
+                      <span
+                        className={`${styles.char} ${styles.working}`}
+                        data-show={beeping ? "true" : undefined}
+                        aria-hidden="true"
+                        style={
+                          {
+                            left: `${SIT[agent as Typist].x}%`,
+                            top: `${SIT[agent as Typist].y}%`,
+                            height: `${WORK_H}%`,
+                            width: `${WORK_H * WORK_ASPECT[agent as Typist]}%`,
+                            backgroundImage: `url(/faculty/cast/${agent}-work.png?v=3)`,
+                            ["--c" as string]: color,
+                          } as CSSProperties
+                        }
+                      />
+                    ) : null}
                     <div
                       className={styles.nameTag}
                       data-on={lit ? "true" : undefined}
@@ -227,18 +309,30 @@ export function Office() {
                       <Sigil agent={agent} size={15} />
                       {AGENT_META[agent].name.replace(/^The\s+/, "")}
                     </div>
-                    {beeping ? (
-                      <span
-                        className={styles.beep}
-                        aria-hidden="true"
-                        style={
-                          { left: `${orb.x}%`, top: `${orb.y}%`, ["--c" as string]: color } as CSSProperties
-                        }
-                      />
-                    ) : null}
                   </div>
                 );
               })}
+
+              {/* The author waits in the central lobby while the committee sits;
+                  lights up when the Endowment pays them out. */}
+              {submission ? (
+                <span
+                  className={`${styles.char} ${styles.author}`}
+                  data-show="true"
+                  data-paid={settled ? "true" : undefined}
+                  aria-hidden="true"
+                  style={
+                    {
+                      left: `${AUTHOR_SPOT.x}%`,
+                      top: `${AUTHOR_SPOT.y}%`,
+                      height: `${CHAR_H}%`,
+                      width: `${CHAR_H * AUTHOR_ASPECT}%`,
+                      backgroundImage: "url(/faculty/cast/author-idle.png)",
+                      ["--c" as string]: "var(--green)",
+                    } as CSSProperties
+                  }
+                />
+              ) : null}
 
               {showIntake ? (
                 <span className={styles.intake}>📄&nbsp;NEW&nbsp;THESIS · {submission?.authorHandle}</span>
