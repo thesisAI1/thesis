@@ -131,6 +131,13 @@
 
     <!-- ===================== DASHBOARD ===================== -->
     <section class="dash" id="dashboard">
+      <!-- Live ticker tape: scrolling marquee of the freshest activity.
+           Populated by renderTicker() in app.js from data.recentActivity. -->
+      <div class="ticker-tape" id="ticker-tape" hidden>
+        <span class="ticker-label"><span class="ticker-dot"></span>live</span>
+        <div class="ticker-track-wrap"><div class="ticker-track" id="ticker-track"></div></div>
+      </div>
+
       <div class="dash-top-row">
         <div class="section-tag">LIVE PERFORMANCE</div>
         <div class="live-status" id="live-status" hidden>
@@ -148,6 +155,49 @@
 
       <div class="stat-grid" id="stat-grid"></div>
       <a class="activity-strip" id="activity-strip" hidden href="#" target="_blank" rel="noopener noreferrer"></a>
+
+      <!-- Cumulative counters card: lifetime running totals for the four
+           distribution legs + 7d rolling win rate. Drives the narrative of
+           "this thing has been working for X weeks". -->
+      <div class="counters-card" id="counters-card" hidden>
+        <div class="counter">
+          <span class="counter-label">$THESIS buyback</span>
+          <span class="counter-value" id="counter-buyback">—</span>
+          <span class="counter-sub">cumulative</span>
+        </div>
+        <div class="counter">
+          <span class="counter-label">Paid to authors</span>
+          <span class="counter-value" id="counter-authors">—</span>
+          <span class="counter-sub">cumulative</span>
+        </div>
+        <div class="counter">
+          <span class="counter-label">Lottery distributed</span>
+          <span class="counter-value" id="counter-lottery">—</span>
+          <span class="counter-sub">cumulative</span>
+        </div>
+        <div class="counter">
+          <span class="counter-label">Win rate (7d)</span>
+          <span class="counter-value" id="counter-winrate">—</span>
+          <span class="counter-sub" id="counter-winrate-sub">—</span>
+        </div>
+      </div>
+
+      <!-- Recent wins highlight strip + portfolio sparkline. Two-column
+           on desktop, stacks on mobile. -->
+      <div class="hero-extras">
+        <div class="recent-wins" id="recent-wins" hidden>
+          <span class="rw-icon">↗</span>
+          <div class="rw-body">
+            <div class="rw-headline" id="rw-headline">—</div>
+            <div class="rw-sub" id="rw-sub">last 24h</div>
+          </div>
+        </div>
+        <div class="sparkline-card" id="sparkline-card" hidden>
+          <div class="sp-label">Portfolio value · last 48h</div>
+          <svg class="sp-chart" id="sp-chart" viewBox="0 0 280 50" preserveAspectRatio="none"></svg>
+        </div>
+      </div>
+
       <div class="stat-row" id="stat-row"></div>
       <p class="funnel-line" id="funnel-line"></p>
 
@@ -158,7 +208,7 @@
       </h3>
       <div class="table-wrap scroll-cap scroll-cap-table scroll-cap-tall" id="open-wrap">
         <table class="data-table">
-          <thead><tr><th>Token</th><th>Author / Thesis</th><th>Grade</th><th>Stage</th><th class="num">Size</th><th class="num">Market cap</th><th class="num">Unrealised</th></tr></thead>
+          <thead><tr><th>Token</th><th>Author / Thesis</th><th>Grade</th><th>Stage</th><th class="num">Size</th><th class="num">Market cap</th><th class="num">Age</th><th class="num">Unrealised</th></tr></thead>
           <tbody id="open-rows"></tbody>
         </table>
       </div>

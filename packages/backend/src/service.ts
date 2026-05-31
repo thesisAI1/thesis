@@ -14,6 +14,7 @@ import { processWalletReplies } from "./payout/index.js";
 import { processAuthorCloseRequests } from "./pipeline/author-actions.js";
 import { processChatbotReplies } from "./agents/chatbot.js";
 import { reviewSubmission, type ReviewResult } from "./pipeline/index.js";
+import { recordActivity } from "./activity.js";
 import { getStore } from "./store/index.js";
 import { triageMentions } from "./triage/index.js";
 import { log } from "./util/log.js";
@@ -146,6 +147,14 @@ async function processSubmission(submission: Submission): Promise<void> {
           `${result.position.order.amountInEth.toFixed(4)} ETH ` +
           `(${(v.positionSizePct * 100).toFixed(1)}% of portfolio)`,
       );
+      // Feed the dashboard ticker tape: every fresh buy is "live activity".
+      recordActivity({
+        kind: "buy",
+        summary: `${submission.authorHandle} funded — ${result.position.order.amountInEth.toFixed(4)} Ξ`,
+        authorHandle: submission.authorHandle,
+        positionId: result.position.id,
+        amountEth: result.position.order.amountInEth,
+      });
       await replyOnBuy(submission, result);
     } else if (result.skippedReason) {
       log.info(`bursar: no buy — ${result.skippedReason}`);

@@ -47,6 +47,7 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { getRecentActivity } from "../activity.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createBaseDataAdapter } from "../adapters/basedata/index.js";
 import { RealBaseData } from "../adapters/basedata/real.js";
@@ -170,6 +171,32 @@ async function getSymbolCached(address: string): Promise<string> {
   // Only persist non-empty results so a later resolution can still overwrite.
   if (sym) symbolCache.set(key, sym);
   return sym;
+}
+
+/** Periodic snapshot of total portfolio value (wallet + open positions
+ *  valued at live price). Drives the cumulative portfolio sparkline on the
+ *  hero. Recorded opportunistically inside the dashboard build — if the
+ *  last snapshot is older than SNAPSHOT_INTERVAL_MS, we append; otherwise
+ *  we skip. Kept in memory only; loses history on restart, but that's
+ *  acceptable for a rolling N-hour window display. */
+interface PortfolioSnapshot {
+  at: string; // ISO
+  totalValueEth: number;
+  walletEth: number;
+  openPositionsValueEth: number;
+}
+const SNAPSHOT_INTERVAL_MS = 30 * 60 * 1000; // every 30 min
+const SNAPSHOT_BUFFER_SIZE = 96; // 48h of 30min snapshots
+const portfolioSnapshots: PortfolioSnapshot[] = [];
+function recordPortfolioSnapshot(snap: Omit<PortfolioSnapshot, "at">): void {
+  const last = portfolioSnapshots[portfolioSnapshots.length - 1];
+  if (last && Date.now() - new Date(last.at).getTime() < SNAPSHOT_INTERVAL_MS) {
+    return;
+  }
+  portfolioSnapshots.push({ ...snap, at: new Date().toISOString() });
+  if (portfolioSnapshots.length > SNAPSHOT_BUFFER_SIZE) {
+    portfolioSnapshots.shift();
+  }
 }
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -1161,6 +1188,53 @@ async function buildDashboardPayload(): Promise<object> {
   const ethUsdPrice = await getEthUsdRate();
   const totalPortfolioValueEth = balanceEth + openPositionsValueEth;
 
+  // Opportunistic snapshot of total portfolio value — drives the hero
+  // sparkline. Internal guard ensures we only persist at most one snapshot
+  // per 30min regardless of dashboard request rate.
+  recordPortfolioSnapshot({
+    totalValueEth: totalPortfolioValueEth,
+    walletEth: balanceEth,
+    openPositionsValueEth,
+  });
+
+  // Recent wins highlight strip (last 24h). Filters closed positions by
+  // closedAt and sums realised profit / counts wins for emotional pull.
+  const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+  const recentClosed = closed.filter((p) => {
+    if (!p.closedAt) return false;
+    return new Date(p.closedAt).getTime() >= dayAgo;
+  });
+  const recentWinsCount = recentClosed.filter((p) => p.realisedPnlEth > 0).length;
+  const recentWinsProfitEth = recentClosed
+    .filter((p) => p.realisedPnlEth > 0)
+    .reduce((s, p) => s + p.realisedPnlEth, 0);
+
+  // 7-day rolling win rate — fresher signal than the all-time number,
+  // and matches what authors care about ("is this thing winning right now?").
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const recentWeekClosed = closed.filter(
+    (p) => p.closedAt && new Date(p.closedAt).getTime() >= weekAgo,
+  );
+  const recentWeekWins = recentWeekClosed.filter((p) => p.realisedPnlEth > 0).length;
+  const winRate7d =
+    recentWeekClosed.length > 0 ? recentWeekWins / recentWeekClosed.length : 0;
+
+  // Per-author stats — wins/total/winRate. Computed once here so the
+  // frontend can decorate every row without N extra lookups. Keyed by
+  // lowercased handle (authors sometimes drift between cases on X).
+  const authorStats: Record<string, { wins: number; total: number; winRate: number }> = {};
+  for (const p of closed) {
+    const key = (p.authorHandle || "").toLowerCase();
+    if (!key) continue;
+    if (!authorStats[key]) authorStats[key] = { wins: 0, total: 0, winRate: 0 };
+    authorStats[key].total += 1;
+    if (p.realisedPnlEth > 0) authorStats[key].wins += 1;
+  }
+  for (const k in authorStats) {
+    const s = authorStats[k];
+    s.winRate = s.total > 0 ? s.wins / s.total : 0;
+  }
+
   return {
     mode: config.mode,
     portfolio: {
@@ -1200,6 +1274,30 @@ async function buildDashboardPayload(): Promise<object> {
     openPositions,
     closedPositions: closedPositions.slice(0, 25),
     recentReviews: reviews.slice(-20).reverse(),
+    /** Cumulative running totals — drive the hero counters card. Each value
+     *  here is ETH "ever distributed to this leg" since launch. */
+    counters: {
+      authorsTotalEth: dist.toAuthors,
+      lotteryTotalEth: dist.toTeam, // toTeam holds the lottery slice post-rename
+      buybackTotalEth: dist.toBuyback, // proxy for "$THESIS burned ever"
+      portfolioTotalEth: dist.toPortfolio,
+      winRate7d,
+      winRate7dCount: recentWeekClosed.length,
+    },
+    /** Last 24h highlight — small punchy strip near the top. */
+    recentWins: {
+      count24h: recentWinsCount,
+      profitEth24h: recentWinsProfitEth,
+      closedCount24h: recentClosed.length,
+    },
+    /** Per-author stats keyed by LOWERCASED handle. The frontend looks up
+     *  each row's author here to render inline win/total stats. */
+    authorStats,
+    /** Last 50 ticker events (newest first). Drives the live activity tape. */
+    recentActivity: getRecentActivity(50),
+    /** Rolling 48h of portfolio-value snapshots (≤30min resolution). Drives
+     *  the hero sparkline. Empty array on first server run; fills over time. */
+    portfolioSnapshots: portfolioSnapshots.slice(),
   };
 }
 

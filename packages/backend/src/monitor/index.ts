@@ -22,6 +22,7 @@ import { createXAdapter } from "../adapters/x/index.js";
 import type { AuthorPaymentInfo, LotteryPaymentInfo } from "../agents/endowment.js";
 import { renderProfitCardSvg, type ProfitCardData } from "../cards/profit-card.js";
 import { fetchAvatarAsDataUri, rasterise } from "../cards/render.js";
+import { recordActivity } from "../activity.js";
 import { publish } from "../events.js";
 import { settlePosition } from "../pipeline/index.js";
 import { getStore } from "../store/index.js";
@@ -155,6 +156,15 @@ async function takeTier(pos: Position): Promise<boolean> {
       `${Math.round(tier.sellFraction * 100)}%, ${sale.proceeds.toFixed(4)} ETH back ` +
       `(+${sale.profit.toFixed(4)} profit)`,
   );
+  // Tier hits feed the dashboard ticker so visitors see "live wins" as
+  // they happen, not only at full close.
+  recordActivity({
+    kind: "tp",
+    summary: `${pos.authorHandle} hit TP${tierNum} (+${gainPct}%) — +${sale.profit.toFixed(4)} Ξ`,
+    authorHandle: pos.authorHandle,
+    positionId: pos.id,
+    amountEth: sale.profit,
+  });
 
   // Final tier closes the position. Mark + persist + settle BEFORE the reply
   // so the author-payment + holder-lottery lines can be folded into the
@@ -258,6 +268,16 @@ async function closeOutWithKind(
   log.info(
     `monitor: ${pos.id} ${kindLabel} — net result ${total >= 0 ? "+" : ""}${total.toFixed(4)} ETH`,
   );
+  // Feed the dashboard ticker — every close (win or loss) is news.
+  recordActivity({
+    kind,
+    summary:
+      `${pos.authorHandle} closed ${kind === "manual" ? "by request" : kind === "aging" ? "(aging)" : kind === "sl" ? "(SL)" : ""} ` +
+      `${total >= 0 ? "+" : ""}${total.toFixed(4)} Ξ`,
+    authorHandle: pos.authorHandle,
+    positionId: pos.id,
+    amountEth: total,
+  });
   // Settle first so we know how the author was paid (direct vs escrow vs
   // failed) AND who won the holder lottery — this gets folded into the
   // close-announcement tweet so the whole story lands as ONE reply.
