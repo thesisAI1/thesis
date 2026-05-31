@@ -108,12 +108,13 @@ export interface Store {
   /** Clear a post's pending marker once its Position is saved (or buy reverted). */
   clearPendingBuy(postId: string): Promise<void>;
 
-  /** Record that a buy happened at `isoAt` (for the rate limit). */
-  recordBuy(isoAt: string): Promise<void>;
-  /** How many buys happened at or after `isoSince`. */
-  countBuysSince(isoSince: string): Promise<number>;
-  /** ISO timestamp of the most recent buy, or null. */
-  lastBuyAt(): Promise<string | null>;
+  /** Record that a buy happened at `isoAt` on `chain` (for the per-chain rate
+   *  limit). Defaults to base — Base and Solana have independent buy lanes. */
+  recordBuy(isoAt: string, chain?: Chain): Promise<void>;
+  /** How many buys happened on `chain` at or after `isoSince`. */
+  countBuysSince(isoSince: string, chain?: Chain): Promise<number>;
+  /** ISO timestamp of the most recent buy on `chain`, or null. */
+  lastBuyAt(chain?: Chain): Promise<string | null>;
 
   /** Add to an unregistered author's escrowed profit share, per chain
    *  (defaults to base). Base keys by raw xUserId (unchanged); Solana is a

@@ -20,7 +20,12 @@ function acctKey(xUserId: string, chain: Chain = "base"): string {
 interface Data {
   registry: Record<string, RegistryEntry>;
   positions: Position[];
+  /** Base buy timestamps (ISO). Base keeps this flat array unchanged — no
+   *  migration. Other chains live in buyLogByChain so cooldowns + daily limits
+   *  are independent per chain (Base and Solana are separate trading lanes). */
   buyLog: string[];
+  /** Per-chain buy timestamps for non-base chains (e.g. solana). */
+  buyLogByChain?: Record<string, string[]>;
   pendingBuys: PendingBuy[];
   escrow: Record<string, EscrowEntry>;
   payoutRequests: Record<string, PayoutRequest>;
@@ -228,18 +233,29 @@ export class FileStore implements Store {
     if (this.data.pendingBuys.length !== before) this.persist();
   }
 
-  async recordBuy(isoAt: string): Promise<void> {
-    this.data.buyLog.push(isoAt);
+  /** The buy-timestamp log for a chain. Base uses the flat `buyLog` (unchanged);
+   *  other chains get a lazily-created namespaced array. Returns a live
+   *  reference so callers can push onto it. */
+  private buyLogFor(chain: Chain): string[] {
+    if (chain === "base") return this.data.buyLog;
+    this.data.buyLogByChain ??= {};
+    this.data.buyLogByChain[chain] ??= [];
+    return this.data.buyLogByChain[chain];
+  }
+
+  async recordBuy(isoAt: string, chain: Chain = "base"): Promise<void> {
+    this.buyLogFor(chain).push(isoAt);
     this.persist();
   }
 
-  async countBuysSince(isoSince: string): Promise<number> {
-    return this.data.buyLog.filter((t) => t >= isoSince).length;
+  async countBuysSince(isoSince: string, chain: Chain = "base"): Promise<number> {
+    return this.buyLogFor(chain).filter((t) => t >= isoSince).length;
   }
 
-  async lastBuyAt(): Promise<string | null> {
-    if (this.data.buyLog.length === 0) return null;
-    return this.data.buyLog.reduce((a, b) => (a > b ? a : b));
+  async lastBuyAt(chain: Chain = "base"): Promise<string | null> {
+    const log = this.buyLogFor(chain);
+    if (log.length === 0) return null;
+    return log.reduce((a, b) => (a > b ? a : b));
   }
 
   async addEscrow(

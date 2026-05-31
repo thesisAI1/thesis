@@ -37,6 +37,12 @@ export async function runBursar(verdict: Verdict): Promise<BursarResult> {
 
   const store = getStore();
 
+  // Trade on the AUTHORITATIVE chain resolved by the Auditor (DexScreener), not
+  // the submission's address-shape guess. The rate limit below is PER CHAIN —
+  // Base and Solana are independent trading lanes, so a Base buy never gates a
+  // Solana buy (and vice-versa).
+  const tradeChain = verdict.tokenReport.chain;
+
   // --- Never double-expose to the same contract (L8) --------------------
   // Two theses about the same token (or a re-post) must not open a second
   // position: that doubles our exposure and splits the exit logic across two
@@ -54,30 +60,27 @@ export async function runBursar(verdict: Verdict): Promise<BursarResult> {
     };
   }
 
-  // --- Anti-spam rate limit ---------------------------------------------
+  // --- Anti-spam rate limit (per chain) ---------------------------------
   const since = new Date(Date.now() - DAY_MS).toISOString();
-  const buysToday = await store.countBuysSince(since);
+  const buysToday = await store.countBuysSince(since, tradeChain);
   if (buysToday >= config.trading.maxBuysPerDay) {
     return {
       position: null,
-      skippedReason: `daily buy limit reached (${config.trading.maxBuysPerDay})`,
+      skippedReason: `daily ${tradeChain} buy limit reached (${config.trading.maxBuysPerDay})`,
     };
   }
-  const last = await store.lastBuyAt();
+  const last = await store.lastBuyAt(tradeChain);
   if (last) {
     const elapsedMin = (Date.now() - new Date(last).getTime()) / 60000;
     if (elapsedMin < config.trading.buyCooldownMinutes) {
       const left = Math.ceil(config.trading.buyCooldownMinutes - elapsedMin);
-      return { position: null, skippedReason: `cooldown active (${left}m left)` };
+      return { position: null, skippedReason: `${tradeChain} cooldown active (${left}m left)` };
     }
   }
 
   // --- Size and execute --------------------------------------------------
-  // Buy on the AUTHORITATIVE chain resolved by the Auditor (DexScreener), not
-  // the submission's address-shape guess — so we always trade the correct token
-  // on the correct chain and size off that chain's wallet (ETH on Base, SOL on
-  // Solana; the `*Eth` fields are native-per-chain).
-  const tradeChain = verdict.tokenReport.chain;
+  // Size off the trade chain's wallet (ETH on Base, SOL on Solana; the `*Eth`
+  // fields are native-per-chain).
   const chain = createChainAdapter(tradeChain);
   let portfolioEth: number;
   try {
@@ -125,7 +128,7 @@ export async function runBursar(verdict: Verdict): Promise<BursarResult> {
     throw err;
   }
   const now = new Date().toISOString();
-  await store.recordBuy(now);
+  await store.recordBuy(now, tradeChain);
 
   const position: Position = {
     id: `pos-${verdict.submission.postId}`,
