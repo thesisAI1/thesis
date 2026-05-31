@@ -12,7 +12,10 @@
   },
   "dependencies": {
     "@resvg/resvg-js": "^2.6.2",
+    "@solana/spl-token": "^0.4.9",
+    "@solana/web3.js": "^1.95.4",
     "@thesis/shared": "*",
+    "bs58": "^6.0.0",
     "viem": "~2.17.0"
   }
 }

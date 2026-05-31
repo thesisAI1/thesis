@@ -76,6 +76,29 @@ export const config = {
     zeroExApiKey: str("ZEROEX_API_KEY"),
   },
 
+  /** Solana support — ADDITIVE and OPTIONAL. Defaults keep the system in mock
+   *  mode with no Solana wallet; a Solana win only needs these when trading
+   *  live on Solana. The global `chain.liveTradingArmed` gate also guards
+   *  real Solana swaps — there is one arm switch for both chains. */
+  solana: {
+    /** Solana RPC endpoint. Public mainnet RPC by default; use a paid RPC
+     *  (Helius / QuickNode) for live trading to avoid rate limits. */
+    rpcUrl: str("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com"),
+    /** base58-encoded secret key for the Solana trading wallet. Separate from
+     *  the EVM wallet — Solana wins trade and pay out from this wallet. */
+    tradingWalletKey: str("SOLANA_TRADING_WALLET_KEY"),
+    /** Where a Solana win's 25% "buyback" slice goes. There is no $THESIS on
+     *  Solana to burn, so this leg pays a dedicated wallet instead of a
+     *  buyback-and-burn. Mirrors TEAM_WALLET but for the Solana substitute leg. */
+    buybackWallet: str("SOLANA_BUYBACK_WALLET"),
+    /** Jupiter aggregator API base (v6 quote + swap). */
+    jupiterApiBase: str("JUPITER_API_BASE", "https://quote-api.jup.ag/v6"),
+    /** Slippage tolerance for Jupiter swaps, in percent. */
+    slippagePct: num("SOLANA_SLIPPAGE_PCT", 8),
+    /** Wrapped-SOL mint — Jupiter's input/output sentinel for native SOL. */
+    wsolMint: str("SOLANA_WSOL_MINT", "So11111111111111111111111111111111111111112"),
+  },
+
   llm: {
     anthropicKey: str("ANTHROPIC_API_KEY"),
     model: str("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001"),
@@ -251,6 +274,9 @@ export function validateConfig(): void {
   range("BASE_CHAIN_ID", config.chain.chainId, 1, BIG);
   range("BASE_SWAP_FEE_TIER", config.chain.feeTier, 1, 1_000_000);
   range("SWAP_SLIPPAGE_PCT", config.chain.slippagePct, 0, 100);
+  // Solana (optional) — only the slippage knob can silently NaN-poison a swap;
+  // the wallet/RPC are checked lazily by the Solana adapter when it trades.
+  range("SOLANA_SLIPPAGE_PCT", config.solana.slippagePct, 0, 100);
 
   // service loop intervals — 0 would hot-loop the self-rescheduling loops.
   range("POLL_INTERVAL_SEC", config.service.pollIntervalSec, 1, DAY_SEC);
