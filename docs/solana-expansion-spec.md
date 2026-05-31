@@ -1,5 +1,13 @@
 # Solana Expansion — Spec (rebased on staging)
 
+> **STATUS: COMPLETE.** All 10 waves landed on `feat/solana-support` (TDD, RED→GREEN
+> per wave). Full suite **162/162** green, typecheck clean. `npm run demo` ($0)
+> opens BOTH a Base position (ETH) and a Solana position (SOL) in one cycle.
+> Added beyond the original plan: **per-chain buy cooldowns + daily limits**
+> (Base and Solana are independent trading lanes) and a chain-aware admin close
+> announcement. Real Jupiter/web3 + Solana data paths are scaffolded behind
+> `LIVE_TRADING_ARMED`, awaiting a funded Solana wallet for live verification.
+
 Goal: THESIS **adds** Solana coin coverage **alongside** Base (not a switch). The
 committee identifies the chain from the submission, audits the Solana token
 (pump.fun only), buys the correct token on Solana, monitors it, and splits the
