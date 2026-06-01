@@ -18,7 +18,7 @@ const FACULTY: { agent: AgentName; desc: string }[] = [
   },
   {
     agent: "auditor",
-    desc: "Holder distribution, liquidity, launchpad origin and honeypot checks become a Token Score.",
+    desc: "Holder distribution, liquidity, launchpad origin (Clanker / Bankr / Virtuals) and honeypot checks become a Token Score.",
   },
   {
     agent: "dean",
