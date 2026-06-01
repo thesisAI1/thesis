@@ -9,6 +9,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { AuthorStatsMap, ClosedPositionView } from "@/lib/api";
 import { fmtEthSigned, fmtMc, fmtPct, timeAgo } from "./format";
 import { AuthorStatsBadge } from "./AuthorStatsBadge";
+import { AuthorCell } from "./AuthorCell";
 import { TokenCell } from "./TokenCell";
 import { SearchIcon } from "./icons";
 import { Pager, usePagination } from "./Pager";
@@ -109,10 +110,15 @@ export function HistoryTable({ positions, authorStats, now }: HistoryTableProps)
                           symbol={p.tokenSymbol}
                           contractAddress={p.contractAddress}
                           logoUrl={p.tokenLogoUrl}
+                          chain={p.chain}
                         />
                       </td>
                       <td>
-                        <span className={styles.author}>{p.authorHandle}</span>
+                        <AuthorCell
+                          handle={p.authorHandle}
+                          avatarUrl={p.authorAvatarUrl}
+                          postUrl={p.postUrl}
+                        />
                         <AuthorStatsBadge stat={authorStats[(p.authorHandle || "").toLowerCase()]} />
                       </td>
                       <td className={styles.tRight}>{p.amountInEth.toFixed(4)}</td>

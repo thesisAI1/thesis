@@ -5,9 +5,15 @@
  *   - RealBaseData    (./real.ts)    — DexScreener + GoPlus (free public APIs)
  *   - BirdeyeBaseData (./birdeye.ts) — paid Birdeye feed (fast prices, no 429s)
  *
- * Provider chosen by env: if BIRDEYE_API_KEY is set we use Birdeye, otherwise
- * we fall back to the DexScreener-based RealBaseData. Same interface across
- * the board so the rest of the codebase doesn't know or care which feed runs.
+ * Provider chosen by env: Birdeye is used ONLY when BASEDATA_PROVIDER=birdeye
+ * (and a key is present); otherwise — including the default "dexscreener" — we
+ * use the DexScreener-based RealBaseData. Same interface across the board so the
+ * rest of the codebase doesn't know or care which feed runs.
+ *
+ * NOTE: Birdeye's Base price index lags badly for low-cap Clanker tokens (it
+ * served prices up to ~30% stale vs live DexScreener during a frozen-MC
+ * incident), and that same feed drives the TP/SL monitor — so gating it behind
+ * an explicit opt-in keeps the accurate DexScreener prices as the default.
  */
 
 import type { Chain, Holder } from "@thesis/shared";
@@ -67,7 +73,8 @@ export function createBaseDataAdapter(chain: Chain = "base"): BaseDataAdapter {
     }
     return new MockBaseData();
   }
-  if (config.baseData.birdeyeKey) {
+  const wantsBirdeye = config.baseData.provider.toLowerCase() === "birdeye";
+  if (wantsBirdeye && config.baseData.birdeyeKey) {
     if (!_adapterLogged) {
       console.log(
         `[basedata] using BirdeyeBaseData (key len=${config.baseData.birdeyeKey.length})`,
@@ -77,7 +84,18 @@ export function createBaseDataAdapter(chain: Chain = "base"): BaseDataAdapter {
     return new BirdeyeBaseData();
   }
   if (!_adapterLogged) {
-    console.log("[basedata] using RealBaseData (DexScreener fallback — no BIRDEYE_API_KEY)");
+    if (wantsBirdeye) {
+      // Explicit birdeye request we can't honour (no key). Warn loudly rather
+      // than silently dropping to DexScreener — a quiet fallback looks like a
+      // config that "worked" and hides the missing key.
+      console.warn(
+        "[basedata] BASEDATA_PROVIDER=birdeye but BIRDEYE_API_KEY is unset — falling back to RealBaseData (DexScreener)",
+      );
+    } else {
+      console.log(
+        `[basedata] using RealBaseData (DexScreener — BASEDATA_PROVIDER='${config.baseData.provider}')`,
+      );
+    }
     _adapterLogged = true;
   }
   return new RealBaseData();

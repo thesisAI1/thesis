@@ -76,6 +76,8 @@ export interface ClosedPositionView {
   /** Token logo (DexScreener), or null when none is on file. */
   tokenLogoUrl: string | null;
   authorHandle: string;
+  /** Author X avatar — already on the wire from the backend; null when none. */
+  authorAvatarUrl: string | null;
   postUrl: string | null;
   amountInEth: number;
   entryPriceEth: number;

@@ -729,12 +729,47 @@
   color: var(--blue);
   font-family: var(--mono);
   font-weight: 500;
+  text-decoration: none;
 }
-/* token cell: logo (or lettered fallback) + ticker label */
+/* The label now links to the DexScreener chart — underline on hover signals it. */
+.tok:hover {
+  text-decoration: underline;
+}
+/* token cell: logo (or lettered fallback) + ticker label + copy-CA button */
 .tokCell {
   display: inline-flex;
   align-items: center;
   gap: 8px;
+}
+/* Copy-contract button — neutral chip that flips green with a ✓ on success. */
+.tokCopy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  padding: 0;
+  border-radius: 6px;
+  background: var(--panel);
+  border: 1px solid var(--border-2);
+  color: var(--muted);
+  line-height: 0;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.tokCopy svg {
+  display: block;
+}
+.tokCopy:hover {
+  color: var(--text);
+  border-color: #45526b;
+  background: var(--panel-2);
+}
+.tokCopied {
+  color: var(--green);
+  border-color: var(--green);
+  background: rgba(63, 185, 132, 0.08);
 }
 .tokLogo {
   width: 20px;
@@ -759,6 +794,59 @@
   color: var(--muted);
   font-family: var(--mono);
   font-size: 12px;
+}
+
+/* ---- author cell: avatar + handle + "VIEW THESIS" link ------------------- */
+/* Ported from the legacy `.ac*` rules. The whole block links to the X post
+ * (the author's thesis). The stats badge sits after it as an inline sibling. */
+.ac {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  vertical-align: middle;
+  text-decoration: none;
+  color: inherit;
+}
+.acAvatar {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  border: 1px solid var(--border-2);
+  object-fit: cover;
+  flex-shrink: 0;
+  /* Centres the fallback initials when there's no image. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+}
+.acMeta {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+.acHandle {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+}
+.acView {
+  color: var(--dim);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+/* Only the linked variant lights up on hover — a non-linked cell stays static. */
+a.ac:hover .acHandle {
+  color: var(--accent);
+}
+a.ac:hover .acView {
+  color: var(--muted);
 }
 .dimCell {
   color: var(--dim);
