@@ -69,6 +69,11 @@ export function DecisionsSection({ reviews, now }: DecisionsSectionProps) {
                   </span>
                 </div>
                 <div className={styles.logRationale}>{r.rationale}</div>
+                {r.skippedReason ? (
+                  <div className={styles.logSkip}>
+                    Approved, but not bought — {r.skippedReason}
+                  </div>
+                ) : null}
               </div>
               <div className={styles.logSide}>
                 <span
