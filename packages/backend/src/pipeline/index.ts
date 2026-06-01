@@ -18,6 +18,7 @@ import { runAuditor } from "../agents/auditor.js";
 import { runDean } from "../agents/dean.js";
 import { runBursar } from "../agents/bursar.js";
 import { runEndowment, type EndowmentResult } from "../agents/endowment.js";
+import { nativeSymbol } from "../util/chains.js";
 import { publish } from "../events.js";
 
 export interface ReviewResult {
@@ -81,7 +82,7 @@ export async function reviewSubmission(submission: Submission): Promise<ReviewRe
     bursar.position
       ? [
           `Sizing the position at ${(verdict.positionSizePct * 100).toFixed(1)}% of the portfolio`,
-          `Buying ${bursar.position.order.amountInEth.toFixed(4)} ETH of the token on Base`,
+          `Buying ${bursar.position.order.amountInEth.toFixed(4)} ${nativeSymbol(bursar.position.order.chain)} of the token on ${bursar.position.order.chain === "solana" ? "Solana" : "Base"}`,
           "Take-profit +100% and stop-loss -35% attached to the position",
           `Position ${bursar.position.id} is now open`,
         ]

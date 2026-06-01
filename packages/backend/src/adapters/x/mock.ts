@@ -59,6 +59,29 @@ function mockWallet(key: string): string {
   return mockAddress(h);
 }
 
+/** Bitcoin/Solana base58 alphabet (no 0 O I l). */
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+/** A deterministic, distinct, address-shaped Solana mint ending in "pump" — the
+ *  pump.fun vanity suffix, so guessChain() resolves it to solana and the mock
+ *  data adapter reads its launchpad as pump.fun (clears the Auditor gate). */
+function mockSolMint(n: number): string {
+  let x = (Math.imul(n + 1, 2_246_822_519) ^ 0x9e3779b9) >>> 0;
+  let s = "";
+  for (let i = 0; i < 40; i++) {
+    x = (Math.imul(x, 1_664_525) + 1_013_904_223) >>> 0;
+    s += B58[x % 58];
+  }
+  return s + "pump";
+}
+
+/** Solana-flavoured theses, so the mixed-chain mock feed reads naturally. */
+const SOL_THESES = [
+  "fresh pump.fun launch, bonding curve filling fast, clean holder spread.",
+  "graduated to Raydium with locked LP — this is the Solana meta right now.",
+  "organic Solana community, devs doxxed, volume ripping on PumpSwap.",
+];
+
 export class MockX implements XAdapter {
   async pollMentions(): Promise<XPost[]> {
     const batch: XPost[] = [];
@@ -100,13 +123,18 @@ export class MockX implements XAdapter {
       });
     }
 
-    // The usual batch of fresh thesis submissions.
+    // The usual batch of fresh thesis submissions — a mix of Base and Solana
+    // so the funnel, Faculty Room, and trade record show both chains in mock.
     for (let i = 0; i < 3; i++) {
       counter += 1;
       const id = `mock-${counter}`;
       const handle = HANDLES[counter % HANDLES.length];
-      const thesis = THESES[counter % THESES.length];
-      const ca = mockAddress(counter);
+      // Every third submission is a Solana (pump.fun) thesis; the rest are Base.
+      const isSolana = i === 2;
+      const thesis = isSolana
+        ? SOL_THESES[counter % SOL_THESES.length]
+        : THESES[counter % THESES.length];
+      const ca = isSolana ? mockSolMint(counter) : mockAddress(counter);
       batch.push({
         postId: `mock-post-${Date.now()}-${counter}`,
         authorXId: id,

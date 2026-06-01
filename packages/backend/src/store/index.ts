@@ -5,6 +5,7 @@
  */
 
 import type {
+  Chain,
   Distribution,
   Position,
   RegistryEntry,
@@ -14,11 +15,15 @@ import type {
 import { config } from "../config.js";
 import { FileStore } from "./fileStore.js";
 
-/** A profit share owed to an author who has not linked a wallet yet. */
+/** A profit share owed to an author who has not linked a wallet yet.
+ *  Escrow is per (author, chain) — a Solana win owes SOL, a Base win owes ETH,
+ *  and the two must never be summed into one figure. */
 export interface EscrowEntry {
   xUserId: string;
   handle: string;
   amountEth: number;
+  /** Chain the escrowed share is denominated/payable on (native units). */
+  chain: Chain;
   updatedAt: string;
 }
 
@@ -39,6 +44,10 @@ export interface PayoutRequest {
   /** The original thesis post this payout traces back to. */
   threadPostId: string;
   requestedAt: string;
+  /** Chain the payout is on — decides which wallet shape is valid in the reply
+   *  and which chain adapter sends. Optional for back-compat with pre-Solana
+   *  requests on disk (absent ⇒ base). */
+  chain?: Chain;
 }
 
 /**
@@ -73,10 +82,12 @@ export interface Funnel {
 }
 
 export interface Store {
-  /** Create or update the X-id -> wallet link. */
+  /** Create or update the X-id -> wallet link (per chain — an author can have a
+   *  Base wallet AND a Solana wallet). */
   linkWallet(entry: RegistryEntry): Promise<void>;
-  /** Look up an author's payout wallet by numeric X id. */
-  getRegistryEntry(xUserId: string): Promise<RegistryEntry | null>;
+  /** Look up an author's payout wallet by numeric X id, for the given chain
+   *  (defaults to base for back-compat with pre-Solana callers). */
+  getRegistryEntry(xUserId: string, chain?: Chain): Promise<RegistryEntry | null>;
 
   /** Insert or update a position (keyed by id). */
   savePosition(position: Position): Promise<void>;
@@ -97,29 +108,33 @@ export interface Store {
   /** Clear a post's pending marker once its Position is saved (or buy reverted). */
   clearPendingBuy(postId: string): Promise<void>;
 
-  /** Record that a buy happened at `isoAt` (for the rate limit). */
-  recordBuy(isoAt: string): Promise<void>;
-  /** How many buys happened at or after `isoSince`. */
-  countBuysSince(isoSince: string): Promise<number>;
-  /** ISO timestamp of the most recent buy, or null. */
-  lastBuyAt(): Promise<string | null>;
+  /** Record that a buy happened at `isoAt` on `chain` (for the per-chain rate
+   *  limit). Defaults to base — Base and Solana have independent buy lanes. */
+  recordBuy(isoAt: string, chain?: Chain): Promise<void>;
+  /** How many buys happened on `chain` at or after `isoSince`. */
+  countBuysSince(isoSince: string, chain?: Chain): Promise<number>;
+  /** ISO timestamp of the most recent buy on `chain`, or null. */
+  lastBuyAt(chain?: Chain): Promise<string | null>;
 
-  /** Add to an unregistered author's escrowed profit share. */
-  addEscrow(xUserId: string, handle: string, amountEth: number): Promise<void>;
-  getEscrow(xUserId: string): Promise<EscrowEntry | null>;
-  /** Clear an author's escrow (e.g. after it has been paid out). */
-  clearEscrow(xUserId: string): Promise<void>;
-  /** Atomically clear an author's escrow AND all their open payout requests in
-   *  a single persist — used after a completed wallet payout so no half-cleared
-   *  state can be re-processed by a later poll. */
-  clearPayout(xUserId: string): Promise<void>;
+  /** Add to an unregistered author's escrowed profit share, per chain
+   *  (defaults to base). Base keys by raw xUserId (unchanged); Solana is a
+   *  separate per-chain entry so ETH and SOL escrow never mix. */
+  addEscrow(xUserId: string, handle: string, amountEth: number, chain?: Chain): Promise<void>;
+  getEscrow(xUserId: string, chain?: Chain): Promise<EscrowEntry | null>;
+  /** Clear an author's escrow for a chain (e.g. after it has been paid out). */
+  clearEscrow(xUserId: string, chain?: Chain): Promise<void>;
+  /** Atomically clear an author's escrow AND their open payout requests for a
+   *  chain in a single persist — used after a completed wallet payout so no
+   *  half-cleared state can be re-processed by a later poll. */
+  clearPayout(xUserId: string, chain?: Chain): Promise<void>;
 
   /** Record a posted "reply with your wallet" request, keyed by its tweet id. */
   addPayoutRequest(req: PayoutRequest): Promise<void>;
   /** Every open payout request. */
   getPayoutRequests(): Promise<PayoutRequest[]>;
-  /** Drop every payout request belonging to an author (after they are paid). */
-  clearPayoutRequestsForUser(xUserId: string): Promise<void>;
+  /** Drop payout requests belonging to an author (after they are paid). When
+   *  `chain` is given, only that chain's requests are dropped. */
+  clearPayoutRequestsForUser(xUserId: string, chain?: Chain): Promise<void>;
 
   /** Add a submission to the review queue. */
   enqueue(item: QueueItem): Promise<void>;

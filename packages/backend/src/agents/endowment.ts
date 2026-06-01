@@ -19,7 +19,7 @@
  * Every on-chain leg is gated (LIVE_TRADING_ARMED) and mock-safe.
  */
 
-import type { Distribution, Position, RegistryEntry, SettlementProgress } from "@thesis/shared";
+import type { Chain, Distribution, Position, RegistryEntry, SettlementProgress } from "@thesis/shared";
 import { recordActivity } from "../activity.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter } from "../adapters/x/index.js";
@@ -76,6 +76,21 @@ export interface EndowmentResult {
  * (legacy path posts the author tweet inline). All current callers pass
  * true; the option is kept for backwards compat / future flexibility.
  */
+/**
+ * Per-chain settlement policy for the team + buyback quarters.
+ *
+ *   Base   — the $THESIS holder lottery (when enabled) + buyback-and-burn of
+ *            $THESIS (the deflationary mechanic).
+ *   Solana — NO holder lottery (it enumerates Base $THESIS holders) and NO
+ *            $THESIS burn (there is no $THESIS on Solana). Both the team slice
+ *            and the buyback-substitute slice are sent in SOL to
+ *            SOLANA_BUYBACK_WALLET — the operator's designated Solana wallet.
+ */
+export function settlementPolicy(chain: Chain): { useLottery: boolean; useBurn: boolean } {
+  if (chain === "solana") return { useLottery: false, useBurn: false };
+  return { useLottery: config.holderLottery.enabled, useBurn: true };
+}
+
 export async function runEndowment(
   position: Position,
   profitEth: number,
@@ -85,8 +100,11 @@ export async function runEndowment(
 
   const quarter = profitEth / 4;
   const store = getStore();
-  const chain = createChainAdapter();
-  const entry = await store.getRegistryEntry(position.authorXId);
+  // Settle on the position's own chain — SOL legs for a Solana win, ETH for Base.
+  const chain = createChainAdapter(position.order.chain);
+  const policy = settlementPolicy(position.order.chain);
+  const isSolana = position.order.chain === "solana";
+  const entry = await store.getRegistryEntry(position.authorXId, position.order.chain);
 
   // PR3 — idempotent settlement. Each leg is gated on a persisted marker, and
   // progress is saved after each leg, so a settlement interrupted by a transient
@@ -122,7 +140,7 @@ export async function runEndowment(
         options.silentAuthorTweet === true,
       );
     } else {
-      await store.addEscrow(position.authorXId, position.authorHandle, quarter);
+      await store.addEscrow(position.authorXId, position.authorHandle, quarter, position.order.chain);
       // addEscrow ADDS to the author's running escrow total, so it must never
       // run twice. Persist authorDone in the very next write — BEFORE the
       // payout-request tweet and the getEscrow read below — so a crash can't let
@@ -138,7 +156,7 @@ export async function runEndowment(
       // The escrow amount in the payout-request copy is the CUMULATIVE total
       // (this close + any prior unanswered closes) — that's what the author
       // actually has waiting, not just the latest tranche.
-      const updated = await store.getEscrow(position.authorXId);
+      const updated = await store.getEscrow(position.authorXId, position.order.chain);
       const totalOwed = updated?.amountEth ?? quarter;
       authorPayment = {
         kind: "escrowed",
@@ -167,7 +185,8 @@ export async function runEndowment(
   let buybackBudget = quarter; // base buyback slice; may be topped up below
   if (!progress.teamDone) {
     let teamOk = true;
-    if (config.holderLottery.enabled) {
+    if (policy.useLottery) {
+      // Base only — the lottery enumerates Base $THESIS holders.
       // runHolderLottery only throws BEFORE any winner is paid (a drawLottery
       // failure); that propagates, leaving teamDone false → safe to retry.
       // Partial winner-send failures are caught inside and rolled into the
@@ -186,6 +205,22 @@ export async function runEndowment(
           amountEth: teamPaidEth,
         });
       }
+    } else if (isSolana) {
+      // Solana team slice — no lottery; pay SOL to the operator's Solana wallet.
+      if (useMock() || config.solana.buybackWallet) {
+        teamOk = await runLeg("pay team (SOL)", () =>
+          chain.sendEth(config.solana.buybackWallet, quarter),
+        );
+        teamPaidEth = teamOk ? quarter : 0;
+      } else {
+        // Live Solana win but SOLANA_BUYBACK_WALLET unset — the team slice has
+        // nowhere to go. Don't silently mark it done; warn and leave teamDone
+        // false so it retries once the operator configures the wallet.
+        teamOk = false;
+        log.warn(
+          `endowment: ${position.id} Solana team slice unpaid — SOLANA_BUYBACK_WALLET unset`,
+        );
+      }
     } else if (useMock() || config.chain.teamWallet) {
       teamOk = await runLeg("pay team", () =>
         chain.sendEth(config.chain.teamWallet, quarter),
@@ -198,9 +233,35 @@ export async function runEndowment(
     }
   }
 
-  // 25% (+ any undistributed lottery ETH) — buy back $THESIS and burn it.
+  // 25% (+ any undistributed lottery ETH) — buy back $THESIS and burn it (Base),
+  // or send the buyback-substitute slice in SOL to the Solana wallet (Solana —
+  // no $THESIS exists there to burn).
   if (!progress.buybackDone) {
-    if (useMock() || config.chain.thesisToken) {
+    // policy.useBurn is false exactly for Solana — there is no $THESIS to burn,
+    // so the buyback-substitute slice is sent in SOL to SOLANA_BUYBACK_WALLET.
+    if (!policy.useBurn) {
+      if (useMock() || config.solana.buybackWallet) {
+        const ok = await runLeg("solana buyback → wallet (SOL)", () =>
+          chain.sendEth(config.solana.buybackWallet, buybackBudget),
+        );
+        if (ok) {
+          progress.buybackDone = true;
+          await saveProgress();
+          recordActivity({
+            kind: "burn",
+            summary: `◎ ${buybackBudget.toFixed(4)} SOL → buyback wallet (no $THESIS on Solana to burn)`,
+            positionId: position.id,
+            amountEth: buybackBudget,
+          });
+        }
+      } else {
+        // Live Solana win, SOLANA_BUYBACK_WALLET unset — leave buybackDone false
+        // so the slice is paid once the wallet is configured (don't silently drop).
+        log.warn(
+          `endowment: ${position.id} Solana buyback slice unpaid — SOLANA_BUYBACK_WALLET unset`,
+        );
+      }
+    } else if (useMock() || config.chain.thesisToken) {
       const ok = await runLeg("buyback & burn $THESIS", () =>
         chain.buybackAndBurn(buybackBudget).then((r) => r.txHash),
       );
@@ -318,7 +379,7 @@ async function payAuthorDirect(
 ): Promise<AuthorPaymentInfo> {
   let txHash: string;
   try {
-    txHash = await createChainAdapter().sendEth(entry.wallet, amountEth);
+    txHash = await createChainAdapter(position.order.chain).sendEth(entry.wallet, amountEth);
   } catch (err) {
     const reason = String(err);
     log.error(`endowment: author payout failed for ${entry.handle} — ${reason}`);
@@ -351,13 +412,17 @@ async function payAuthorDirect(
  */
 async function requestAuthorPayout(position: Position): Promise<void> {
   const store = getStore();
-  const escrow = await store.getEscrow(position.authorXId);
+  const escrow = await store.getEscrow(position.authorXId, position.order.chain);
   const owed = escrow?.amountEth ?? 0;
 
   try {
     const requestTweetId = await createXAdapter().replyToPost(
       position.postId,
-      payoutRequestText({ handle: position.authorHandle, amountEth: owed }),
+      payoutRequestText({
+        handle: position.authorHandle,
+        amountEth: owed,
+        chain: position.order.chain,
+      }),
     );
     await store.addPayoutRequest({
       requestTweetId,
@@ -365,6 +430,7 @@ async function requestAuthorPayout(position: Position): Promise<void> {
       handle: position.authorHandle,
       threadPostId: position.postId,
       requestedAt: new Date().toISOString(),
+      chain: position.order.chain,
     });
     log.info(
       `endowment: ${position.authorHandle} payout request posted — total escrow ${owed.toFixed(4)} ETH (tweet ${requestTweetId})`,

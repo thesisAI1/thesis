@@ -19,15 +19,55 @@
  */
 
 import { isAddress } from "viem";
+import bs58 from "bs58";
+import type { Chain } from "@thesis/shared";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter, type XPost } from "../adapters/x/index.js";
 import { getStore, type PayoutRequest } from "../store/index.js";
 import { log } from "../util/log.js";
+import { nativeSymbol } from "../util/chains.js";
 import { payoutSentText } from "../util/replies.js";
 
-/** A Base/EVM wallet address, isolated (word boundaries) so a 64-hex tx hash is
- *  not mis-matched. Global so we can detect an ambiguous multi-address reply. */
-const ADDRESS_RE = /\b0x[a-fA-F0-9]{40}\b/g;
+/** EVM wallet, isolated (word boundaries) so a 64-hex tx hash is not matched. */
+const EVM_ADDRESS_RE = /\b0x[a-fA-F0-9]{40}\b/g;
+/** Solana base58 wallet — 32–44 base58 chars (no 0 O I l). */
+const SOLANA_ADDRESS_RE = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/g;
+
+/** A base58 string decodes to exactly 32 bytes for a valid Solana pubkey. */
+function isSolanaAddress(addr: string): boolean {
+  try {
+    return bs58.decode(addr).length === 32;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Extract + validate the payout wallet from a reply, for the request's chain.
+ * Returns the wallet, or a reason string explaining why nothing was paid.
+ * Money-safety: reject ambiguous (multiple distinct addresses) or wrong-shape
+ * replies rather than guessing — real, irreversible funds move on success.
+ */
+function extractWallet(
+  text: string,
+  chain: Chain,
+): { wallet: string } | { reject: string } {
+  if (chain === "solana") {
+    // base58 is case-sensitive — do NOT lowercase when de-duping.
+    const found = (text.match(SOLANA_ADDRESS_RE) ?? []).filter(isSolanaAddress);
+    const distinct = [...new Set(found)];
+    if (distinct.length > 1) return { reject: `${distinct.length} distinct Solana addresses` };
+    if (!distinct[0]) return { reject: "no valid base58 Solana address" };
+    return { wallet: distinct[0] };
+  }
+  const found = text.match(EVM_ADDRESS_RE) ?? [];
+  const distinct = [...new Set(found.map((a) => a.toLowerCase()))];
+  if (distinct.length > 1) return { reject: `${distinct.length} distinct addresses` };
+  const wallet = found[0];
+  if (!wallet) return { reject: "no 0x address" };
+  if (!isAddress(wallet)) return { reject: "invalid address (failed EIP-55 checksum)" };
+  return { wallet };
+}
 
 /**
  * Pull wallet-reply answers out of a batch of mentions, pay them, and return
@@ -73,77 +113,61 @@ async function handleWalletReply(post: XPost, req: PayoutRequest): Promise<void>
     return;
   }
 
-  // Extract the payout wallet. We send real, irreversible ETH, so reject the
-  // two ways a reply can be wrong rather than guessing:
-  //   - MORE THAN ONE distinct address ("not 0xWRONG, I mean 0xRIGHT") → don't
-  //     guess which to pay; wait for an unambiguous reply.
-  //   - a malformed / bad-EIP-55-checksum address → reject. isAddress accepts
-  //     all-lowercase and a valid checksum, but rejects a mistyped mixed-case
-  //     address — catching a fat-fingered char before ETH leaves the wallet.
-  const found = post.text.match(ADDRESS_RE) ?? [];
-  const distinct = [...new Set(found.map((a) => a.toLowerCase()))];
-  if (distinct.length > 1) {
-    log.warn(
-      `payout: reply from ${req.handle} on ${req.requestTweetId} had ${distinct.length} ` +
-        `distinct addresses — ignoring (won't guess which to pay)`,
-    );
-    return;
-  }
-  const wallet = found[0];
-  if (!wallet) {
+  // Extract + validate the payout wallet for THIS request's chain (0x on Base,
+  // base58 on Solana). Wrong-shape / ambiguous replies are rejected, never guessed.
+  const chain: Chain = req.chain ?? "base";
+  const sym = nativeSymbol(chain);
+  const extracted = extractWallet(post.text, chain);
+  if ("reject" in extracted) {
     log.info(
-      `payout: reply from ${req.handle} on ${req.requestTweetId} had no 0x address — waiting`,
+      `payout: reply from ${req.handle} on ${req.requestTweetId} not actionable for ${chain} ` +
+        `(${extracted.reject}) — waiting`,
     );
     return;
   }
-  if (!isAddress(wallet)) {
-    log.warn(
-      `payout: reply from ${req.handle} on ${req.requestTweetId} had an invalid address ` +
-        `(${wallet}) — failed EIP-55 checksum, ignoring`,
-    );
-    return;
-  }
+  const wallet = extracted.wallet;
 
-  const escrow = await store.getEscrow(req.xUserId);
+  const escrow = await store.getEscrow(req.xUserId, chain);
   const owed = escrow?.amountEth ?? 0;
   if (owed <= 0) {
-    log.warn(`payout: ${req.handle} answered but the escrow is empty — clearing the request`);
-    await store.clearPayoutRequestsForUser(req.xUserId);
+    log.warn(`payout: ${req.handle} answered but the ${chain} escrow is empty — clearing the request`);
+    await store.clearPayoutRequestsForUser(req.xUserId, chain);
     return;
   }
 
-  // Remember the wallet so any future win pays this author directly.
+  // Remember the wallet (per chain) so any future win pays this author directly.
   await store.linkWallet({
     xUserId: req.xUserId,
     handle: req.handle,
     wallet,
+    chain,
     linkedAt: new Date().toISOString(),
   });
 
   let txHash: string;
   try {
-    txHash = await createChainAdapter().sendEth(wallet, owed);
+    txHash = await createChainAdapter(chain).sendEth(wallet, owed);
   } catch (err) {
     // Keep the escrow and the request so the payout can be retried next poll.
     log.error(`payout: send to ${req.handle} failed — ${String(err)}`);
     return;
   }
 
-  // Atomically clear the escrow AND the open requests in a single write, so a
-  // re-poll cannot re-pay (no half-cleared state). The only residual — a crash
-  // between the confirmed on-chain send above and this write — is the same
-  // accepted at-least-once window the settlement path documents; the escrow-
+  // Atomically clear the escrow AND the open requests for this chain in a single
+  // write, so a re-poll cannot re-pay (no half-cleared state). The only residual
+  // — a crash between the confirmed on-chain send above and this write — is the
+  // same accepted at-least-once window the settlement path documents; the escrow-
   // empty guard at the top of this function neutralises a same-batch re-reply.
-  await store.clearPayout(req.xUserId);
+  await store.clearPayout(req.xUserId, chain);
   log.info(
-    `payout: paid ${req.handle} ${owed.toFixed(4)} ETH to ${wallet} — tx ${txHash}`,
+    `payout: paid ${req.handle} ${owed.toFixed(4)} ${sym} to ${wallet} — tx ${txHash}`,
   );
 
   // Confirm on-chain delivery as a reply in the same thread.
   try {
     const replyId = await createXAdapter().replyToPost(
       post.postId,
-      payoutSentText({ handle: req.handle, amountEth: owed, wallet, txHash }),
+      payoutSentText({ handle: req.handle, amountEth: owed, wallet, txHash, chain }),
     );
     log.info(`x: replied to ${post.postId} confirming the payout (reply ${replyId})`);
   } catch (err) {

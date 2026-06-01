@@ -1,13 +1,22 @@
 /**
- * Adapter: the Base chain itself — the Bursar's hands (wallet + swaps).
+ * Adapter: the trading chain — the Bursar's hands (wallet + swaps). Selected
+ * per position by `createChainAdapter(chain)`:
  *
- *   - MockChain  (./mock.ts)  — simulated trades, no real funds, $0
- *   - RealChain  (./real.ts)  — viem on Base (test on Sepolia first)
+ *   Base  — MockChain (./mock.ts) | RealChain (./real.ts, viem + KyberSwap)
+ *   Solana — MockSolanaChain (./solana.mock.ts) | RealSolanaChain
+ *            (./solana.real.ts, @solana/web3.js + Jupiter)
+ *
+ * The `*Eth` fields throughout the interface carry NATIVE units scoped to the
+ * adapter's chain — ETH on Base, SOL on Solana. The pipeline treats a position's
+ * value in its own native unit (see util/chains.ts for symbol/explorer).
  */
 
+import type { Chain } from "@thesis/shared";
 import { useMock } from "../../config.js";
 import { MockChain } from "./mock.js";
 import { RealChain } from "./real.js";
+import { MockSolanaChain } from "./solana.mock.js";
+import { RealSolanaChain } from "./solana.real.js";
 
 /** Result of a swap. */
 export interface SwapResult {
@@ -77,7 +86,15 @@ export function __setChainForTest(adapter: ChainAdapter | null): void {
   _testOverride = adapter;
 }
 
-export function createChainAdapter(): ChainAdapter {
+/**
+ * Build the chain adapter for `chain`. Defaults to "base" so every existing
+ * arg-less caller is unchanged. Solana → the Jupiter/web3.js adapter; every
+ * other (EVM) chain → the existing Base adapter.
+ */
+export function createChainAdapter(chain: Chain = "base"): ChainAdapter {
   if (_testOverride) return _testOverride;
+  if (chain === "solana") {
+    return useMock() ? new MockSolanaChain() : new RealSolanaChain();
+  }
   return useMock() ? new MockChain() : new RealChain();
 }

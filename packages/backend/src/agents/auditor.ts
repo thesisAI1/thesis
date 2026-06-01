@@ -2,9 +2,10 @@
  * THE AUDITOR — on-chain forensics on the token.
  *
  * A strict gate model — a token must clear EVERY hard requirement:
- *   1. Launched via Clanker or Bankr. Those launchpads deploy a standard,
- *      audited token + LP, so contract-level honeypot / rug risk is removed —
- *      no separate honeypot check is needed.
+ *   1. Launched via a trusted, per-chain launchpad — Clanker/Bankr on Base,
+ *      pump.fun on Solana. Those launchpads deploy a standard, audited token +
+ *      LP, so contract-level honeypot / rug risk is removed — no separate
+ *      honeypot check is needed.
  *   2. At least `minTokenAgeHours` old — avoids the instant pump-and-dumps.
  *   3. Top 10 *real* holders (excluding LP pools, burn addresses and locked
  *      positions) control no more than `maxTop10Pct` of supply.
@@ -17,18 +18,27 @@
  * the token sits.
  */
 
-import type { Submission, TokenReport } from "@thesis/shared";
+import type { Chain, Submission, TokenReport } from "@thesis/shared";
 import { createBaseDataAdapter } from "../adapters/basedata/index.js";
 import { config } from "../config.js";
-
-const TRUSTED_LAUNCHPADS = ["clanker", "bankr"];
+import { isLaunchpadTrusted, trustedLaunchpads } from "../util/launchpad.js";
 
 /** Holder labels that don't count as real circulating supply for the
  *  concentration calc: LP pools, burns, locked liquidity. */
 const NON_CIRCULATING = new Set(["lp", "burn", "lock"]);
 
+/** Human-readable "Clanker or Bankr" / "pump.fun" for a chain's reasoning text. */
+function launchpadNames(chain: Chain): string {
+  const names = trustedLaunchpads(chain).map((l) => (l === "pumpfun" ? "pump.fun" : l));
+  if (names.length === 0) return "a trusted launchpad";
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`;
+}
+
 export async function runAuditor(submission: Submission): Promise<TokenReport> {
-  const token = await createBaseDataAdapter().getToken(submission.contractAddress);
+  // Fetch from the data source for the submission's chain (DexScreener/GoPlus
+  // Solana vs Base). DexScreener resolves the AUTHORITATIVE chain in token.chain.
+  const token = await createBaseDataAdapter(submission.chain).getToken(submission.contractAddress);
 
   // Drop LP pools, burn addresses and locked positions before measuring the
   // real concentration of supply — otherwise every legitimate Uniswap token
@@ -41,16 +51,21 @@ export async function runAuditor(submission: Submission): Promise<TokenReport> {
   const top10Pct = top10 * 100;
   const ageHours = (Date.now() - Date.parse(token.launchedAt)) / 3_600_000;
   const launchpad = (token.launchpad ?? "").toLowerCase();
-  const fromTrustedLaunchpad = TRUSTED_LAUNCHPADS.includes(launchpad);
+  // Per-chain trust: Clanker/Bankr on Base, pump.fun on Solana. The authoritative
+  // chain is token.chain (resolved by DexScreener), not the submission's guess.
+  const fromTrustedLaunchpad = isLaunchpadTrusted(token.chain, token.launchpad);
+  const trustedNames = launchpadNames(token.chain);
 
   const flags: string[] = [];
-  const reasoning: string[] = ["Fetching on-chain data — launchpad, age, holders…"];
+  const reasoning: string[] = [
+    `Fetching on-chain data on ${token.chain} — launchpad, age, holders…`,
+  ];
 
   // Gate 1 — launchpad origin.
   reasoning.push(
     fromTrustedLaunchpad
       ? `Launched via ${launchpad} — standard contract, no honeypot / rug risk`
-      : `Launchpad: ${token.launchpad ?? "unknown"} — NOT Clanker or Bankr`,
+      : `Launchpad: ${token.launchpad ?? "unknown"} — NOT ${trustedNames}`,
   );
   // Gate 2 — token age.
   reasoning.push(
@@ -78,7 +93,7 @@ export async function runAuditor(submission: Submission): Promise<TokenReport> {
 
   let score: number;
   if (!fromTrustedLaunchpad) {
-    flags.push("not launched via Clanker or Bankr");
+    flags.push(`not launched via ${trustedNames}`);
     score = 0;
   } else if (ageHours < config.auditor.minTokenAgeHours) {
     flags.push(`launched under ${config.auditor.minTokenAgeHours}h ago`);

@@ -47,6 +47,8 @@ import { readFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { dirname, extname, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Chain } from "@thesis/shared";
+import { nativeSymbol, explorerTxUrl } from "../util/chains.js";
 import { checkAdmin } from "./admin-auth.js";
 import { getRecentActivity } from "../activity.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
@@ -353,6 +355,7 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
     handle?: string;
     amountEth?: number;
     postId?: string;
+    chain?: string;
   };
   try {
     body = JSON.parse(await readBody(req)) as typeof body;
@@ -362,16 +365,26 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
   const xUserId = body.xUserId?.trim();
   const wallet = body.wallet?.trim();
   const postId = body.postId?.trim();
+  // Per-chain — a stuck Solana payout needs the SOL escrow + Solana send, not Base.
+  const chain: Chain = body.chain === "solana" ? "solana" : "base";
+  const sym = nativeSymbol(chain);
   if (!xUserId) return sendJson(res, 400, { ok: false, error: "xUserId is required" });
-  if (!wallet || !/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
-    return sendJson(res, 400, { ok: false, error: "wallet must be a 0x address" });
+  const walletOk =
+    chain === "solana"
+      ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet ?? "")
+      : /^0x[a-fA-F0-9]{40}$/.test(wallet ?? "");
+  if (!wallet || !walletOk) {
+    return sendJson(res, 400, {
+      ok: false,
+      error: chain === "solana" ? "wallet must be a base58 Solana address" : "wallet must be a 0x address",
+    });
   }
 
   const store = getStore();
   // Prefer the escrow record (real, tracked, comes from a real settlement).
   // Fall back to the `amountEth` body override for cases where the author leg
   // failed BEFORE escrow was created (e.g. a payAuthorDirect tx revert).
-  const escrow = await store.getEscrow(xUserId);
+  const escrow = await store.getEscrow(xUserId, chain);
   let amountEth: number;
   let handle: string;
   if (escrow && escrow.amountEth > 0) {
@@ -382,7 +395,7 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
     if (!Number.isFinite(overrideAmount) || overrideAmount <= 0 || overrideAmount > 1) {
       return sendJson(res, 400, {
         ok: false,
-        error: "no escrow found — supply a positive `amountEth` (≤ 1 ETH safety cap) and `handle`",
+        error: `no escrow found — supply a positive \`amountEth\` (≤ 1 ${sym} safety cap) and \`handle\``,
       });
     }
     if (!body.handle) {
@@ -393,27 +406,29 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
   }
 
   log.info(
-    `admin: settle-stuck-payout — paying ${handle} ${amountEth.toFixed(6)} ETH to ${wallet}`,
+    `admin: settle-stuck-payout — paying ${handle} ${amountEth.toFixed(6)} ${sym} to ${wallet} (${chain})`,
   );
 
   let txHash: string;
   try {
-    txHash = await createChainAdapter().sendEth(wallet, amountEth);
+    txHash = await createChainAdapter(chain).sendEth(wallet, amountEth);
   } catch (err) {
     log.error(`admin: settle-stuck-payout sendEth failed — ${String(err)}`);
     return sendJson(res, 500, { ok: false, error: "internal error" });
   }
 
-  // Persist the wallet and clear all owed state so future settlements pay direct.
+  // Persist the wallet (per chain) and clear owed state so future settlements
+  // pay direct. Per-chain clears so a Base settle never wipes Solana state.
   await store.linkWallet({
     xUserId,
     handle,
     wallet,
+    chain,
     linkedAt: new Date().toISOString(),
   });
-  await store.clearEscrow(xUserId);
-  await store.clearPayoutRequestsForUser(xUserId);
-  log.info(`admin: settle-stuck-payout — cleared escrow + open requests for ${handle}`);
+  await store.clearEscrow(xUserId, chain);
+  await store.clearPayoutRequestsForUser(xUserId, chain);
+  log.info(`admin: settle-stuck-payout — cleared ${chain} escrow + open requests for ${handle}`);
 
   // Confirm in the thesis thread if a postId was provided.
   let replyId: string | undefined;
@@ -421,7 +436,7 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
     try {
       replyId = await createXAdapter().replyToPost(
         postId,
-        payoutSentText({ handle, amountEth, wallet, txHash }),
+        payoutSentText({ handle, amountEth, wallet, txHash, chain }),
       );
       log.info(`admin: posted payout confirmation on ${postId} (reply ${replyId})`);
     } catch (err) {
@@ -434,7 +449,7 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
     handle,
     amountEth,
     txHash,
-    basescanUrl: `https://basescan.org/tx/${txHash}`,
+    explorerUrl: explorerTxUrl(chain, txHash),
     replyId: replyId ?? null,
   });
 }
@@ -560,7 +575,7 @@ async function adminRebuyPosition(req: IncomingMessage, res: ServerResponse): Pr
 
   let buy;
   try {
-    buy = await createChainAdapter().buy(pos.order.contractAddress, amountInEth);
+    buy = await createChainAdapter(pos.order.chain).buy(pos.order.contractAddress, amountInEth);
   } catch (err) {
     log.error(`admin: rebuy-position buy failed — ${String(err)}`);
     return sendJson(res, 500, { ok: false, error: "internal error" });
@@ -738,7 +753,7 @@ async function adminForceClosePosition(
   // re-check, so concurrent monitor ticks won't race us.
   let currentPrice: number;
   try {
-    currentPrice = await createBaseDataAdapter().getPriceEth(pos.order.contractAddress);
+    currentPrice = await createBaseDataAdapter(pos.order.chain).getPriceEth(pos.order.contractAddress);
   } catch (err) {
     log.error(`admin: force-close price fetch failed — ${String(err)}`);
     return sendJson(res, 502, { ok: false, error: "upstream fetch failed" });
@@ -820,33 +835,40 @@ async function adminRepostCloseAnnouncement(
     return sendJson(res, 409, { ok: false, error: `position is ${pos.status}, expected closed` });
   }
 
-  // Check escrow — if the author hasn't been paid (no wallet on file), we
-  // turn this repost INTO a payout request so they can claim.
-  const escrow = await store.getEscrow(pos.authorXId);
+  // Check escrow (per chain) — if the author hasn't been paid (no wallet on
+  // file), we turn this repost INTO a payout request so they can claim.
+  const chain = pos.order.chain;
+  const sym = nativeSymbol(chain);
+  const escrow = await store.getEscrow(pos.authorXId, chain);
   const isEscrowed = Boolean(escrow && escrow.amountEth > 0);
 
   // Build a tight, address-free announcement. Repost intentionally skips the
   // card image and the per-winner lottery block — both of those tripped X's
-  // crypto-address filter the first time. The BaseScan tx link is the one
+  // crypto-address filter the first time. The explorer tx link is the one
   // reliable receipt for on-chain delivery.
   const sign = pos.realisedPnlEth >= 0 ? "+" : "";
   const lines: string[] = [
     `Closing summary for the thesis above.`,
-    `Net result: ${sign}${pos.realisedPnlEth.toFixed(4)} ETH.`,
+    `Net result: ${sign}${pos.realisedPnlEth.toFixed(4)} ${sym}.`,
   ];
   if (pos.realisedPnlEth > 0) {
-    lines.push(`Author share: 25% of profit. Buyback + holder lottery + portfolio split — all settled on-chain.`);
+    lines.push(
+      chain === "solana"
+        ? `Author share: 25% of profit. Treasury split + portfolio — all settled on-chain.`
+        : `Author share: 25% of profit. Buyback + holder lottery + portfolio split — all settled on-chain.`,
+    );
   }
   if (isEscrowed && escrow) {
+    const walletHint = chain === "solana" ? "Solana wallet (base58)" : "Base wallet (0x…)";
     lines.push("");
     lines.push(
-      `${pos.authorHandle} — reply to THIS tweet with your Base wallet (0x…) to claim your ${escrow.amountEth.toFixed(4)} ETH share.`,
+      `${pos.authorHandle} — reply to THIS tweet with your ${walletHint} to claim your ${escrow.amountEth.toFixed(4)} ${sym} share.`,
     );
     lines.push("Only the original thesis author can claim — replies from other accounts are ignored.");
   }
   if (pos.lastExitTxHash) {
     lines.push("");
-    lines.push(`https://basescan.org/tx/${pos.lastExitTxHash}`);
+    lines.push(explorerTxUrl(chain, pos.lastExitTxHash));
   }
   const text = lines.join("\n");
 
@@ -861,19 +883,23 @@ async function adminRepostCloseAnnouncement(
   }
 
   if (isEscrowed) {
-    // Wipe any prior payout requests for this user (the original failed close
-    // tweet OR the fallback to thesis post id) before registering the new one.
-    await store.clearPayoutRequestsForUser(pos.authorXId);
+    // Wipe any prior payout requests for this user ON THIS CHAIN (the original
+    // failed close tweet OR the fallback to thesis post id) before registering
+    // the new one. Per-chain so reposting a Base close never wipes a pending
+    // Solana request (and the rebound request carries the right chain so the
+    // payout poller validates the correct wallet shape + escrow bucket).
+    await store.clearPayoutRequestsForUser(pos.authorXId, chain);
     await store.addPayoutRequest({
       requestTweetId: replyId,
       xUserId: pos.authorXId,
       handle: pos.authorHandle,
       threadPostId: pos.postId,
       requestedAt: new Date().toISOString(),
+      chain,
     });
     log.info(
       `admin: repost-close — payout request rebound for ${pos.authorHandle} ` +
-        `(${escrow?.amountEth.toFixed(4)} ETH escrow) → tweet ${replyId}`,
+        `(${escrow?.amountEth.toFixed(4)} ${sym} escrow) → tweet ${replyId}`,
     );
   }
 
@@ -938,6 +964,9 @@ async function apiStatus(res: ServerResponse): Promise<void> {
 interface OpenPositionView {
   id: string;
   contractAddress: string;
+  /** Chain the position trades on — lets the (new) frontend branch native-unit
+   *  labels and explorer links (Solscan vs BaseScan). */
+  chain: Chain;
   /** Token ticker — e.g. "DEGEN". Empty when DexScreener doesn't know it yet. */
   tokenSymbol: string;
   /** Token logo URL from DexScreener's info.imageUrl (populated when the
@@ -1058,17 +1087,26 @@ async function buildDashboardPayload(): Promise<object> {
   // to entry-time prices for every position that couldn't be priced. The
   // batched call is the same one the monitor uses and cuts the dashboard
   // build from ~10s to <1s with effectively zero Birdeye pressure.
-  const openAddresses = Array.from(
-    new Set(open.map((p) => p.order.contractAddress.toLowerCase())),
-  );
-  let livePrices = new Map<string, number>();
-  if (openAddresses.length > 0) {
-    try {
-      livePrices = await createBaseDataAdapter().getPricesEth(openAddresses);
-    } catch (err) {
-      log.warn(`dashboard: batch price fetch failed — falling back to entry prices for all positions: ${String(err)}`);
-    }
+  // One batched price call PER CHAIN (Base + Solana data providers differ and
+  // can't share a multi-price call) — mirrors the monitor's grouping so the
+  // dashboard PnL is correct for Solana positions too.
+  const addrsByChain = new Map<Chain, string[]>();
+  for (const p of open) {
+    const list = addrsByChain.get(p.order.chain) ?? [];
+    list.push(p.order.contractAddress.toLowerCase());
+    addrsByChain.set(p.order.chain, list);
   }
+  const livePrices = new Map<string, number>();
+  await Promise.all(
+    [...addrsByChain.entries()].map(async ([c, addrs]) => {
+      try {
+        const got = await createBaseDataAdapter(c).getPricesEth(Array.from(new Set(addrs)));
+        for (const [addr, price] of got) livePrices.set(addr, price);
+      } catch (err) {
+        log.warn(`dashboard: ${c} batch price fetch failed — entry-price fallback for its positions: ${String(err)}`);
+      }
+    }),
+  );
 
   let balanceEth = 0;
   let walletAddress = "";
@@ -1108,6 +1146,7 @@ async function buildDashboardPayload(): Promise<object> {
     openPositions.push({
       id: p.id,
       contractAddress: p.order.contractAddress,
+      chain: p.order.chain,
       tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
       tokenLogoUrl: logoCache.get(p.order.contractAddress.toLowerCase()) ?? null,
       authorHandle: p.authorHandle,
@@ -1162,6 +1201,7 @@ async function buildDashboardPayload(): Promise<object> {
       return {
         id: p.id,
         contractAddress: p.order.contractAddress,
+        chain: p.order.chain,
         tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
         tokenLogoUrl: logoCache.get(p.order.contractAddress.toLowerCase()) ?? null,
         authorHandle: p.authorHandle,
