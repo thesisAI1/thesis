@@ -21,6 +21,8 @@ import styles from "./dashboard.module.css";
 export interface PositionsSectionProps {
   initialOpen: OpenPositionView[];
   initialClosed: ClosedPositionView[];
+  /** Server-stamped clock for relative times, so SSR and client hydration agree. */
+  now: number;
   /** Bumped on every successful live refetch (drives the Updated ticker). */
   onRefresh?: () => void;
 }
@@ -31,6 +33,7 @@ type Tab = "open" | "hist";
 export function PositionsSection({
   initialOpen,
   initialClosed,
+  now,
   onRefresh,
 }: PositionsSectionProps) {
   const [tab, setTab] = useState<Tab>("open");
@@ -91,7 +94,7 @@ export function PositionsSection({
       {tab === "open" ? (
         <OpenPositionsTable positions={open} />
       ) : (
-        <HistoryTable positions={closed} />
+        <HistoryTable positions={closed} now={now} />
       )}
     </>
   );

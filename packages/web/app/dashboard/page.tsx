@@ -88,6 +88,10 @@ function EmptyState() {
 
 export default async function DashboardPage() {
   const { dashboard, leaderboard } = await loadData();
+  // One server-stamped clock, threaded into the client components that render
+  // relative times (timeAgo). Using the SAME `now` on the SSR pass and the
+  // client hydration keeps their output identical — no hydration mismatch.
+  const now = Date.now();
 
   return (
     <>
@@ -106,6 +110,7 @@ export default async function DashboardPage() {
             portfolio={dashboard.portfolio}
             initialOpen={dashboard.openPositions}
             initialClosed={dashboard.closedPositions}
+            now={now}
             overview={
               <BentoOverview
                 portfolio={dashboard.portfolio}
@@ -114,7 +119,7 @@ export default async function DashboardPage() {
                 closedPositions={dashboard.closedPositions}
               />
             }
-            decisions={<DecisionsSection reviews={dashboard.recentReviews} />}
+            decisions={<DecisionsSection reviews={dashboard.recentReviews} now={now} />}
             leaderboard={<Leaderboard entries={leaderboard?.leaderboard ?? []} />}
           />
         </main>

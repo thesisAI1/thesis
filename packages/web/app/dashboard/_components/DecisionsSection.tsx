@@ -14,6 +14,8 @@ import styles from "./dashboard.module.css";
 
 export interface DecisionsSectionProps {
   reviews: ReviewRecord[];
+  /** Server-stamped clock for timeAgo, so SSR and client hydration agree. */
+  now: number;
 }
 
 type Filter = "all" | Decision;
@@ -24,7 +26,7 @@ const FILTERS: Array<{ key: Filter; label: string }> = [
   { key: "SKIP", label: "SKIP" },
 ];
 
-export function DecisionsSection({ reviews }: DecisionsSectionProps) {
+export function DecisionsSection({ reviews, now }: DecisionsSectionProps) {
   const [filter, setFilter] = useState<Filter>("all");
 
   const rows = useMemo(
@@ -74,7 +76,7 @@ export function DecisionsSection({ reviews }: DecisionsSectionProps) {
                 >
                   {r.decision}
                 </span>
-                <div className={styles.logTime}>{timeAgo(r.reviewedAt)}</div>
+                <div className={styles.logTime}>{timeAgo(r.reviewedAt, now)}</div>
               </div>
             </div>
           ))

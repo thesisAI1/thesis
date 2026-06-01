@@ -15,6 +15,8 @@ import styles from "./dashboard.module.css";
 
 export interface HistoryTableProps {
   positions: ClosedPositionView[];
+  /** Server-stamped clock for timeAgo, so SSR and client hydration agree. */
+  now: number;
 }
 
 type Result = "all" | "win" | "loss";
@@ -28,7 +30,7 @@ const RESULTS: Array<{ key: Result; label: string }> = [
 /** Rows per page. Tunable — matches the Open table for a consistent ledger. */
 const PAGE_SIZE = 10;
 
-export function HistoryTable({ positions }: HistoryTableProps) {
+export function HistoryTable({ positions, now }: HistoryTableProps) {
   const [search, setSearch] = useState("");
   const [result, setResult] = useState<Result>("all");
 
@@ -118,7 +120,7 @@ export function HistoryTable({ positions }: HistoryTableProps) {
                         {fmtEthSigned(p.realisedPnlEth)} ({fmtPct(p.realisedPct)})
                       </td>
                       <td className={`${styles.tRight} ${styles.dimCell}`}>
-                        {timeAgo(p.closedAt)}
+                        {timeAgo(p.closedAt, now)}
                       </td>
                     </tr>
                   );

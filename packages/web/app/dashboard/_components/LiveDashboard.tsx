@@ -10,7 +10,7 @@
  *   status pills → §01 overview (slot) → §02 positions (live) →
  *   §03 decisions (slot) → §04 leaderboard (slot)
  */
-import { useCallback, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useState, type ReactNode } from "react";
 import type {
   ClosedPositionView,
   OpenPositionView,
@@ -27,6 +27,8 @@ export interface LiveDashboardProps {
   portfolio: PortfolioSummary;
   initialOpen: OpenPositionView[];
   initialClosed: ClosedPositionView[];
+  /** Server-stamped clock for relative times, so SSR and client hydration agree. */
+  now: number;
   /** §01 overview bento (server-rendered). */
   overview: ReactNode;
   /** §03 decision log (client island, server-passed). */
@@ -60,6 +62,7 @@ export function LiveDashboard({
   portfolio,
   initialOpen,
   initialClosed,
+  now,
   overview,
   decisions,
   leaderboard,
@@ -85,7 +88,7 @@ export function LiveDashboard({
 
       <section>
         <SectionHead id="overview" idx="01" title="Overview" meta="FROM THE TRADING WALLET" />
-        {overview}
+        <Fragment key="overview">{overview}</Fragment>
       </section>
 
       <section>
@@ -93,13 +96,14 @@ export function LiveDashboard({
         <PositionsSection
           initialOpen={initialOpen}
           initialClosed={initialClosed}
+          now={now}
           onRefresh={onRefresh}
         />
       </section>
 
       <section>
         <SectionHead id="decisions" idx="03" title="Decision Log" meta="EVERY GRADED THESIS" />
-        {decisions}
+        <Fragment key="decisions">{decisions}</Fragment>
       </section>
 
       <section>
@@ -109,7 +113,7 @@ export function LiveDashboard({
           title="Author Leaderboard"
           meta="PAID THE MOST · 25% AUTHOR SHARE"
         />
-        {leaderboard}
+        <Fragment key="leaderboard">{leaderboard}</Fragment>
       </section>
     </>
   );
