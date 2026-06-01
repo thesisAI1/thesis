@@ -17,6 +17,7 @@
  */
 
 import { formatEther } from "viem";
+import { log } from "../../util/log.js";
 
 /** Clamped wallet ETH delta, in wei. A swap can never legitimately reduce the
  *  wallet's ETH below zero proceeds, so a non-positive delta (gas exceeded the
@@ -74,6 +75,18 @@ export async function measureEthProceeds(
     after = await readEthWei();
     if (after > before) break;
     if (attempt < maxReadAttempts - 1) await new Promise((r) => setTimeout(r, readDelayMs));
+  }
+  // Exhausted every read without seeing the wallet grow: either a genuine
+  // net-zero sell (gas ≥ output) or a replica that stayed a block behind the
+  // whole budget. The loop CANNOT tell these apart, so surface it — mirroring
+  // buy()'s zero-delta warn — instead of silently reporting 0 to the reply tweet
+  // and realisedPnlEth. A stuck-replica false 0 is then visible/alertable (grep
+  // the txHash on-chain) rather than invisible in monitoring.
+  if (after <= before) {
+    log.warn(
+      `chain: sell proceeds read saw no ETH credit after ${maxReadAttempts} attempt(s) for tx ${txHash} — ` +
+        `reporting 0 (genuine net-zero sell OR persistent replica lag; indistinguishable here)`,
+    );
   }
   return { txHash, amountOut: Number(formatEther(netReceivedEthWei(before, after))) };
 }
