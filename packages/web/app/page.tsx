@@ -51,7 +51,7 @@ export default async function Home() {
   return (
     <>
       <TopBar />
-      <VerdictTape />
+      <VerdictTape data={dashboard} />
       <main>
         <Hero data={dashboard} />
         <FacultyOffice />

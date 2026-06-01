@@ -10,23 +10,18 @@
  *     reasoning, so text never covers the office floor (or the characters later).
  * The bottom-right Archive is a clickable hotspot into the live record.
  *
- * Reuses the homepage engine wholesale (useEventStream + reduceRoom + the
- * scripted demos); state drives the spatial overlay + the transcript.
+ * Reuses the homepage engine wholesale (useEventStream + reduceRoomFrom); state
+ * drives the spatial overlay + the transcript. When no review is streaming the
+ * office simply rests — the committee sits idle at their desks. There is no
+ * scripted stand-in: every word on screen is a real review or nothing at all.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CSSProperties } from "react";
 import Link from "next/link";
 import type { Grade } from "@/lib/api";
-import { useEventStream, type StreamEvent } from "@/lib/useEventStream";
+import { useEventStream } from "@/lib/useEventStream";
 import { AGENT_COLOR, AGENT_META, Sigil, type AgentName } from "@/components/shell/Sigil";
-import {
-  ROOM_ORDER,
-  emptyRoom,
-  reduceRoom,
-  reduceRoomFrom,
-  type RoomState,
-} from "@/app/_home/roomState";
-import { DEMO_REVIEWS, demoEvents } from "@/app/_home/demoReview";
+import { ROOM_ORDER, emptyRoom, reduceRoomFrom } from "@/app/_home/roomState";
 import styles from "./office.module.css";
 
 /* Room rectangles + desk points as % of the square stage, snapped to the walls
@@ -125,73 +120,50 @@ const GRADE_COLOR: Record<Grade, string> = {
   F: "var(--red)",
 };
 
-const GAP_AFTER_REVIEW_MS = 2400;
+// Grace after a review ends (or settles) before the office rests — long enough
+// for the verdict / payout to land before the room goes quiet.
 const LIVE_HOLD_MS = 6500;
+// Safety window for mid-review events: an LLM gap between agents can leave the
+// stream silent for several seconds, so we hold "live" much longer between
+// steps. Only a genuinely stalled/dead stream waits this out before resting —
+// it never flickers to idle in the middle of an active review.
+const STALE_STREAM_MS = 30000;
 
 export function Office() {
   const { events, lastEvent, connected } = useEventStream();
   const liveRoom = useMemo(() => reduceRoomFrom(events), [events]);
+  // A stable empty room is the resting state — agents idle at their desks.
+  const idleRoom = useMemo(() => emptyRoom(), []);
 
-  const [mode, setMode] = useState<"demo" | "live">("demo");
-  const [demoRoom, setDemoRoom] = useState<RoomState>(emptyRoom);
-  const timers = useRef<ReturnType<typeof setTimeout>[]>([]);
-  const idxRef = useRef(0);
+  // "idle" — nothing streaming: the committee sits at their desks.
+  // "live" — a real review is streaming in from the SSE pipeline.
+  // No demo/scripted mode exists: when nothing is live, the office rests.
+  const [mode, setMode] = useState<"idle" | "live">("idle");
 
-  const clearTimers = useCallback(() => {
-    timers.current.forEach(clearTimeout);
-    timers.current = [];
-  }, []);
-
+  // A streamed event flips the room live; silence then settles it back to idle.
+  // Each new event re-arms the timer, so the office stays live for the whole
+  // review. Terminal events (review:end / endowment) use the short grace so the
+  // verdict or payout lingers, then rests; mid-review events use the long safety
+  // window so an LLM gap between agents never flickers the room back to idle.
   useEffect(() => {
     if (!lastEvent) return;
     setMode("live");
-    const t = setTimeout(() => setMode("demo"), LIVE_HOLD_MS);
+    const terminal = lastEvent.type === "review:end" || lastEvent.type === "endowment";
+    const hold = terminal ? LIVE_HOLD_MS : STALE_STREAM_MS;
+    const t = setTimeout(() => setMode("idle"), hold);
     return () => clearTimeout(t);
   }, [lastEvent]);
 
-  useEffect(() => {
-    if (mode !== "demo") {
-      clearTimers();
-      return;
-    }
-    let cancelled = false;
-    const play = () => {
-      if (cancelled) return;
-      clearTimers();
-      const review = DEMO_REVIEWS[idxRef.current % DEMO_REVIEWS.length];
-      idxRef.current += 1;
-      setDemoRoom(emptyRoom());
-      const schedule = demoEvents(review, { settle: true });
-      for (const { at, event } of schedule) {
-        timers.current.push(
-          setTimeout(() => setDemoRoom((prev) => reduceRoom(prev, event as StreamEvent)), at),
-        );
-      }
-      const end = schedule.length ? schedule[schedule.length - 1].at : 0;
-      timers.current.push(
-        setTimeout(() => {
-          if (!cancelled) play();
-        }, end + GAP_AFTER_REVIEW_MS),
-      );
-    };
-    timers.current.push(setTimeout(play, 600));
-    return () => {
-      cancelled = true;
-      clearTimers();
-    };
-  }, [mode, clearTimers]);
-
-  const room = mode === "live" ? liveRoom : demoRoom;
+  const room = mode === "live" ? liveRoom : idleRoom;
   const submission = room.submission;
   const verdict = room.verdict;
   const buy = verdict?.decision === "BUY";
 
-  const statusText =
-    mode === "live"
-      ? connected
-        ? "Watching X for new submissions…"
-        : "Reconnecting to the committee feed…"
-      : "The committee is between reviews…";
+  // With no submission on screen we're resting — but the bot is still watching
+  // X, so the status says so honestly rather than implying a review is underway.
+  const statusText = connected
+    ? "Watching X for new submissions…"
+    : "Reconnecting to the committee feed…";
 
   const showIntake = !!submission && room.agents.dean.phase === "idle" && !verdict;
   const ticketSpot = room.agents.bursar.phase !== "idle" ? MONITOR.bursar : MONITOR.dean;
