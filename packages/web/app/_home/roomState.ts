@@ -175,7 +175,7 @@ export function reduceRoom(state: RoomState, event: StreamEvent): RoomState {
       const eth = asNumber(event.toAuthorEth);
       const lines = [
         "A position closed in profit — splitting 25/25/25/25",
-        `Paid ${eth.toFixed(4)} Ξ to ${author || "the author"} on X`,
+        `Paid ${eth.toFixed(4)} ETH to ${author || "the author"} on X`,
         "Buyback share burns $THESIS on the open market",
       ];
       return {

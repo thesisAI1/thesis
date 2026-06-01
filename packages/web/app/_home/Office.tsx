@@ -350,7 +350,7 @@ export function Office() {
                   className={styles.coin}
                   style={{ left: `${DESK.endowment.x}%`, top: `${DESK.endowment.y}%` }}
                 >
-                  Ξ
+                  ETH
                 </span>
               ) : null}
 

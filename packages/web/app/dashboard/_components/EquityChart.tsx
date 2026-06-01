@@ -77,10 +77,10 @@ export function EquityChart({ portfolio, closedPositions }: EquityChartProps) {
       <div className={styles.bpad}>
         <div className={styles.chartBig}>
           {portfolio.totalPortfolioValueUsd > 0 ? fmtUsd(portfolio.totalPortfolioValueUsd) : "—"}
-          <small>· {portfolio.totalPortfolioValueEth.toFixed(2)} Ξ</small>
+          <small>· {portfolio.totalPortfolioValueEth.toFixed(2)} ETH</small>
         </div>
         <div className={`${styles.chartDelta} ${deltaUp ? styles.pos : styles.neg}`}>
-          {deltaUp ? "▲" : "▼"} {fmtEthSigned(portfolio.realizedPnlEth)} Ξ ·{" "}
+          {deltaUp ? "▲" : "▼"} {fmtEthSigned(portfolio.realizedPnlEth)} ETH ·{" "}
           {fmtPct(allTimePct)} all-time realised
         </div>
       </div>
@@ -101,7 +101,7 @@ export function EquityChart({ portfolio, closedPositions }: EquityChartProps) {
           <g key={gy}>
             <line x1="0" y1={gy} x2={W} y2={gy} stroke="#1f2734" strokeWidth="1" />
             <text x="8" y={gy - 5}>
-              {val} Ξ
+              {val} ETH
             </text>
           </g>
         ))}

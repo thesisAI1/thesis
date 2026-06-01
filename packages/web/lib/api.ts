@@ -11,7 +11,7 @@
  * level. Server-side fetch must hit the absolute backend origin — Next's
  * /api/* rewrites only apply to browser requests.
  */
-import type { Decision, Grade, ReviewRecord } from "@thesis/shared";
+import type { Chain, Decision, Grade, ReviewRecord } from "@thesis/shared";
 
 /** Absolute backend origin. Mirrors next.config.ts; the rewrite that proxies
  *  /api/* is browser-only, so Server Components must call the origin directly. */
@@ -37,6 +37,9 @@ export interface StatusData {
 export interface OpenPositionView {
   id: string;
   contractAddress: string;
+  /** Chain the position trades on — decides the native-unit symbol (ETH Base / SOL Solana).
+   *  The `*Eth` value fields are native units scoped to this chain. */
+  chain: Chain;
   /** Token ticker — empty when DexScreener doesn't know it yet. */
   tokenSymbol: string;
   authorHandle: string;
@@ -65,6 +68,8 @@ export interface OpenPositionView {
 export interface ClosedPositionView {
   id: string;
   contractAddress: string;
+  /** Chain the trade settled on — decides the native-unit symbol (ETH Base / SOL Solana). */
+  chain: Chain;
   tokenSymbol: string;
   authorHandle: string;
   postUrl: string | null;

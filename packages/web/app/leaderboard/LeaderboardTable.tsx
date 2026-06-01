@@ -63,7 +63,7 @@ export function LeaderboardTable({ entries }: { entries: LeaderboardEntry[] }) {
                       {fmtPct(e.bestTradePct)}
                     </span>
                   </td>
-                  <td className={`${styles.tRight} ${styles.earned}`}>{e.totalEarnedEth.toFixed(2)} Ξ</td>
+                  <td className={`${styles.tRight} ${styles.earned}`}>{e.totalEarnedEth.toFixed(2)} ETH</td>
                 </tr>
               ))
             ) : (

@@ -28,6 +28,7 @@ import {
   WalletIcon,
 } from "./icons";
 import { fmtEthSigned, fmtRate, fmtUsd, timeAgo, tokenLabel } from "./format";
+import { nativeSymbol } from "@/lib/chain";
 import styles from "./dashboard.module.css";
 
 export interface BentoOverviewProps {
@@ -73,10 +74,10 @@ export function BentoOverview({
         <div className={styles.kpiV}>
           {portfolio.totalPortfolioValueUsd > 0
             ? fmtUsd(portfolio.totalPortfolioValueUsd)
-            : `${portfolio.totalPortfolioValueEth.toFixed(2)} Ξ`}
+            : `${portfolio.totalPortfolioValueEth.toFixed(2)} ETH`}
         </div>
         <div className={styles.kpiN}>
-          {portfolio.totalPortfolioValueEth.toFixed(2)} Ξ · wallet +{" "}
+          {portfolio.totalPortfolioValueEth.toFixed(2)} ETH · wallet +{" "}
           {portfolio.openCount} open
         </div>
       </div>
@@ -90,7 +91,7 @@ export function BentoOverview({
           <span className={styles.kpiL}>Realised PnL</span>
         </div>
         <div className={`${styles.kpiV} ${realisedUp ? styles.pos : styles.neg}`}>
-          {fmtEthSigned(portfolio.realizedPnlEth)}Ξ
+          {fmtEthSigned(portfolio.realizedPnlEth)} ETH
         </div>
         <div className={styles.kpiN}>since inception</div>
       </div>
@@ -131,7 +132,7 @@ export function BentoOverview({
           className={styles.bigv}
           style={{ color: "var(--blue)", fontSize: "40px", lineHeight: 1.1, marginTop: "6px" }}
         >
-          {distributions.toAuthors.toFixed(2)} Ξ
+          {distributions.toAuthors.toFixed(2)} ETH
         </div>
         <div className={styles.kpiN}>
           {authorsUsd ? `${authorsUsd} · ` : ""}25% author share · {distributions.count} paid on X
@@ -147,7 +148,7 @@ export function BentoOverview({
           Buyback &amp; burn
         </div>
         <div className={styles.bigv} style={{ color: "var(--accent)" }}>
-          {distributions.toBuyback.toFixed(2)} Ξ
+          {distributions.toBuyback.toFixed(2)} ETH
         </div>
         <div className={styles.kpiN}>
           {buybackUsd ? `${buybackUsd} · ` : ""}$THESIS removed
@@ -164,7 +165,7 @@ export function BentoOverview({
                 <div
                   className={`${styles.bigv} ${latest.realisedPnlEth >= 0 ? styles.pos : styles.neg}`}
                 >
-                  {fmtEthSigned(latest.realisedPnlEth)} Ξ
+                  {fmtEthSigned(latest.realisedPnlEth)} {nativeSymbol(latest.chain)}
                 </div>
                 <div className={styles.kpiN}>
                   {tokenLabel(latest.tokenSymbol, latest.contractAddress)} ·{" "}

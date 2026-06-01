@@ -7,6 +7,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import type { ClosedPositionView } from "@/lib/api";
+import { nativeSymbol } from "@/lib/chain";
 import { fmtEthSigned, fmtPct, timeAgo, tokenLabel } from "./format";
 import { SearchIcon } from "./icons";
 import { Pager, usePagination } from "./Pager";
@@ -108,9 +109,11 @@ export function HistoryTable({ positions }: HistoryTableProps) {
                       </td>
                       <td className={styles.tRight}>{p.amountInEth.toFixed(4)}</td>
                       <td className={`${styles.tRight} ${styles.dimCell}`}>
-                        {p.entryPriceEth.toExponential(2)} Ξ
+                        {p.entryPriceEth.toExponential(2)} {nativeSymbol(p.chain)}
                       </td>
-                      <td className={styles.tRight}>{p.exitPriceEth.toExponential(2)} Ξ</td>
+                      <td className={styles.tRight}>
+                        {p.exitPriceEth.toExponential(2)} {nativeSymbol(p.chain)}
+                      </td>
                       <td className={`${styles.tRight} ${up ? styles.pos : styles.neg}`}>
                         {fmtEthSigned(p.realisedPnlEth)} ({fmtPct(p.realisedPct)})
                       </td>

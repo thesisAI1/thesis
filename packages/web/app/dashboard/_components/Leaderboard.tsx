@@ -68,7 +68,7 @@ export function Leaderboard({ entries }: LeaderboardProps) {
                     </span>
                   </td>
                   <td className={`${styles.tRight} ${styles.earned}`}>
-                    {e.totalEarnedEth.toFixed(2)} Ξ
+                    {e.totalEarnedEth.toFixed(2)} ETH
                   </td>
                 </tr>
               ))

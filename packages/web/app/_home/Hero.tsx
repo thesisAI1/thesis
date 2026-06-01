@@ -24,7 +24,7 @@ export function Hero({ data }: HeroProps) {
     {
       value: (
         <>
-          <CountUp value={data?.distributions?.toAuthors ?? 0} decimals={2} /> Ξ
+          <CountUp value={data?.distributions?.toAuthors ?? 0} decimals={2} /> ETH
         </>
       ),
       label: "Paid to authors",
