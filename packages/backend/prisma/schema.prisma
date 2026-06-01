@@ -24,12 +24,17 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Author X-id -> payout wallet link. Keyed on the numeric X id (handles change).
+/// Author X-id -> payout wallet link. An author can register one wallet PER
+/// chain (a 0x… on Base, a base58 on Solana), so the primary key is
+/// (xUserId, chain). `chain` defaults to "base" — pre-Solana rows are base.
 model RegistryEntry {
-  xUserId  String @id
+  xUserId  String
   handle   String
   wallet   String
+  chain    String @default("base")
   linkedAt String
+
+  @@id([xUserId, chain])
 }
 
 /// A trading position, upserted by id. `order` (TradeOrder incl. takeProfits[])
@@ -53,8 +58,25 @@ model Position {
   lastExitTxHash       String?
   openedAt             String
   closedAt             String?
+  /// Settlement durability (PR3). Set when the 25/25/25/25 split has FULLY
+  /// completed. A `closed` position with no `settledAt` is retried by the
+  /// monitor each tick: getUnsettledClosedPositions = closed && settledAt null.
+  settledAt            String?
+  /// Per-leg settlement progress (SettlementProgress), stored as Json so a
+  /// crash-interrupted settlement resumes idempotently. Null until first write.
+  settlement           Json?
 
   @@index([status])
+}
+
+/// A write-ahead marker for a buy executed (or about to execute) on-chain
+/// BEFORE its Position is persisted — crash recovery against silent loss.
+/// Keyed by postId (one open buy per post); upserted on a re-attempt.
+model PendingBuy {
+  postId          String @id
+  contractAddress String
+  amountInEth     Float
+  at              String
 }
 
 /// Append-only buy log (for the rate limit). Insertion order recoverable via id.
@@ -63,25 +85,34 @@ model Position {
 model BuyLog {
   id    Int    @id @default(autoincrement())
   isoAt String
+  /// Trading lane. Base and Solana have independent cooldowns + daily limits,
+  /// so counts / last-buy are scoped per chain ("base" default).
+  chain String @default("base")
 
-  @@index([isoAt])
+  @@index([chain, isoAt])
 }
 
-/// An unregistered author's accumulated profit share, keyed by X id.
+/// An unregistered author's accumulated profit share, per (author, chain) so
+/// ETH and SOL escrow never sum into one figure. `chain` defaults to "base".
 model Escrow {
-  xUserId   String @id
+  xUserId   String
   handle    String
   amountEth Float
+  chain     String @default("base")
   updatedAt String
+
+  @@id([xUserId, chain])
 }
 
 /// A posted "reply with your wallet" request, keyed by its tweet id.
 model PayoutRequest {
-  requestTweetId String @id
+  requestTweetId String  @id
   xUserId        String
   handle         String
   threadPostId   String
   requestedAt    String
+  /// Chain the payout is on. Null for pre-Solana requests (treated as base).
+  chain          String?
 
   @@index([xUserId])
 }

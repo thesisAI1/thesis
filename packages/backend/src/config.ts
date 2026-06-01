@@ -136,9 +136,11 @@ export const config = {
     monitorIntervalSec: num("MONITOR_INTERVAL_SEC", 15),
     /** Where the store keeps its data (JSON file or SQLite db). */
     dataDir: str("DATA_DIR", "./data"),
-    /** Which persistence backend getStore() builds. "sqlite" (default) uses the
-     *  Prisma/SQLite store; "file" keeps the legacy JSON file store. */
-    store: str("THESIS_STORE", "sqlite"),
+    /** Which persistence backend getStore() builds. "file" (default) is the
+     *  JSON file store — the canonical, battle-tested path the whole backend
+     *  suite runs against and where production data already lives. Set
+     *  THESIS_STORE=sqlite to opt into the Prisma/SQLite store instead. */
+    store: str("THESIS_STORE", "file"),
   },
 
   auditor: {

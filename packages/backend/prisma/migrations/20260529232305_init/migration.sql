@@ -1,9 +1,12 @@
 -- CreateTable
 CREATE TABLE "RegistryEntry" (
-    "xUserId" TEXT NOT NULL PRIMARY KEY,
+    "xUserId" TEXT NOT NULL,
     "handle" TEXT NOT NULL,
     "wallet" TEXT NOT NULL,
-    "linkedAt" TEXT NOT NULL
+    "chain" TEXT NOT NULL DEFAULT 'base',
+    "linkedAt" TEXT NOT NULL,
+
+    PRIMARY KEY ("xUserId", "chain")
 );
 
 -- CreateTable
@@ -25,21 +28,35 @@ CREATE TABLE "Position" (
     "lastExitPriceEth" REAL,
     "lastExitTxHash" TEXT,
     "openedAt" TEXT NOT NULL,
-    "closedAt" TEXT
+    "closedAt" TEXT,
+    "settledAt" TEXT,
+    "settlement" JSONB
+);
+
+-- CreateTable
+CREATE TABLE "PendingBuy" (
+    "postId" TEXT NOT NULL PRIMARY KEY,
+    "contractAddress" TEXT NOT NULL,
+    "amountInEth" REAL NOT NULL,
+    "at" TEXT NOT NULL
 );
 
 -- CreateTable
 CREATE TABLE "BuyLog" (
     "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
-    "isoAt" TEXT NOT NULL
+    "isoAt" TEXT NOT NULL,
+    "chain" TEXT NOT NULL DEFAULT 'base'
 );
 
 -- CreateTable
 CREATE TABLE "Escrow" (
-    "xUserId" TEXT NOT NULL PRIMARY KEY,
+    "xUserId" TEXT NOT NULL,
     "handle" TEXT NOT NULL,
     "amountEth" REAL NOT NULL,
-    "updatedAt" TEXT NOT NULL
+    "chain" TEXT NOT NULL DEFAULT 'base',
+    "updatedAt" TEXT NOT NULL,
+
+    PRIMARY KEY ("xUserId", "chain")
 );
 
 -- CreateTable
@@ -48,7 +65,8 @@ CREATE TABLE "PayoutRequest" (
     "xUserId" TEXT NOT NULL,
     "handle" TEXT NOT NULL,
     "threadPostId" TEXT NOT NULL,
-    "requestedAt" TEXT NOT NULL
+    "requestedAt" TEXT NOT NULL,
+    "chain" TEXT
 );
 
 -- CreateTable
@@ -108,7 +126,7 @@ CREATE TABLE "Funnel" (
 CREATE INDEX "Position_status_idx" ON "Position"("status");
 
 -- CreateIndex
-CREATE INDEX "BuyLog_isoAt_idx" ON "BuyLog"("isoAt");
+CREATE INDEX "BuyLog_chain_isoAt_idx" ON "BuyLog"("chain", "isoAt");
 
 -- CreateIndex
 CREATE INDEX "PayoutRequest_xUserId_idx" ON "PayoutRequest"("xUserId");

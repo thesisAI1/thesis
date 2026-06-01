@@ -168,14 +168,15 @@ export interface Store {
 
 let singleton: Store | null = null;
 
-/** The process-wide store. SQLite/Prisma by default; set THESIS_STORE=file to
- *  fall back to the legacy JSON file store. Both implement the same interface. */
+/** The process-wide store. The legacy JSON file store by default (the path the
+ *  whole suite + production run against); set THESIS_STORE=sqlite to opt into
+ *  the Prisma/SQLite store. Both implement the same interface. */
 export function getStore(): Store {
   if (!singleton) {
     singleton =
-      config.service.store === "file"
-        ? new FileStore(config.service.dataDir)
-        : new PrismaStore(config.service.dataDir);
+      config.service.store === "sqlite"
+        ? new PrismaStore(config.service.dataDir)
+        : new FileStore(config.service.dataDir);
   }
   return singleton;
 }

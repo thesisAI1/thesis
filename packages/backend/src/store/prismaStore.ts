@@ -22,14 +22,16 @@ import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { Prisma, PrismaClient } from "@prisma/client";
 import type {
+  Chain,
   Distribution,
   Position,
   RegistryEntry,
   ReviewRecord,
+  SettlementProgress,
   Submission,
   TradeOrder,
 } from "@thesis/shared";
-import type { EscrowEntry, Funnel, PayoutRequest, QueueItem, Store } from "./index.js";
+import type { EscrowEntry, Funnel, PayoutRequest, PendingBuy, QueueItem, Store } from "./index.js";
 
 /** The fixed primary key of the single funnel-counters row. */
 const FUNNEL_ID = 1;
@@ -83,6 +85,8 @@ export class PrismaStore implements Store {
     lastExitTxHash: string | null;
     openedAt: string;
     closedAt: string | null;
+    settledAt: string | null;
+    settlement: Prisma.JsonValue;
   }): Position {
     return {
       id: row.id,
@@ -103,6 +107,11 @@ export class PrismaStore implements Store {
       lastExitTxHash: undef(row.lastExitTxHash),
       openedAt: row.openedAt,
       closedAt: undef(row.closedAt),
+      settledAt: undef(row.settledAt),
+      settlement:
+        row.settlement === null
+          ? undefined
+          : (row.settlement as unknown as SettlementProgress),
     };
   }
 
@@ -175,18 +184,62 @@ export class PrismaStore implements Store {
     };
   }
 
+  private rowToPayoutRequest(row: {
+    requestTweetId: string;
+    xUserId: string;
+    handle: string;
+    threadPostId: string;
+    requestedAt: string;
+    chain: string | null;
+  }): PayoutRequest {
+    return {
+      requestTweetId: row.requestTweetId,
+      xUserId: row.xUserId,
+      handle: row.handle,
+      threadPostId: row.threadPostId,
+      requestedAt: row.requestedAt,
+      // null (pre-Solana) -> undefined, mirroring FileStore's JSON round-trip.
+      chain: row.chain === null ? undefined : (row.chain as Chain),
+    };
+  }
+
+  /** WHERE clause matching an author's payout requests, optionally scoped to a
+   *  chain. A "base" filter also matches pre-Solana rows with NULL chain
+   *  (FileStore treats `req.chain ?? "base"`); `undefined` matches all chains. */
+  private payoutWhere(xUserId: string, chain?: Chain): Prisma.PayoutRequestWhereInput {
+    if (chain === undefined) return { xUserId };
+    if (chain === "base") return { xUserId, OR: [{ chain: "base" }, { chain: null }] };
+    return { xUserId, chain };
+  }
+
   // ---- registry ------------------------------------------------------------
 
   async linkWallet(entry: RegistryEntry): Promise<void> {
+    // Per (author, chain): an author can hold one wallet per chain. `chain`
+    // defaults to "base" so pre-Solana callers (no chain) stay byte-identical.
+    const chain = entry.chain ?? "base";
     await this.prisma.registryEntry.upsert({
-      where: { xUserId: entry.xUserId },
-      create: entry,
+      where: { xUserId_chain: { xUserId: entry.xUserId, chain } },
+      create: {
+        xUserId: entry.xUserId,
+        handle: entry.handle,
+        wallet: entry.wallet,
+        chain,
+        linkedAt: entry.linkedAt,
+      },
       update: { handle: entry.handle, wallet: entry.wallet, linkedAt: entry.linkedAt },
     });
   }
 
-  async getRegistryEntry(xUserId: string): Promise<RegistryEntry | null> {
-    return this.prisma.registryEntry.findUnique({ where: { xUserId } });
+  async getRegistryEntry(xUserId: string, chain: Chain = "base"): Promise<RegistryEntry | null> {
+    const row = await this.prisma.registryEntry.findUnique({
+      where: { xUserId_chain: { xUserId, chain } },
+    });
+    if (row === null) return null;
+    // FileStore stores the entry verbatim, so a no-chain link round-trips as
+    // chain:undefined (the shared type treats absent ⇒ base). Mirror that: a
+    // "base" row reads back WITHOUT an explicit chain; other chains keep theirs.
+    return { ...row, chain: row.chain === "base" ? undefined : (row.chain as Chain) };
   }
 
   // ---- positions -----------------------------------------------------------
@@ -210,6 +263,12 @@ export class PrismaStore implements Store {
       lastExitTxHash: position.lastExitTxHash ?? null,
       openedAt: position.openedAt,
       closedAt: position.closedAt ?? null,
+      settledAt: position.settledAt ?? null,
+      // Optional Json: absent settlement → SQL NULL (read back as undefined).
+      settlement:
+        position.settlement === undefined
+          ? Prisma.DbNull
+          : (position.settlement as unknown as Prisma.InputJsonValue),
     };
     await this.prisma.position.upsert({
       where: { id: position.id },
@@ -233,45 +292,102 @@ export class PrismaStore implements Store {
     return rows.map((r) => this.rowToPosition(r));
   }
 
+  async getUnsettledClosedPositions(): Promise<Position[]> {
+    // Mirrors FileStore: closed && !settledAt. The monitor retries these each
+    // tick until the 25/25/25/25 split fully completes.
+    const rows = await this.prisma.position.findMany({
+      where: { status: "closed", settledAt: null },
+      orderBy: { openedAt: "asc" },
+    });
+    return rows.map((r) => this.rowToPosition(r));
+  }
+
+  // ---- pending buys (write-ahead log) --------------------------------------
+
+  async recordPendingBuy(buy: PendingBuy): Promise<void> {
+    // Upsert by postId — a re-attempt for the same post replaces the marker
+    // (FileStore filters out the old one then pushes), so it stays idempotent.
+    await this.prisma.pendingBuy.upsert({
+      where: { postId: buy.postId },
+      create: {
+        postId: buy.postId,
+        contractAddress: buy.contractAddress,
+        amountInEth: buy.amountInEth,
+        at: buy.at,
+      },
+      update: {
+        contractAddress: buy.contractAddress,
+        amountInEth: buy.amountInEth,
+        at: buy.at,
+      },
+    });
+  }
+
+  async getPendingBuys(): Promise<PendingBuy[]> {
+    // `at` ASC ≈ FileStore's push order (markers are recorded in time order).
+    const rows = await this.prisma.pendingBuy.findMany({ orderBy: { at: "asc" } });
+    return rows.map((r) => ({
+      postId: r.postId,
+      contractAddress: r.contractAddress,
+      amountInEth: r.amountInEth,
+      at: r.at,
+    }));
+  }
+
+  async clearPendingBuy(postId: string): Promise<void> {
+    await this.prisma.pendingBuy.deleteMany({ where: { postId } });
+  }
+
   // ---- buy log -------------------------------------------------------------
 
-  async recordBuy(isoAt: string): Promise<void> {
-    await this.prisma.buyLog.create({ data: { isoAt } });
+  async recordBuy(isoAt: string, chain: Chain = "base"): Promise<void> {
+    await this.prisma.buyLog.create({ data: { isoAt, chain } });
   }
 
-  async countBuysSince(isoSince: string): Promise<number> {
-    // Relies on ISO-8601 UTC ("Z") strings sorting lexicographically — the same
-    // invariant FileStore's `t >= isoSince` string comparison depends on.
-    return this.prisma.buyLog.count({ where: { isoAt: { gte: isoSince } } });
+  async countBuysSince(isoSince: string, chain: Chain = "base"): Promise<number> {
+    // Per chain — Base and Solana are independent buy lanes. Relies on ISO-8601
+    // UTC ("Z") strings sorting lexicographically, same as FileStore's `t >=`.
+    return this.prisma.buyLog.count({ where: { chain, isoAt: { gte: isoSince } } });
   }
 
-  async lastBuyAt(): Promise<string | null> {
+  async lastBuyAt(chain: Chain = "base"): Promise<string | null> {
     // DESC on the ISO-8601 UTC string column gives the lexicographically largest
-    // (most recent) timestamp — same as FileStore's reduce((a,b) => a>b?a:b).
-    const row = await this.prisma.buyLog.findFirst({ orderBy: { isoAt: "desc" } });
+    // (most recent) timestamp for the chain — same as FileStore's reduce(max).
+    const row = await this.prisma.buyLog.findFirst({
+      where: { chain },
+      orderBy: { isoAt: "desc" },
+    });
     return row?.isoAt ?? null;
   }
 
   // ---- escrow --------------------------------------------------------------
 
-  async addEscrow(xUserId: string, handle: string, amountEth: number): Promise<void> {
+  async addEscrow(
+    xUserId: string,
+    handle: string,
+    amountEth: number,
+    chain: Chain = "base",
+  ): Promise<void> {
     // Single upsert with an atomic DB-side increment — no read-modify-write race.
-    // Mirrors FileStore's `(existing?.amountEth ?? 0) + amountEth` accumulation
-    // and stamps updatedAt to ISO now() on every call.
+    // Per (author, chain) so ETH and SOL escrow never mix. Mirrors FileStore's
+    // `(existing?.amountEth ?? 0) + amountEth` and stamps updatedAt every call.
     const nowIso = new Date().toISOString();
     await this.prisma.escrow.upsert({
-      where: { xUserId },
-      create: { xUserId, handle, amountEth, updatedAt: nowIso },
+      where: { xUserId_chain: { xUserId, chain } },
+      create: { xUserId, handle, amountEth, chain, updatedAt: nowIso },
       update: { amountEth: { increment: amountEth }, handle, updatedAt: nowIso },
     });
   }
 
-  async getEscrow(xUserId: string): Promise<EscrowEntry | null> {
-    return this.prisma.escrow.findUnique({ where: { xUserId } });
+  async getEscrow(xUserId: string, chain: Chain = "base"): Promise<EscrowEntry | null> {
+    const row = await this.prisma.escrow.findUnique({
+      where: { xUserId_chain: { xUserId, chain } },
+    });
+    return row === null ? null : { ...row, chain: row.chain as Chain };
   }
 
-  async clearEscrow(xUserId: string): Promise<void> {
-    await this.prisma.escrow.deleteMany({ where: { xUserId } });
+  async clearEscrow(xUserId: string, chain: Chain = "base"): Promise<void> {
+    await this.prisma.escrow.deleteMany({ where: { xUserId, chain } });
   }
 
   // ---- processed dedup -----------------------------------------------------
@@ -357,25 +473,38 @@ export class PrismaStore implements Store {
   // ---- payout requests -----------------------------------------------------
 
   async addPayoutRequest(req: PayoutRequest): Promise<void> {
+    const data = {
+      xUserId: req.xUserId,
+      handle: req.handle,
+      threadPostId: req.threadPostId,
+      requestedAt: req.requestedAt,
+      chain: req.chain ?? null,
+    };
     await this.prisma.payoutRequest.upsert({
       where: { requestTweetId: req.requestTweetId },
-      create: req,
-      update: {
-        xUserId: req.xUserId,
-        handle: req.handle,
-        threadPostId: req.threadPostId,
-        requestedAt: req.requestedAt,
-      },
+      create: { requestTweetId: req.requestTweetId, ...data },
+      update: data,
     });
   }
 
   async getPayoutRequests(): Promise<PayoutRequest[]> {
     // requestedAt ASC for deterministic, oldest-first ordering.
-    return this.prisma.payoutRequest.findMany({ orderBy: { requestedAt: "asc" } });
+    const rows = await this.prisma.payoutRequest.findMany({ orderBy: { requestedAt: "asc" } });
+    return rows.map((r) => this.rowToPayoutRequest(r));
   }
 
-  async clearPayoutRequestsForUser(xUserId: string): Promise<void> {
-    await this.prisma.payoutRequest.deleteMany({ where: { xUserId } });
+  async clearPayoutRequestsForUser(xUserId: string, chain?: Chain): Promise<void> {
+    await this.prisma.payoutRequest.deleteMany({ where: this.payoutWhere(xUserId, chain) });
+  }
+
+  async clearPayout(xUserId: string, chain: Chain = "base"): Promise<void> {
+    // Atomic: drop the escrow AND every open payout request for this author on
+    // this chain in one transaction, so a completed payout can't leave a half-
+    // cleared state for a later poll to re-process. Per chain (Base ≠ Solana).
+    await this.prisma.$transaction([
+      this.prisma.escrow.deleteMany({ where: { xUserId, chain } }),
+      this.prisma.payoutRequest.deleteMany({ where: this.payoutWhere(xUserId, chain) }),
+    ]);
   }
 
   // ---- queue ---------------------------------------------------------------
