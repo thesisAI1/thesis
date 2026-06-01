@@ -10,9 +10,15 @@
  *   npm run migrate:json -w @thesis/backend -- /path/to/thesis-data.json
  *
  * Idempotent-ish: collections the interface UPSERTS (registry, positions,
- * escrow, payout requests, processed) can be re-run safely. Append-style
- * collections (buy log, reviews, distributions, queue) and the funnel would
- * DOUBLE on a second run — run this once against a fresh SQLite db.
+ * pending buys, escrow, payout requests, processed) can be re-run safely.
+ * Append-style collections (buy log incl. per-chain lanes, reviews,
+ * distributions, queue) and the funnel would DOUBLE on a second run — run this
+ * once against a fresh SQLite db.
+ *
+ * Per-chain fidelity: escrow keeps its `chain` (a Solana escrow owes SOL and
+ * must never collapse into the base key), and the non-base buy lanes
+ * (`buyLogByChain`) are replayed so per-chain cooldown/daily-limit history
+ * survives — otherwise the bot could over-buy a non-base chain after cutover.
  *
  * Fidelity note: escrow `updatedAt` is re-stamped to now() because the only
  * interface entry point (addEscrow) accumulates and stamps the time itself.
@@ -22,13 +28,20 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type {
+  Chain,
   Distribution,
   Position,
   RegistryEntry,
   ReviewRecord,
 } from "@thesis/shared";
 import { config } from "../src/config.js";
-import type { EscrowEntry, Funnel, PayoutRequest, QueueItem } from "../src/store/index.js";
+import type {
+  EscrowEntry,
+  Funnel,
+  PayoutRequest,
+  PendingBuy,
+  QueueItem,
+} from "../src/store/index.js";
 import { PrismaStore } from "../src/store/prismaStore.js";
 
 /** The on-disk shape the legacy FileStore persisted (see fileStore.ts). */
@@ -36,6 +49,10 @@ interface FileData {
   registry: Record<string, RegistryEntry>;
   positions: Position[];
   buyLog: string[];
+  /** Per-chain (non-base) buy timestamps — mirrors FileStore Data.buyLogByChain. */
+  buyLogByChain?: Record<string, string[]>;
+  /** Pending-buy WAL markers — mirrors FileStore Data.pendingBuys. */
+  pendingBuys: PendingBuy[];
   escrow: Record<string, EscrowEntry>;
   payoutRequests: Record<string, PayoutRequest>;
   processed: string[];
@@ -49,6 +66,7 @@ const EMPTY: FileData = {
   registry: {},
   positions: [],
   buyLog: [],
+  pendingBuys: [],
   escrow: {},
   payoutRequests: {},
   processed: [],
@@ -109,8 +127,14 @@ async function migrate(): Promise<void> {
         `already-settled (prevents re-paying historical trades).`,
     );
   }
+  // Pending-buy WAL markers (crash-recovery). Upsert by postId — safe to re-run.
+  for (const buy of data.pendingBuys) {
+    await store.recordPendingBuy(buy);
+  }
   for (const entry of Object.values(data.escrow)) {
-    await store.addEscrow(entry.xUserId, entry.handle, entry.amountEth);
+    // Preserve the chain — a Solana escrow owes SOL; re-keying it to base would
+    // sum two native balances under one key (the invariant escrow exists to keep).
+    await store.addEscrow(entry.xUserId, entry.handle, entry.amountEth, entry.chain);
   }
   for (const req of Object.values(data.payoutRequests)) {
     await store.addPayoutRequest(req);
@@ -122,6 +146,10 @@ async function migrate(): Promise<void> {
   // Append-style collections — preserve order; run once against a fresh db.
   for (const iso of data.buyLog) {
     await store.recordBuy(iso);
+  }
+  // Non-base buy lanes (e.g. solana) keep per-chain cooldown/daily-limit history.
+  for (const [chain, isos] of Object.entries(data.buyLogByChain ?? {})) {
+    for (const iso of isos) await store.recordBuy(iso, chain as Chain);
   }
   for (const review of data.reviews) {
     await store.saveReview(review);
@@ -140,11 +168,13 @@ async function migrate(): Promise<void> {
 
   await store.disconnect();
 
+  const perChainBuys = Object.values(data.buyLogByChain ?? {}).reduce((n, a) => n + a.length, 0);
   console.log(
     `[migrate] done from ${sourcePath}: ` +
       `${Object.keys(data.registry).length} registry, ` +
       `${data.positions.length} positions, ` +
-      `${data.buyLog.length} buys, ` +
+      `${data.pendingBuys.length} pending buys, ` +
+      `${data.buyLog.length + perChainBuys} buys, ` +
       `${Object.keys(data.escrow).length} escrow, ` +
       `${Object.keys(data.payoutRequests).length} payout requests, ` +
       `${data.processed.length} processed, ` +

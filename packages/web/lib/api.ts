@@ -195,7 +195,14 @@ async function getJson<T>(endpoint: string): Promise<T> {
     throw new ThesisApiError(endpoint, null, cause);
   }
   if (!res.ok) throw new ThesisApiError(endpoint, res.status);
-  return (await res.json()) as T;
+  // Parse inside the boundary: a 200 with a malformed/empty body throws here,
+  // and must surface as a ThesisApiError so pages degrade to their empty state
+  // rather than crashing on an uncaught SyntaxError.
+  try {
+    return (await res.json()) as T;
+  } catch (cause) {
+    throw new ThesisApiError(endpoint, res.status, cause);
+  }
 }
 
 /** GET /api/status. */

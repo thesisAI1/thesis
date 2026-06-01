@@ -29,7 +29,7 @@ import type {
 } from "@thesis/shared";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FileStore } from "../src/store/fileStore.js";
-import type { PayoutRequest, QueueItem, Store } from "../src/store/index.js";
+import type { PayoutRequest, PendingBuy, QueueItem, Store } from "../src/store/index.js";
 import { PrismaStore } from "../src/store/prismaStore.js";
 
 const HERE = resolve(fileURLToPath(new URL(".", import.meta.url)));
@@ -203,6 +203,16 @@ function makeQueueItem(over: Partial<QueueItem> = {}): QueueItem {
     submission: makeSubmission(),
     priority: 1,
     enqueuedAt: "2026-01-01T00:00:00.000Z",
+    ...over,
+  };
+}
+
+function makePendingBuy(over: Partial<PendingBuy> = {}): PendingBuy {
+  return {
+    postId: "post-1",
+    contractAddress: "0xCA",
+    amountInEth: 0.05,
+    at: "2026-01-01T00:00:00.000Z",
     ...over,
   };
 }
@@ -484,5 +494,119 @@ describe.each(cases)("Store contract — $name", ({ name, make }) => {
     await store.addPayoutRequest(makePayoutRequest({ requestTweetId: "late", requestedAt: "2026-02-01T00:00:00.000Z" }));
     const all = await store.getPayoutRequests();
     expect(all.map((r) => r.requestTweetId)).toEqual(["early", "late"]);
+  });
+
+  // ---- settlement durability (PR3) ----
+  it("getUnsettledClosedPositions = closed && !settledAt (open + settled excluded)", async () => {
+    await store.savePosition(makeBarePosition({ id: "open", status: "open" }));
+    await store.savePosition(
+      makeBarePosition({ id: "unsettled", status: "closed", closedAt: "2026-02-01T00:00:00.000Z" }),
+    );
+    await store.savePosition(
+      makeBarePosition({
+        id: "settled",
+        status: "closed",
+        closedAt: "2026-02-01T00:00:00.000Z",
+        settledAt: "2026-02-01T00:05:00.000Z",
+        settlement: { authorDone: true, teamDone: true, buybackDone: true, distributionDone: true },
+      }),
+    );
+    const unsettled = await store.getUnsettledClosedPositions();
+    expect(unsettled.map((p) => p.id)).toEqual(["unsettled"]);
+  });
+
+  it("PARITY: settledAt + settlement round-trip exactly; never-set reads back undefined", async () => {
+    const settlement = {
+      authorDone: true,
+      teamDone: false,
+      buybackDone: true,
+      distributionDone: false,
+    };
+    const p = makeBarePosition({
+      id: "s",
+      status: "closed",
+      closedAt: "2026-02-01T00:00:00.000Z",
+      settledAt: "2026-02-01T00:05:00.000Z",
+      settlement,
+    });
+    await store.savePosition(p);
+    await store.savePosition(makeBarePosition({ id: "bare2" }));
+    const read = (await store.getAllPositions()).find((x) => x.id === "s")!;
+    expect(read).toEqual(p);
+    expect(read.settledAt).toBe("2026-02-01T00:05:00.000Z");
+    expect(read.settlement).toEqual(settlement);
+    // a position that was never settled reads back with BOTH fields undefined
+    const bare = (await store.getAllPositions()).find((x) => x.id === "bare2")!;
+    expect(bare.settledAt).toBeUndefined();
+    expect(bare.settlement).toBeUndefined();
+  });
+
+  // ---- pending-buy write-ahead log ----
+  it("recordPendingBuy upserts by postId; getPendingBuys lists; clearPendingBuy removes", async () => {
+    expect(await store.getPendingBuys()).toEqual([]);
+    await store.recordPendingBuy(makePendingBuy({ postId: "p1", amountInEth: 0.05 }));
+    await store.recordPendingBuy(
+      makePendingBuy({ postId: "p2", amountInEth: 0.1, at: "2026-01-02T00:00:00.000Z" }),
+    );
+    // re-record the same postId with new data -> replaces, never duplicates
+    await store.recordPendingBuy(makePendingBuy({ postId: "p1", amountInEth: 0.07 }));
+    const all = await store.getPendingBuys();
+    expect(all.length).toBe(2);
+    expect(all.find((b) => b.postId === "p1")?.amountInEth).toBeCloseTo(0.07, 12);
+
+    await store.clearPendingBuy("p1");
+    expect((await store.getPendingBuys()).map((b) => b.postId)).toEqual(["p2"]);
+  });
+
+  // ---- per-chain escrow isolation ----
+  it("escrow is per (author, chain) — base and solana never sum; clear is per chain", async () => {
+    await store.addEscrow("x-1", "@alice", 0.5, "base");
+    await store.addEscrow("x-1", "@alice", 0.3, "solana");
+    expect((await store.getEscrow("x-1", "base"))?.amountEth).toBeCloseTo(0.5, 12);
+    expect((await store.getEscrow("x-1", "solana"))?.amountEth).toBeCloseTo(0.3, 12);
+    expect((await store.getEscrow("x-1", "solana"))?.chain).toBe("solana");
+
+    await store.clearEscrow("x-1", "base");
+    expect(await store.getEscrow("x-1", "base")).toBeNull();
+    expect((await store.getEscrow("x-1", "solana"))?.amountEth).toBeCloseTo(0.3, 12);
+  });
+
+  // ---- per-chain buy lanes (independent cooldown/limit history) ----
+  it("buy lanes are independent per chain; default (no chain) is the base lane", async () => {
+    await store.recordBuy("2026-01-01T10:00:00.000Z", "base");
+    await store.recordBuy("2026-01-01T11:00:00.000Z", "base");
+    await store.recordBuy("2026-01-01T12:00:00.000Z", "solana");
+    expect(await store.countBuysSince("2026-01-01T00:00:00.000Z", "base")).toBe(2);
+    expect(await store.countBuysSince("2026-01-01T00:00:00.000Z", "solana")).toBe(1);
+    expect(await store.lastBuyAt("base")).toBe("2026-01-01T11:00:00.000Z");
+    expect(await store.lastBuyAt("solana")).toBe("2026-01-01T12:00:00.000Z");
+    // no-chain call resolves to the base lane (back-compat default)
+    expect(await store.countBuysSince("2026-01-01T00:00:00.000Z")).toBe(2);
+  });
+
+  // ---- clearPayout: atomic + per-chain scoped ----
+  it("clearPayout drops escrow + payout requests for ONE chain only (base leaves solana intact)", async () => {
+    await store.addEscrow("x-9", "@bob", 0.4, "base");
+    await store.addEscrow("x-9", "@bob", 0.2, "solana");
+    await store.addPayoutRequest(makePayoutRequest({ requestTweetId: "b1", xUserId: "x-9", chain: "base" }));
+    await store.addPayoutRequest(
+      makePayoutRequest({ requestTweetId: "s1", xUserId: "x-9", chain: "solana" }),
+    );
+
+    await store.clearPayout("x-9", "base");
+
+    expect(await store.getEscrow("x-9", "base")).toBeNull();
+    expect((await store.getEscrow("x-9", "solana"))?.amountEth).toBeCloseTo(0.2, 12);
+    expect((await store.getPayoutRequests()).map((r) => r.requestTweetId)).toEqual(["s1"]);
+  });
+
+  // ---- per-chain registry (one wallet per chain) ----
+  it("registry is per (author, chain) — base and solana wallets are independent", async () => {
+    await store.linkWallet(makeRegistry({ xUserId: "x-7", wallet: "0xBASE" }));
+    await store.linkWallet(makeRegistry({ xUserId: "x-7", wallet: "SoLwAlLeT", chain: "solana" }));
+    expect((await store.getRegistryEntry("x-7"))?.wallet).toBe("0xBASE");
+    const sol = await store.getRegistryEntry("x-7", "solana");
+    expect(sol?.wallet).toBe("SoLwAlLeT");
+    expect(sol?.chain).toBe("solana");
   });
 });
