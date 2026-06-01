@@ -1,27 +1,44 @@
 /**
- * Hero (design `.hero`): the eyebrow, the headline, the lede, the two CTAs, the
- * proof-stat row, and the glowing wireframe theta with five orbiting faculty
- * dots. Reveal + count-up + line-draw are handled by the client children;
+ * Hero (design `.hero`): the eyebrow, the headline, the lede, the "Submit a
+ * thesis" CTA, a live proof-stat row read from the dashboard, and the glowing
+ * wireframe theta video. Reveal + count-up are handled by the client children;
  * everything else is static server markup.
  */
+import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
+import type { DashboardData } from "@/lib/api";
 import { Reveal } from "./Reveal";
 import { CountUp } from "./CountUp";
 import { HeroVideo } from "./HeroVideo";
 
-export function Hero() {
+interface HeroProps {
+  /** Live dashboard payload (null on a backend error → stats read 0). */
+  data: DashboardData | null;
+}
+
+export function Hero({ data }: HeroProps) {
+  const reviews = data?.reviews;
+  const p = data?.portfolio;
+  const stats: { value: ReactNode; label: string; color?: string }[] = [
+    { value: <CountUp value={reviews?.buys ?? 0} group />, label: "Theses funded" },
+    {
+      value: (
+        <>
+          <CountUp value={data?.distributions?.toAuthors ?? 0} decimals={2} /> Ξ
+        </>
+      ),
+      label: "Paid to authors",
+      color: "text-green",
+    },
+    { value: <CountUp value={Math.round((p?.winRate ?? 0) * 100)} suffix="%" />, label: "Win rate" },
+    { value: <CountUp value={reviews?.total ?? 0} group />, label: "Reviewed" },
+  ];
   return (
     <section className="relative isolate overflow-hidden">
       {/* Video stage: a 16:9 block on mobile (the whole theta scene stays visible),
           a full-bleed background on desktop (the headline overlays it). */}
       <div className="relative aspect-[16/9] w-full md:absolute md:inset-0 md:aspect-auto md:h-full">
         <HeroVideo />
-        {/* Orbit anchor for OrbField — the point the five faculty orbs circle. */}
-        <span
-          data-orb-anchor="theta"
-          className="pointer-events-none absolute left-[67%] top-[47%] md:left-[55%] md:top-[45%]"
-          aria-hidden="true"
-        />
       </div>
 
       <div className="relative z-[2] mx-auto flex w-full max-w-shell flex-col justify-center px-7 pb-16 pt-10 md:min-h-[88vh] md:py-24">
@@ -60,52 +77,26 @@ export function Hero() {
             >
               Submit a thesis
             </Link>
-            <Link
-              href="/#pipeline"
-              className="inline-flex items-center gap-[9px] rounded-md border border-border-2 bg-panel-2 px-[22px] py-[13px] text-[14.5px] font-semibold text-text transition-colors hover:border-border-hi"
-            >
-              See the pipeline →
-            </Link>
           </div>
         </Reveal>
 
         <Reveal delay={340}>
           <div className="mt-[34px] flex flex-wrap items-stretch gap-[22px]">
-            <div className="flex flex-col gap-1">
-              <span className="font-mono text-[18px] font-semibold leading-none tabular-nums text-text">
-                <CountUp value={31} />
-              </span>
-              <span className="font-mono text-[9.5px] uppercase tracking-[1.3px] text-dim">
-                Theses funded
-              </span>
-            </div>
-            <span className="w-px bg-border" aria-hidden="true" />
-            <div className="flex flex-col gap-1">
-              <span className="font-mono text-[18px] font-semibold leading-none tabular-nums text-green">
-                <CountUp value={1.91} decimals={2} /> Ξ
-              </span>
-              <span className="font-mono text-[9.5px] uppercase tracking-[1.3px] text-dim">
-                Paid to authors
-              </span>
-            </div>
-            <span className="w-px bg-border" aria-hidden="true" />
-            <div className="flex flex-col gap-1">
-              <span className="font-mono text-[18px] font-semibold leading-none tabular-nums text-text">
-                <CountUp value={73} suffix="%" />
-              </span>
-              <span className="font-mono text-[9.5px] uppercase tracking-[1.3px] text-dim">
-                Win rate
-              </span>
-            </div>
-            <span className="w-px bg-border" aria-hidden="true" />
-            <div className="flex flex-col gap-1">
-              <span className="font-mono text-[18px] font-semibold leading-none text-accent">
-                Open
-              </span>
-              <span className="font-mono text-[9.5px] uppercase tracking-[1.3px] text-dim">
-                Source · on Base
-              </span>
-            </div>
+            {stats.map((s, i) => (
+              <Fragment key={s.label}>
+                {i > 0 ? <span className="w-px bg-border" aria-hidden="true" /> : null}
+                <div className="flex flex-col gap-1">
+                  <span
+                    className={`font-mono text-[18px] font-semibold leading-none tabular-nums ${s.color ?? "text-text"}`}
+                  >
+                    {s.value}
+                  </span>
+                  <span className="font-mono text-[9.5px] uppercase tracking-[1.3px] text-dim">
+                    {s.label}
+                  </span>
+                </div>
+              </Fragment>
+            ))}
           </div>
         </Reveal>
       </div>

@@ -3,11 +3,10 @@
  *
  * The 2D pixel-art committee sim — agents sit at their desks and review a thesis
  * in real time — that replaced both the static Pipeline and the card-based
- * Faculty Room. Wraps the shared <Office> client island (also rendered on
- * /faculty) in the homepage's section frame.
+ * Faculty Room. Wraps the <Office> client island in the homepage's section frame.
  */
 import { SectionHead } from "./SectionHead";
-import { Office } from "@/app/faculty/Office";
+import { Office } from "./Office";
 
 export function FacultyOffice() {
   return (
