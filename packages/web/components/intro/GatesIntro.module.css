@@ -8,6 +8,8 @@
 .intro {
   position: fixed; inset: 0; z-index: 1000; display: none; place-items: center;
   background: #04060b; overflow: hidden; transition: opacity .6s ease;
+  /* The overlay captures touch so a swipe can't scroll the page behind it. */
+  touch-action: none; overscroll-behavior: none;
 }
 .intro.armed { display: grid; }
 .intro.gone { display: none; }
@@ -35,10 +37,14 @@
 @keyframes gateFadeIn { to { opacity: 1; } }
 
 .skip {
-  position: absolute; top: 18px; right: 18px; z-index: 6;
-  font-family: var(--mono); font-size: 12px; letter-spacing: 1px; color: rgba(255, 255, 255, .72);
-  background: rgba(0, 0, 0, .25); border: 1px solid rgba(255, 255, 255, .25); border-radius: 8px;
-  padding: 7px 12px; cursor: pointer; backdrop-filter: blur(4px);
+  position: absolute; z-index: 6;
+  /* Clear of the notch / status bar / browser chrome on phones, so it's always
+   *  tappable (the safe-area insets are 0 on desktop). */
+  top: max(18px, calc(env(safe-area-inset-top, 0px) + 12px));
+  right: max(16px, calc(env(safe-area-inset-right, 0px) + 14px));
+  font-family: var(--mono); font-size: 13px; letter-spacing: 1px; color: rgba(255, 255, 255, .85);
+  background: rgba(0, 0, 0, .4); border: 1px solid rgba(255, 255, 255, .32); border-radius: 8px;
+  padding: 10px 16px; cursor: pointer; backdrop-filter: blur(4px);
 }
 .skip:hover { color: #fff; border-color: var(--accent); }
 

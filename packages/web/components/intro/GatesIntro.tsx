@@ -42,6 +42,20 @@ export function GatesIntro({ firstVisit }: { firstVisit: boolean }) {
 
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     let entering = false;
+    let watchdog = 0; // setInterval id — stall detector while the intro is up
+    let lastTime = 0; // last seen video currentTime
+    let lastProgressAt = 0; // ms timestamp of the last real playback progress
+
+    // Lock the page behind the full-screen overlay. Without this, a touch — most
+    // visibly when the video hasn't started — scrolls the real site underneath.
+    const lockScroll = () => {
+      document.documentElement.style.overflow = "hidden";
+      document.body.style.overflow = "hidden";
+    };
+    const unlockScroll = () => {
+      document.documentElement.style.overflow = "";
+      document.body.style.overflow = "";
+    };
 
     const setSeen = () => {
       document.cookie = `${COOKIE}=1; max-age=31536000; path=/; samesite=lax`;
@@ -55,25 +69,35 @@ export function GatesIntro({ firstVisit }: { firstVisit: boolean }) {
     function enterThroughLight() {
       if (entering) return;
       entering = true;
+      window.clearInterval(watchdog);
       flash!.classList.add(styles.bloom);
       window.setTimeout(() => {
         intro!.classList.add(styles.gone);
         try { film!.pause(); } catch { /* ignore */ }
         setSeen();
+        unlockScroll();
         flash!.classList.add(styles.clear);
         window.setTimeout(() => replay!.classList.add(styles.show), 250);
       }, 600);
     }
     function revealInstant() {
+      window.clearInterval(watchdog);
       intro!.classList.add(styles.gone);
       try { film!.pause(); } catch { /* ignore */ }
       setSeen();
+      unlockScroll();
       replay!.classList.add(styles.show);
     }
     const enter = () => (reduce ? revealInstant() : enterThroughLight());
 
     function onTime() {
       if (!film!.duration) return;
+      // Record genuine playback progress so the stall watchdog can tell a
+      // playing clip from a frozen one (and never truncates a clip that plays).
+      if (film!.currentTime > lastTime + 0.01) {
+        lastTime = film!.currentTime;
+        lastProgressAt = Date.now();
+      }
       const left = film!.duration - film!.currentTime;
       if (left < 2.3) intro!.classList.add(styles.closingIn); // closing line fades in
       if (left < 0.7) enterThroughLight(); // bloom as the frame brightens
@@ -85,6 +109,24 @@ export function GatesIntro({ firstVisit }: { firstVisit: boolean }) {
       flash!.classList.remove(styles.bloom, styles.clear);
       replay!.classList.remove(styles.show);
       tap!.hidden = true;
+      lockScroll();
+
+      // Dismissal normally rides the video's timeupdate/ended. If the clip never
+      // plays (autoplay blocked or stalled — iOS Low Power Mode, a slow or
+      // non-secure dev origin), nothing fires and the overlay would trap the
+      // page. This watchdog watches for playback PROGRESS: it offers the manual
+      // "enter" tap after 2s of no progress and force-dismisses after 7s, so it
+      // can never get stuck — while never cutting short a clip that is playing.
+      lastTime = 0;
+      lastProgressAt = Date.now();
+      window.clearInterval(watchdog);
+      watchdog = window.setInterval(() => {
+        if (entering) return;
+        if (!visible()) { window.clearInterval(watchdog); return; }
+        const idle = Date.now() - lastProgressAt;
+        if (idle > 2000 && film!.paused) tap!.hidden = false; // surface manual enter
+        if (idle > 7000) enter(); // hard guarantee the overlay releases
+      }, 1000);
 
       const s = source();
       film!.preload = "auto";
@@ -120,6 +162,8 @@ export function GatesIntro({ firstVisit }: { firstVisit: boolean }) {
     else replay.classList.add(styles.show);
 
     return () => {
+      window.clearInterval(watchdog);
+      unlockScroll(); // never leave the page scroll-locked if we unmount mid-intro
       film.removeEventListener("timeupdate", onTime);
       film.removeEventListener("ended", enterThroughLight);
       skip.removeEventListener("click", enter);
