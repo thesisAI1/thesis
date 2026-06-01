@@ -6,7 +6,8 @@
  * -> Verdict -> TradeOrder -> Position -> Distribution.
  */
 
-/** Chains we recognise. The project trades on Base; others are detected and skipped. */
+/** Chains we recognise. The project trades on Base AND Solana; the other members
+ *  are detected (so a submission can be classified) and skipped — never traded. */
 export type Chain =
   | "base"
   | "base-sepolia"

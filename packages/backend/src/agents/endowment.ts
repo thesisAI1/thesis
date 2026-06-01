@@ -212,6 +212,14 @@ export async function runEndowment(
           chain.sendEth(config.solana.buybackWallet, quarter),
         );
         teamPaidEth = teamOk ? quarter : 0;
+      } else {
+        // Live Solana win but SOLANA_BUYBACK_WALLET unset — the team slice has
+        // nowhere to go. Don't silently mark it done; warn and leave teamDone
+        // false so it retries once the operator configures the wallet.
+        teamOk = false;
+        log.warn(
+          `endowment: ${position.id} Solana team slice unpaid — SOLANA_BUYBACK_WALLET unset`,
+        );
       }
     } else if (useMock() || config.chain.teamWallet) {
       teamOk = await runLeg("pay team", () =>
@@ -229,7 +237,9 @@ export async function runEndowment(
   // or send the buyback-substitute slice in SOL to the Solana wallet (Solana —
   // no $THESIS exists there to burn).
   if (!progress.buybackDone) {
-    if (isSolana) {
+    // policy.useBurn is false exactly for Solana — there is no $THESIS to burn,
+    // so the buyback-substitute slice is sent in SOL to SOLANA_BUYBACK_WALLET.
+    if (!policy.useBurn) {
       if (useMock() || config.solana.buybackWallet) {
         const ok = await runLeg("solana buyback → wallet (SOL)", () =>
           chain.sendEth(config.solana.buybackWallet, buybackBudget),
@@ -245,8 +255,11 @@ export async function runEndowment(
           });
         }
       } else {
-        progress.buybackDone = true;
-        await saveProgress();
+        // Live Solana win, SOLANA_BUYBACK_WALLET unset — leave buybackDone false
+        // so the slice is paid once the wallet is configured (don't silently drop).
+        log.warn(
+          `endowment: ${position.id} Solana buyback slice unpaid — SOLANA_BUYBACK_WALLET unset`,
+        );
       }
     } else if (useMock() || config.chain.thesisToken) {
       const ok = await runLeg("buyback & burn $THESIS", () =>

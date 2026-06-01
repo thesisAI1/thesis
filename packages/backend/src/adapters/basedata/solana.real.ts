@@ -1,4 +1,5 @@
 import type { Holder } from "@thesis/shared";
+import { log } from "../../util/log.js";
 import type { BaseDataAdapter, TokenOnChain } from "./index.js";
 import { detectSolanaLaunchpad } from "./solana-launchpad.js";
 
@@ -118,22 +119,38 @@ export class RealSolanaData implements BaseDataAdapter {
     isHoneypot: boolean;
     topHolders: Holder[];
   }> {
+    // NOTE: on a fetch FAILURE we fall back to empty security data, which the
+    // Auditor's top-10-concentration gate reads as 0% — i.e. a GoPlus outage
+    // weakens (does not strengthen) that gate. We log.warn loudly so the outage
+    // is never silent; the launchpad (pump.fun), age, and mcap gates still apply.
+    // A future hardening can thread an explicit "security unknown" signal into
+    // TokenOnChain so the concentration gate fails closed.
     try {
       const res = await fetch(`${GOPLUS_SOL}?contract_addresses=${mint}`);
-      if (!res.ok) return { isHoneypot: false, topHolders: [] };
+      if (!res.ok) {
+        log.warn(`basedata(solana): GoPlus ${res.status} for ${mint} — security data unavailable this check`);
+        return { isHoneypot: false, topHolders: [] };
+      }
       const json = (await res.json()) as { result?: Record<string, GoPlusSolToken> };
       const token = json.result?.[mint];
-      if (!token) return { isHoneypot: false, topHolders: [] };
+      if (!token) {
+        // Common for a just-launched mint GoPlus hasn't indexed yet — info, not warn.
+        log.info(`basedata(solana): GoPlus has no security record for ${mint} yet`);
+        return { isHoneypot: false, topHolders: [] };
+      }
       const topHolders: Holder[] = (token.holders ?? []).slice(0, 20).map((h) => ({
         address: h.account ?? h.address ?? "",
         share: Number(h.percent ?? 0),
         label: h.is_locked === 1 ? "lock" : undefined,
       }));
-      // A pump.fun mint should have its mint authority revoked; a live mint
-      // authority is the closest Solana analogue to a honeypot risk here.
+      // Honeypot proxy: `non_transferable` means the SPL token cannot be
+      // transferred at all — i.e. holders can't sell — which is the Solana
+      // analogue of an EVM honeypot. (This is NOT the mint-authority field;
+      // a live mint authority is a separate dilution risk, not modelled here.)
       const isHoneypot = token.non_transferable === "1";
       return { isHoneypot, topHolders };
-    } catch {
+    } catch (err) {
+      log.warn(`basedata(solana): security fetch failed for ${mint} — ${String(err)}`);
       return { isHoneypot: false, topHolders: [] };
     }
   }

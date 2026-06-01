@@ -11,6 +11,7 @@ import { getMint } from "@solana/spl-token";
 import bs58 from "bs58";
 import { config } from "../../config.js";
 import { log } from "../../util/log.js";
+import { toBaseUnits } from "../../util/units.js";
 import type { ChainAdapter, SwapResult } from "./index.js";
 import {
   parseJupiterQuote,
@@ -34,9 +35,10 @@ import {
  * lazily so merely selecting this adapter (e.g. for a stray Solana submission on
  * a Base-only deployment) never throws — only an actual trade/read does.
  */
-const WSOL = "So11111111111111111111111111111111111111112";
-
 export class RealSolanaChain implements ChainAdapter {
+  /** Wrapped-SOL mint (Jupiter's quote asset), from config. */
+  private readonly wsol = config.solana.wsolMint;
+
   private readonly connection = new Connection(config.solana.rpcUrl, "confirmed");
   private _kp: Keypair | null = null;
   private readonly decimalsCache = new Map<string, number>();
@@ -82,14 +84,14 @@ export class RealSolanaChain implements ChainAdapter {
   async getTokenPriceEth(mint: string): Promise<number> {
     const dec = await this.decimals(mint);
     const oneToken = BigInt(10) ** BigInt(dec);
-    const quote = await this.getQuote(mint, WSOL, oneToken.toString());
+    const quote = await this.getQuote(mint, this.wsol, oneToken.toString());
     return Number(quote.outAmount) / LAMPORTS_PER_SOL;
   }
 
   async buy(mint: string, amountInEth: number): Promise<SwapResult> {
     this.ensureArmed();
     const lamportsIn = BigInt(Math.round(amountInEth * LAMPORTS_PER_SOL));
-    const quote = await this.getQuote(WSOL, mint, lamportsIn.toString());
+    const quote = await this.getQuote(this.wsol, mint, lamportsIn.toString());
     const dec = await this.decimals(mint);
     const txHash = await this.executeSwap(quote);
     const amountOut = Number(quote.outAmount) / 10 ** dec;
@@ -105,9 +107,9 @@ export class RealSolanaChain implements ChainAdapter {
   ): Promise<SwapResult> {
     this.ensureArmed();
     const dec = await this.decimals(mint);
-    const baseUnits = BigInt(Math.round(amountTokens * 10 ** dec));
+    const baseUnits = toBaseUnits(amountTokens, dec);
     if (baseUnits <= 0n) throw new Error(`solana: cannot sell — 0 base units of ${mint}`);
-    const quote = await this.getQuote(mint, WSOL, baseUnits.toString());
+    const quote = await this.getQuote(mint, this.wsol, baseUnits.toString());
     const txHash = await this.executeSwap(quote);
     const proceedsEth = Number(quote.outAmount) / LAMPORTS_PER_SOL;
     const priceEth = amountTokens > 0 ? proceedsEth / amountTokens : 0;
@@ -117,9 +119,9 @@ export class RealSolanaChain implements ChainAdapter {
 
   async quoteSell(mint: string, amountTokens: number): Promise<{ proceedsEth: number }> {
     const dec = await this.decimals(mint);
-    const baseUnits = BigInt(Math.round(amountTokens * 10 ** dec));
+    const baseUnits = toBaseUnits(amountTokens, dec);
     if (baseUnits <= 0n) return { proceedsEth: 0 };
-    const quote = await this.getQuote(mint, WSOL, baseUnits.toString());
+    const quote = await this.getQuote(mint, this.wsol, baseUnits.toString());
     return { proceedsEth: Number(quote.outAmount) / LAMPORTS_PER_SOL };
   }
 
@@ -133,13 +135,32 @@ export class RealSolanaChain implements ChainAdapter {
         lamports: Math.round(amountEth * LAMPORTS_PER_SOL),
       }),
     );
-    const { blockhash } = await this.connection.getLatestBlockhash("confirmed");
+    const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash("confirmed");
     tx.recentBlockhash = blockhash;
     tx.feePayer = kp.publicKey;
     tx.sign(kp);
     const sig = await this.connection.sendRawTransaction(tx.serialize());
-    await this.connection.confirmTransaction(sig, "confirmed");
+    await this.confirmOrThrow(sig, blockhash, lastValidBlockHeight);
     return sig;
+  }
+
+  /** Wait for a tx to land AND check it did not revert. confirmTransaction
+   *  RESOLVES (does not throw) for a tx that was included but failed on-chain
+   *  (slippage, insufficient lamports, program revert) — so we MUST inspect
+   *  `value.err`. Without this a reverted SOL payout would clear the author's
+   *  escrow and a reverted swap would book a position/PnL that never happened. */
+  private async confirmOrThrow(
+    sig: string,
+    blockhash: string,
+    lastValidBlockHeight: number,
+  ): Promise<void> {
+    const conf = await this.connection.confirmTransaction(
+      { signature: sig, blockhash, lastValidBlockHeight },
+      "confirmed",
+    );
+    if (conf.value.err) {
+      throw new Error(`solana tx ${sig} failed on-chain: ${JSON.stringify(conf.value.err)}`);
+    }
   }
 
   /** No $THESIS on Solana to burn — the Endowment routes the Solana buyback
@@ -180,10 +201,14 @@ export class RealSolanaChain implements ChainAdapter {
     const txBuf = Buffer.from(built.swapTransaction, "base64");
     const tx = VersionedTransaction.deserialize(txBuf);
     tx.sign([this.keypair()]);
+    const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash("confirmed");
     const sig = await this.connection.sendRawTransaction(tx.serialize(), {
       maxRetries: 3,
     });
-    await this.connection.confirmTransaction(sig, "confirmed");
+    // Inspect value.err — a reverted swap (slippage, route failure) resolves
+    // confirmTransaction without throwing; treating it as success would book a
+    // fill that never happened.
+    await this.confirmOrThrow(sig, blockhash, lastValidBlockHeight);
     return sig;
   }
 }

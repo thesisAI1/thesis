@@ -31,6 +31,10 @@ import { log } from "../util/log.js";
 import { nativeGlyph } from "../util/chains.js";
 import { exitReplyText, payoutRequestText, payoutSentText } from "../util/replies.js";
 
+/** Consecutive per-chain price-fetch failures, for SL-starvation escalation
+ *  (warn → error after a few in a row). Reset to 0 on a successful fetch. */
+const priceFetchFailStreak = new Map<Chain, number>();
+
 /** Check every open position once; act on take-profit tiers and the stop-loss.
  *  Serialized via withLock so two ticks (or a tick racing an author/admin
  *  close) can't both run the same position to close and settle it twice. */
@@ -83,8 +87,18 @@ async function monitorTickInner(): Promise<void> {
           Array.from(new Set(addresses)),
         );
         for (const [addr, price] of chainPrices) prices.set(addr, price);
+        priceFetchFailStreak.set(chain, 0); // recovered
       } catch (err) {
-        log.warn(`monitor: ${chain} batch price fetch failed — skipping its positions this tick: ${String(err)}`);
+        // A single failed tick is recoverable (next tick retries). But a chain
+        // whose price feed is wedged gets ZERO stop-loss evaluation every tick —
+        // a silent money risk. Escalate from warn → error after a few consecutive
+        // failures so an operator watching ERROR sees the SL-starvation window.
+        const streak = (priceFetchFailStreak.get(chain) ?? 0) + 1;
+        priceFetchFailStreak.set(chain, streak);
+        const ids = open.filter((p) => p.order.chain === chain).map((p) => p.id).join(", ");
+        const msg = `monitor: ${chain} batch price fetch failed (${streak} consecutive) — no TP/SL for [${ids}] this tick: ${String(err)}`;
+        if (streak >= 3) log.error(msg);
+        else log.warn(msg);
       }
     }),
   );

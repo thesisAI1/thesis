@@ -110,3 +110,47 @@ test("Solana payout: an EVM 0x reply to a Solana request is NOT paid (wrong shap
     __setChainForTest(null);
   }
 });
+
+test("Base payout: a base58 reply to a Base request is NOT paid (wrong shape)", async () => {
+  const rec = new RecordingChain();
+  __setChainForTest(rec);
+  try {
+    const store = getStore();
+    await store.addEscrow("base-author-1", "@base_author", 0.5); // base escrow (default chain)
+    await store.addPayoutRequest({
+      requestTweetId: "base-tweet-1",
+      xUserId: "base-author-1",
+      handle: "@base_author",
+      threadPostId: "base-tweet-1-thread",
+      requestedAt: new Date().toISOString(),
+      // no chain ⇒ base
+    });
+    const solWallet = Keypair.generate().publicKey.toBase58();
+    await processWalletReplies([reply("base-author-1", "base-tweet-1", `gm ${solWallet}`)]);
+    assert.equal(rec.sends.length, 0, "a base58 address must not satisfy a Base payout");
+    assert.ok(((await store.getEscrow("base-author-1")))?.amountEth ?? 0 > 0, "base escrow intact");
+  } finally {
+    __setChainForTest(null);
+  }
+});
+
+test("escrow buckets are isolated per chain — paying Solana leaves the Base escrow", async () => {
+  const rec = new RecordingChain();
+  __setChainForTest(rec);
+  try {
+    const store = getStore();
+    // Same author wins on BOTH chains.
+    await store.addEscrow("dual-author", "@dual", 0.4); // base
+    await seedSolanaRequest("dual-author", "dual-sol-tweet", 3); // solana
+    const solWallet = Keypair.generate().publicKey.toBase58();
+
+    await processWalletReplies([reply("dual-author", "dual-sol-tweet", `gm ${solWallet}`)]);
+
+    // Solana paid + cleared; Base escrow untouched.
+    assert.ok(rec.sends.some((s) => s.to === solWallet && s.amountEth === 3), "solana paid");
+    assert.equal((await store.getEscrow("dual-author", "solana"))?.amountEth ?? 0, 0, "solana escrow cleared");
+    assert.equal((await store.getEscrow("dual-author"))?.amountEth, 0.4, "base escrow preserved");
+  } finally {
+    __setChainForTest(null);
+  }
+});

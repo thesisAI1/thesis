@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import type { AuthorReport, Submission, TokenReport, Verdict } from "@thesis/shared";
 import { config } from "../src/config.js";
 import { runBursar } from "../src/agents/bursar.js";
+import { getStore } from "../src/store/index.js";
 
 function verdict(chain: "base" | "solana", contractAddress: string): Verdict {
   const submission: Submission = {
@@ -86,5 +87,34 @@ test("a Base buy does NOT trigger the Solana cooldown (independent lanes)", asyn
     assert.match(sol2.skippedReason ?? "", /cooldown/i);
   } finally {
     config.trading.buyCooldownMinutes = prev;
+  }
+});
+
+test("the daily buy limit is per-chain (a Base limit does not freeze Solana)", async () => {
+  const prevCd = config.trading.buyCooldownMinutes;
+  const prevMax = config.trading.maxBuysPerDay;
+  config.trading.buyCooldownMinutes = 0; // isolate the daily-limit gate from the cooldown gate
+  // The file-store buy log is shared across tests in this process; size the cap
+  // off the CURRENT per-chain counts so the assertions don't depend on how many
+  // buys earlier tests recorded.
+  const store = getStore();
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const baseUsed = await store.countBuysSince(since, "base");
+  config.trading.maxBuysPerDay = baseUsed + 1; // room for exactly one more Base buy
+  try {
+    const b1 = await runBursar(verdict("base", "0x1111111111111111111111111111111111111111"));
+    assert.ok(b1.position, `first base buy should open; skipped: ${b1.skippedReason}`);
+
+    // Solana has its OWN per-chain counter → not frozen by the Base lane being full.
+    const s1 = await runBursar(verdict("solana", "Sol1MintForDailyLimitTestxxxxxxxxxxxxxxpump"));
+    assert.ok(s1.position, `solana buy must not be frozen by the base daily limit; skipped: ${s1.skippedReason}`);
+
+    // Base lane is now at its cap → a further Base buy is blocked.
+    const b2 = await runBursar(verdict("base", "0x2222222222222222222222222222222222222222"));
+    assert.equal(b2.position, null, "second base buy must hit the per-chain daily limit");
+    assert.match(b2.skippedReason ?? "", /daily/i);
+  } finally {
+    config.trading.buyCooldownMinutes = prevCd;
+    config.trading.maxBuysPerDay = prevMax;
   }
 });

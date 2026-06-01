@@ -355,6 +355,7 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
     handle?: string;
     amountEth?: number;
     postId?: string;
+    chain?: string;
   };
   try {
     body = JSON.parse(await readBody(req)) as typeof body;
@@ -364,16 +365,26 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
   const xUserId = body.xUserId?.trim();
   const wallet = body.wallet?.trim();
   const postId = body.postId?.trim();
+  // Per-chain — a stuck Solana payout needs the SOL escrow + Solana send, not Base.
+  const chain: Chain = body.chain === "solana" ? "solana" : "base";
+  const sym = nativeSymbol(chain);
   if (!xUserId) return sendJson(res, 400, { ok: false, error: "xUserId is required" });
-  if (!wallet || !/^0x[a-fA-F0-9]{40}$/.test(wallet)) {
-    return sendJson(res, 400, { ok: false, error: "wallet must be a 0x address" });
+  const walletOk =
+    chain === "solana"
+      ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet ?? "")
+      : /^0x[a-fA-F0-9]{40}$/.test(wallet ?? "");
+  if (!wallet || !walletOk) {
+    return sendJson(res, 400, {
+      ok: false,
+      error: chain === "solana" ? "wallet must be a base58 Solana address" : "wallet must be a 0x address",
+    });
   }
 
   const store = getStore();
   // Prefer the escrow record (real, tracked, comes from a real settlement).
   // Fall back to the `amountEth` body override for cases where the author leg
   // failed BEFORE escrow was created (e.g. a payAuthorDirect tx revert).
-  const escrow = await store.getEscrow(xUserId);
+  const escrow = await store.getEscrow(xUserId, chain);
   let amountEth: number;
   let handle: string;
   if (escrow && escrow.amountEth > 0) {
@@ -384,7 +395,7 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
     if (!Number.isFinite(overrideAmount) || overrideAmount <= 0 || overrideAmount > 1) {
       return sendJson(res, 400, {
         ok: false,
-        error: "no escrow found — supply a positive `amountEth` (≤ 1 ETH safety cap) and `handle`",
+        error: `no escrow found — supply a positive \`amountEth\` (≤ 1 ${sym} safety cap) and \`handle\``,
       });
     }
     if (!body.handle) {
@@ -395,27 +406,29 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
   }
 
   log.info(
-    `admin: settle-stuck-payout — paying ${handle} ${amountEth.toFixed(6)} ETH to ${wallet}`,
+    `admin: settle-stuck-payout — paying ${handle} ${amountEth.toFixed(6)} ${sym} to ${wallet} (${chain})`,
   );
 
   let txHash: string;
   try {
-    txHash = await createChainAdapter().sendEth(wallet, amountEth);
+    txHash = await createChainAdapter(chain).sendEth(wallet, amountEth);
   } catch (err) {
     log.error(`admin: settle-stuck-payout sendEth failed — ${String(err)}`);
     return sendJson(res, 500, { ok: false, error: "internal error" });
   }
 
-  // Persist the wallet and clear all owed state so future settlements pay direct.
+  // Persist the wallet (per chain) and clear owed state so future settlements
+  // pay direct. Per-chain clears so a Base settle never wipes Solana state.
   await store.linkWallet({
     xUserId,
     handle,
     wallet,
+    chain,
     linkedAt: new Date().toISOString(),
   });
-  await store.clearEscrow(xUserId);
-  await store.clearPayoutRequestsForUser(xUserId);
-  log.info(`admin: settle-stuck-payout — cleared escrow + open requests for ${handle}`);
+  await store.clearEscrow(xUserId, chain);
+  await store.clearPayoutRequestsForUser(xUserId, chain);
+  log.info(`admin: settle-stuck-payout — cleared ${chain} escrow + open requests for ${handle}`);
 
   // Confirm in the thesis thread if a postId was provided.
   let replyId: string | undefined;
@@ -423,7 +436,7 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
     try {
       replyId = await createXAdapter().replyToPost(
         postId,
-        payoutSentText({ handle, amountEth, wallet, txHash }),
+        payoutSentText({ handle, amountEth, wallet, txHash, chain }),
       );
       log.info(`admin: posted payout confirmation on ${postId} (reply ${replyId})`);
     } catch (err) {
@@ -436,7 +449,7 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
     handle,
     amountEth,
     txHash,
-    basescanUrl: `https://basescan.org/tx/${txHash}`,
+    explorerUrl: explorerTxUrl(chain, txHash),
     replyId: replyId ?? null,
   });
 }
@@ -870,19 +883,23 @@ async function adminRepostCloseAnnouncement(
   }
 
   if (isEscrowed) {
-    // Wipe any prior payout requests for this user (the original failed close
-    // tweet OR the fallback to thesis post id) before registering the new one.
-    await store.clearPayoutRequestsForUser(pos.authorXId);
+    // Wipe any prior payout requests for this user ON THIS CHAIN (the original
+    // failed close tweet OR the fallback to thesis post id) before registering
+    // the new one. Per-chain so reposting a Base close never wipes a pending
+    // Solana request (and the rebound request carries the right chain so the
+    // payout poller validates the correct wallet shape + escrow bucket).
+    await store.clearPayoutRequestsForUser(pos.authorXId, chain);
     await store.addPayoutRequest({
       requestTweetId: replyId,
       xUserId: pos.authorXId,
       handle: pos.authorHandle,
       threadPostId: pos.postId,
       requestedAt: new Date().toISOString(),
+      chain,
     });
     log.info(
       `admin: repost-close — payout request rebound for ${pos.authorHandle} ` +
-        `(${escrow?.amountEth.toFixed(4)} ETH escrow) → tweet ${replyId}`,
+        `(${escrow?.amountEth.toFixed(4)} ${sym} escrow) → tweet ${replyId}`,
     );
   }
 

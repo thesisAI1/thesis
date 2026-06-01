@@ -23,7 +23,11 @@ export function detectSolanaLaunchpad(
   mint: string,
   dexIds: string[] = [],
 ): string | null {
-  if (mint.toLowerCase().endsWith("pump")) return "pumpfun";
+  // Case-SENSITIVE: base58 is case-sensitive and pump.fun's vanity miner emits
+  // the literal lowercase suffix "pump". A mint ending in "PUMP"/"Pump" is
+  // provably NOT a pump.fun mint, so it must not clear the trusted gate.
+  if (mint.endsWith("pump")) return "pumpfun";
+  // DexScreener dexIds are canonical lowercase, so lowercasing is safe here.
   if (dexIds.some((d) => d.toLowerCase().includes("pump"))) return "pumpfun";
   return null;
 }

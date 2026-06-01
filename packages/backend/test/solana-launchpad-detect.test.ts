@@ -29,3 +29,11 @@ test("a raydium-native token (no pump signal) is NOT a trusted launchpad", () =>
 test("no signal at all → null", () => {
   assert.equal(detectSolanaLaunchpad("PlainMint1111111111111111111111111111111111"), null);
 });
+
+test("the suffix is case-sensitive — a non-lowercase 'PUMP' is NOT pump.fun", () => {
+  // base58 is case-sensitive; pump.fun's vanity miner emits lowercase "pump".
+  // A mint ending in "PUMP"/"Pump" is provably not a pump.fun mint and must NOT
+  // clear the trusted-launchpad gate.
+  assert.equal(detectSolanaLaunchpad("SomeMintEndingInUppercaseSuffixxxxxxxxxPUMP"), null);
+  assert.equal(detectSolanaLaunchpad("SomeMintEndingInMixedCaseSuffixxxxxxxxxPuMp"), null);
+});
