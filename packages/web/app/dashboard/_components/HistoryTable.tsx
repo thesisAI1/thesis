@@ -6,15 +6,18 @@
  * the win/loss chips the data supports plus the free-text search.
  */
 import { useEffect, useMemo, useState } from "react";
-import type { ClosedPositionView } from "@/lib/api";
-import { nativeSymbol } from "@/lib/chain";
-import { fmtEthSigned, fmtPct, timeAgo, tokenLabel } from "./format";
+import type { AuthorStatsMap, ClosedPositionView } from "@/lib/api";
+import { fmtEthSigned, fmtMc, fmtPct, timeAgo } from "./format";
+import { AuthorStatsBadge } from "./AuthorStatsBadge";
+import { TokenCell } from "./TokenCell";
 import { SearchIcon } from "./icons";
 import { Pager, usePagination } from "./Pager";
 import styles from "./dashboard.module.css";
 
 export interface HistoryTableProps {
   positions: ClosedPositionView[];
+  /** Per-author win/total stats, keyed by lowercased handle. */
+  authorStats: AuthorStatsMap;
   /** Server-stamped clock for timeAgo, so SSR and client hydration agree. */
   now: number;
 }
@@ -30,7 +33,7 @@ const RESULTS: Array<{ key: Result; label: string }> = [
 /** Rows per page. Tunable — matches the Open table for a consistent ledger. */
 const PAGE_SIZE = 10;
 
-export function HistoryTable({ positions, now }: HistoryTableProps) {
+export function HistoryTable({ positions, authorStats, now }: HistoryTableProps) {
   const [search, setSearch] = useState("");
   const [result, setResult] = useState<Result>("all");
 
@@ -89,8 +92,8 @@ export function HistoryTable({ positions, now }: HistoryTableProps) {
                 <th>Token</th>
                 <th>Author</th>
                 <th className={styles.tRight}>Size</th>
-                <th className={styles.tRight}>Entry</th>
-                <th className={styles.tRight}>Exit</th>
+                <th className={styles.tRight}>Entry MC</th>
+                <th className={styles.tRight}>Exit MC</th>
                 <th className={styles.tRight}>Realised</th>
                 <th className={styles.tRight}>Closed</th>
               </tr>
@@ -102,19 +105,22 @@ export function HistoryTable({ positions, now }: HistoryTableProps) {
                   return (
                     <tr key={p.id}>
                       <td>
-                        <span className={styles.tok}>
-                          {tokenLabel(p.tokenSymbol, p.contractAddress)}
-                        </span>
+                        <TokenCell
+                          symbol={p.tokenSymbol}
+                          contractAddress={p.contractAddress}
+                          logoUrl={p.tokenLogoUrl}
+                        />
                       </td>
                       <td>
                         <span className={styles.author}>{p.authorHandle}</span>
+                        <AuthorStatsBadge stat={authorStats[(p.authorHandle || "").toLowerCase()]} />
                       </td>
                       <td className={styles.tRight}>{p.amountInEth.toFixed(4)}</td>
                       <td className={`${styles.tRight} ${styles.dimCell}`}>
-                        {p.entryPriceEth.toExponential(2)} {nativeSymbol(p.chain)}
+                        {fmtMc(p.entryMarketCapUsd ?? null)}
                       </td>
-                      <td className={styles.tRight}>
-                        {p.exitPriceEth.toExponential(2)} {nativeSymbol(p.chain)}
+                      <td className={`${styles.tRight} ${styles.dimCell}`}>
+                        {fmtMc(p.exitMarketCapUsd ?? null)}
                       </td>
                       <td className={`${styles.tRight} ${up ? styles.pos : styles.neg}`}>
                         {fmtEthSigned(p.realisedPnlEth)} ({fmtPct(p.realisedPct)})

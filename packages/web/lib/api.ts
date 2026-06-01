@@ -42,6 +42,8 @@ export interface OpenPositionView {
   chain: Chain;
   /** Token ticker — empty when DexScreener doesn't know it yet. */
   tokenSymbol: string;
+  /** Token logo (DexScreener), or null when none is on file. */
+  tokenLogoUrl: string | null;
   authorHandle: string;
   authorAvatarUrl: string | null;
   grade: string | null;
@@ -71,11 +73,18 @@ export interface ClosedPositionView {
   /** Chain the trade settled on — decides the native-unit symbol (ETH Base / SOL Solana). */
   chain: Chain;
   tokenSymbol: string;
+  /** Token logo (DexScreener), or null when none is on file. */
+  tokenLogoUrl: string | null;
   authorHandle: string;
   postUrl: string | null;
   amountInEth: number;
   entryPriceEth: number;
   exitPriceEth: number;
+  /** Market cap (USD) at entry / exit. Exit MC is derived from entry MC × the
+   *  price ratio (constant supply). Null for positions opened before entry MC
+   *  was persisted — render a dash. These drive the table's Entry/Exit columns. */
+  entryMarketCapUsd: number | null;
+  exitMarketCapUsd: number | null;
   realisedPnlEth: number;
   realisedPct: number;
   tiersHit: number;
@@ -130,6 +139,50 @@ export interface FunnelSummary {
   queued: number;
 }
 
+/** One ticker-tape event — mirrors ActivityItem in
+ *  packages/backend/src/activity.ts. An in-memory ring (last 50, newest first);
+ *  the marquee renders the pre-formatted `summary`. */
+export interface ActivityItem {
+  /** ISO timestamp. */
+  at: string;
+  kind: "buy" | "tp" | "sl" | "manual" | "aging" | "lottery" | "burn" | "skip";
+  /** Pre-formatted human-readable line, e.g. "@author hit TP1 (+100%)". */
+  summary: string;
+  authorHandle?: string;
+  tokenSymbol?: string;
+  positionId?: string;
+  amountEth?: number;
+}
+
+/** Cumulative running totals + a rolling 7-day win rate — the counters block.
+ *  Each `*TotalEth` is "ever distributed to this leg since launch". */
+export interface CountersSummary {
+  authorsTotalEth: number;
+  lotteryTotalEth: number;
+  buybackTotalEth: number;
+  portfolioTotalEth: number;
+  /** 0-1, rolling 7-day. */
+  winRate7d: number;
+  winRate7dCount: number;
+}
+
+/** Last-24h win highlight strip. */
+export interface RecentWinsSummary {
+  count24h: number;
+  profitEth24h: number;
+  closedCount24h: number;
+}
+
+/** Per-author wins/total/winRate, keyed by LOWERCASED handle, so a position or
+ *  trade row can show inline author stats without an extra lookup. */
+export interface AuthorStat {
+  wins: number;
+  total: number;
+  /** 0-1. */
+  winRate: number;
+}
+export type AuthorStatsMap = Record<string, AuthorStat>;
+
 /** GET /api/dashboard — buildDashboardPayload(). */
 export interface DashboardData {
   mode: string;
@@ -140,6 +193,14 @@ export interface DashboardData {
   openPositions: OpenPositionView[];
   closedPositions: ClosedPositionView[];
   recentReviews: ReviewRecord[];
+  /** Cumulative running totals + rolling 7-day win rate. */
+  counters: CountersSummary;
+  /** Last-24h win highlight. */
+  recentWins: RecentWinsSummary;
+  /** Per-author stats, keyed by lowercased handle. */
+  authorStats: AuthorStatsMap;
+  /** Last 50 ticker events (newest first). */
+  recentActivity: ActivityItem[];
 }
 
 // --- /api/leaderboard ------------------------------------------------------

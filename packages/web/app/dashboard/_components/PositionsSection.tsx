@@ -10,6 +10,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 import type {
+  AuthorStatsMap,
   ClosedPositionView,
   DashboardData,
   OpenPositionView,
@@ -21,6 +22,8 @@ import styles from "./dashboard.module.css";
 export interface PositionsSectionProps {
   initialOpen: OpenPositionView[];
   initialClosed: ClosedPositionView[];
+  /** Per-author win/total stats (lowercased-handle keyed), refreshed on poll. */
+  initialAuthorStats: AuthorStatsMap;
   /** Server-stamped clock for relative times, so SSR and client hydration agree. */
   now: number;
   /** Bumped on every successful live refetch (drives the Updated ticker). */
@@ -33,12 +36,14 @@ type Tab = "open" | "hist";
 export function PositionsSection({
   initialOpen,
   initialClosed,
+  initialAuthorStats,
   now,
   onRefresh,
 }: PositionsSectionProps) {
   const [tab, setTab] = useState<Tab>("open");
   const [open, setOpen] = useState<OpenPositionView[]>(initialOpen);
   const [closed, setClosed] = useState<ClosedPositionView[]>(initialClosed);
+  const [authorStats, setAuthorStats] = useState<AuthorStatsMap>(initialAuthorStats);
   const onRefreshRef = useRef(onRefresh);
   onRefreshRef.current = onRefresh;
 
@@ -58,6 +63,7 @@ export function PositionsSection({
         if (cancelled) return;
         setOpen(data.openPositions);
         setClosed(data.closedPositions);
+        setAuthorStats(data.authorStats ?? {});
         onRefreshRef.current?.();
       } catch (err) {
         // Transient network/backend blip — keep the last good snapshot, but
@@ -95,9 +101,9 @@ export function PositionsSection({
       </div>
 
       {tab === "open" ? (
-        <OpenPositionsTable positions={open} />
+        <OpenPositionsTable positions={open} authorStats={authorStats} now={now} />
       ) : (
-        <HistoryTable positions={closed} now={now} />
+        <HistoryTable positions={closed} authorStats={authorStats} now={now} />
       )}
     </>
   );

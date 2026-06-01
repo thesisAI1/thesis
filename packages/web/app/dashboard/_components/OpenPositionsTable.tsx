@@ -7,19 +7,19 @@
  * a random walk. The flash class is re-armed each change via a render nonce.
  */
 import { useEffect, useRef, useState } from "react";
-import type { OpenPositionView } from "@/lib/api";
-import {
-  fmtEthSigned,
-  fmtMc,
-  fmtPct,
-  gradeClass,
-  tokenLabel,
-} from "./format";
+import type { AuthorStat, AuthorStatsMap, OpenPositionView } from "@/lib/api";
+import { fmtEthSigned, fmtMc, fmtPct, gradeClass, timeAgo } from "./format";
+import { AuthorStatsBadge } from "./AuthorStatsBadge";
+import { TokenCell } from "./TokenCell";
 import { Pager, usePagination } from "./Pager";
 import styles from "./dashboard.module.css";
 
 export interface OpenPositionsTableProps {
   positions: OpenPositionView[];
+  /** Per-author win/total stats, keyed by lowercased handle. */
+  authorStats: AuthorStatsMap;
+  /** Server-stamped clock for the Age cell, so SSR and client hydration agree. */
+  now: number;
 }
 
 /** Rows per page. Tunable — 10 keeps the ledger scannable without scrolling. */
@@ -80,7 +80,15 @@ function TierBar({ pos }: { pos: OpenPositionView }) {
 
 /** One row, owning its own flash state so a change to one position doesn't
  *  re-flash the whole table. */
-function OpenRow({ pos }: { pos: OpenPositionView }) {
+function OpenRow({
+  pos,
+  stat,
+  now,
+}: {
+  pos: OpenPositionView;
+  stat: AuthorStat | undefined;
+  now: number;
+}) {
   const prevPct = useRef(pos.unrealizedPct);
   const [flash, setFlash] = useState<FlashDir>(null);
   const [nonce, setNonce] = useState(0);
@@ -99,10 +107,15 @@ function OpenRow({ pos }: { pos: OpenPositionView }) {
   return (
     <tr>
       <td>
-        <span className={styles.tok}>{tokenLabel(pos.tokenSymbol, pos.contractAddress)}</span>
+        <TokenCell
+          symbol={pos.tokenSymbol}
+          contractAddress={pos.contractAddress}
+          logoUrl={pos.tokenLogoUrl}
+        />
       </td>
       <td>
         <span className={styles.author}>{pos.authorHandle}</span>
+        <AuthorStatsBadge stat={stat} />
       </td>
       <td>
         <span className={`${styles.gcell} ${styles[gradeClass(pos.grade)]}`}>
@@ -114,6 +127,7 @@ function OpenRow({ pos }: { pos: OpenPositionView }) {
       </td>
       <td className={styles.tRight}>{pos.amountInEth.toFixed(4)}</td>
       <td className={styles.tRight}>{fmtMc(pos.marketCapNowUsd)}</td>
+      <td className={`${styles.tRight} ${styles.dimCell}`}>{timeAgo(pos.openedAt, now)}</td>
       <td
         key={nonce}
         className={`${styles.tRight} ${up ? styles.pos : styles.neg} ${flashCls}`}
@@ -124,7 +138,7 @@ function OpenRow({ pos }: { pos: OpenPositionView }) {
   );
 }
 
-export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
+export function OpenPositionsTable({ positions, authorStats, now }: OpenPositionsTableProps) {
   const pg = usePagination(positions, PAGE_SIZE);
 
   return (
@@ -139,15 +153,23 @@ export function OpenPositionsTable({ positions }: OpenPositionsTableProps) {
               <th>Stage</th>
               <th className={styles.tRight}>Size</th>
               <th className={styles.tRight}>Market cap</th>
+              <th className={styles.tRight}>Age</th>
               <th className={styles.tRight}>Unrealised</th>
             </tr>
           </thead>
           <tbody>
             {positions.length ? (
-              pg.pageItems.map((pos) => <OpenRow key={pos.id} pos={pos} />)
+              pg.pageItems.map((pos) => (
+                <OpenRow
+                  key={pos.id}
+                  pos={pos}
+                  stat={authorStats[(pos.authorHandle || "").toLowerCase()]}
+                  now={now}
+                />
+              ))
             ) : (
               <tr className={styles.emptyRow}>
-                <td colSpan={7}>No open positions.</td>
+                <td colSpan={8}>No open positions.</td>
               </tr>
             )}
           </tbody>

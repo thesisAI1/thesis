@@ -12,6 +12,7 @@
  */
 import { Fragment, useCallback, useState, type ReactNode } from "react";
 import type {
+  AuthorStatsMap,
   ClosedPositionView,
   OpenPositionView,
   PortfolioSummary,
@@ -22,11 +23,19 @@ import { UpdatedTicker } from "./UpdatedTicker";
 import { truncate } from "./format";
 import styles from "./dashboard.module.css";
 
+/** The trading wallet is the Base (EVM) account, so its on-chain record lives on
+ *  BaseScan. Mirrors the legacy "Trading wallet on BaseScan ↗" link. */
+function baseScanAddress(address: string): string {
+  return `https://basescan.org/address/${encodeURIComponent(address)}`;
+}
+
 export interface LiveDashboardProps {
   mode: string;
   portfolio: PortfolioSummary;
   initialOpen: OpenPositionView[];
   initialClosed: ClosedPositionView[];
+  /** Per-author win/total stats, keyed by lowercased handle. */
+  authorStats: AuthorStatsMap;
   /** Server-stamped clock for relative times, so SSR and client hydration agree. */
   now: number;
   /** §01 overview bento (server-rendered). */
@@ -62,6 +71,7 @@ export function LiveDashboard({
   portfolio,
   initialOpen,
   initialClosed,
+  authorStats,
   now,
   overview,
   decisions,
@@ -79,7 +89,15 @@ export function LiveDashboard({
         </Pill>
         <Pill>
           Wallet&nbsp;&nbsp;
-          <b style={{ color: "var(--blue)" }}>{truncate(portfolio.walletAddress)}</b>
+          <a
+            className={styles.walletLink}
+            href={baseScanAddress(portfolio.walletAddress)}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Trading wallet on BaseScan"
+          >
+            {truncate(portfolio.walletAddress)} ↗
+          </a>
         </Pill>
         <Pill className={styles.statusRight}>
           <UpdatedTicker resetKey={refreshKey} />
@@ -96,6 +114,7 @@ export function LiveDashboard({
         <PositionsSection
           initialOpen={initialOpen}
           initialClosed={initialClosed}
+          initialAuthorStats={authorStats}
           now={now}
           onRefresh={onRefresh}
         />
