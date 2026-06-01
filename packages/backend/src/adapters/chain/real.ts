@@ -128,13 +128,85 @@ export class RealChain implements ChainAdapter {
     this.ensureArmed();
     const price = await this.getTokenPriceEth(address);
     const amountIn = parseEther(amountInEth.toFixed(18));
+
+    // Read the wallet's token balance BEFORE the swap so we can measure
+    // the actual delivered delta. KyberSwap's `built.amountOut` is the
+    // router's optimistic forecast — many Bankr/Doppler tokens deliver
+    // FEWER tokens than the quote due to anti-MEV / anti-snipe / first-
+    // block trim hooks. Trusting the router quote means recording an
+    // entryPriceEth that's half (or worse) of reality, which silently
+    // turns the first take-profit tier into a near-full liquidation
+    // because the tier sizing back-converts cost-basis to tokens using
+    // that wrong price.
+    //
+    // Incident this fixes — 2026-06-01 @GamerGuyz5 pos-2061177421601427598:
+    //   - Router quoted 46.3M tokens for 0.020 ETH; wallet actually received 23.9M
+    //   - Agent recorded entryPriceEth half of reality
+    //   - TP1 fired, asked for "50% of position" = 23.15M tokens
+    //   - Wallet only had 23.9M; clamp sold 23.15M = 97% of position
+    //   - Position state still said remainingFraction 0.5 (50%)
+    //   - Tweet to author said "Holding the rest" — false
+    const tokenAddress = address as Address;
+    const balanceBefore = (await this.publicClient.readContract({
+      address: tokenAddress,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [this.account.address],
+    })) as bigint;
+
     // Native ETH input — no approval needed, the router is paid via tx.value.
     const route = await this.fetchKyberRoute(ETH_SENTINEL, address, amountIn);
     const built = await this.buildKyberTx(route);
     const txHash = await this.sendSwap(built, /* hasEthInput */ true);
-    const amountOut = Number(formatEther(BigInt(built.amountOut)));
+
+    // Read balance AFTER with the same retry-loop pattern as buybackAndBurn —
+    // Alchemy's read endpoint serves balanceOf from a pool of replicas, and
+    // a fresh swap can be visible on one replica while the next read hits
+    // a sibling that's a block behind. Retry up to 5 times with 2s spacing
+    // until we see balance growth.
+    let balanceAfter = balanceBefore;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      balanceAfter = (await this.publicClient.readContract({
+        address: tokenAddress,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [this.account.address],
+      })) as bigint;
+      if (balanceAfter > balanceBefore) break;
+      if (attempt < 4) await new Promise((r) => setTimeout(r, 2_000));
+    }
+
+    const actualDelta = balanceAfter > balanceBefore ? balanceAfter - balanceBefore : 0n;
+    const routerAmountOut = Number(formatEther(BigInt(built.amountOut)));
+    const actualReceived = Number(formatEther(actualDelta));
+
+    // Defensive fallback: if balance genuinely didn't grow after 5 retries
+    // (rebase-failed buy, extreme tax that took everything), fall back to
+    // the router quote so the caller still gets a non-zero amountOut and
+    // downstream divide-by-zero is avoided. Better to log + degrade than
+    // hard-fail the buy after the on-chain swap already happened.
+    if (actualReceived === 0) {
+      log.warn(
+        `chain: buy delta read returned 0 for ${address} — falling back to router quote ${routerAmountOut.toFixed(2)}`,
+      );
+      log.info(`chain: buy via KyberSwap — ${describeRoute(route)} — tx ${txHash}`);
+      return { txHash, amountOut: routerAmountOut, priceEth: price };
+    }
+
+    // Surface significant delivery shortfalls so we know which tokens
+    // have aggressive transfer mechanics. < 95% delivery = real signal,
+    // not just slippage / dust.
+    const deliveryRatio = actualReceived / routerAmountOut;
+    if (deliveryRatio < 0.95) {
+      log.warn(
+        `chain: buy delivery shortfall for ${address} — router quoted ${routerAmountOut.toFixed(2)} tokens, ` +
+          `wallet received ${actualReceived.toFixed(2)} (${(deliveryRatio * 100).toFixed(1)}% delivery rate). ` +
+          `Likely transfer-tax / anti-MEV / Doppler dynamic-pricing mechanics.`,
+      );
+    }
+
     log.info(`chain: buy via KyberSwap — ${describeRoute(route)} — tx ${txHash}`);
-    return { txHash, amountOut, priceEth: price };
+    return { txHash, amountOut: actualReceived, priceEth: price };
   }
 
   async sell(
