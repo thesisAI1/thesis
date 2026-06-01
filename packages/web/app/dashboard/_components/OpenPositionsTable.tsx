@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AuthorStat, AuthorStatsMap, OpenPositionView } from "@/lib/api";
 import { fmtEthSigned, fmtMc, fmtPct, gradeClass, timeAgo } from "./format";
 import { AuthorStatsBadge } from "./AuthorStatsBadge";
+import { AuthorCell } from "./AuthorCell";
 import { TokenCell } from "./TokenCell";
 import { Pager, usePagination } from "./Pager";
 import styles from "./dashboard.module.css";
@@ -111,10 +112,15 @@ function OpenRow({
           symbol={pos.tokenSymbol}
           contractAddress={pos.contractAddress}
           logoUrl={pos.tokenLogoUrl}
+          chain={pos.chain}
         />
       </td>
       <td>
-        <span className={styles.author}>{pos.authorHandle}</span>
+        <AuthorCell
+          handle={pos.authorHandle}
+          avatarUrl={pos.authorAvatarUrl}
+          postUrl={pos.postUrl}
+        />
         <AuthorStatsBadge stat={stat} />
       </td>
       <td>
@@ -126,6 +132,7 @@ function OpenRow({
         <TierBar pos={pos} />
       </td>
       <td className={styles.tRight}>{pos.amountInEth.toFixed(4)}</td>
+      <td className={`${styles.tRight} ${styles.dimCell}`}>{fmtMc(pos.marketCapAtEntryUsd)}</td>
       <td className={styles.tRight}>{fmtMc(pos.marketCapNowUsd)}</td>
       <td className={`${styles.tRight} ${styles.dimCell}`}>{timeAgo(pos.openedAt, now)}</td>
       <td
@@ -152,7 +159,8 @@ export function OpenPositionsTable({ positions, authorStats, now }: OpenPosition
               <th>Grade</th>
               <th>Stage</th>
               <th className={styles.tRight}>Size</th>
-              <th className={styles.tRight}>Market cap</th>
+              <th className={styles.tRight}>Entry MC</th>
+              <th className={styles.tRight}>Live MC</th>
               <th className={styles.tRight}>Age</th>
               <th className={styles.tRight}>Unrealised</th>
             </tr>
@@ -169,7 +177,7 @@ export function OpenPositionsTable({ positions, authorStats, now }: OpenPosition
               ))
             ) : (
               <tr className={styles.emptyRow}>
-                <td colSpan={8}>No open positions.</td>
+                <td colSpan={9}>No open positions.</td>
               </tr>
             )}
           </tbody>

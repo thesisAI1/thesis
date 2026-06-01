@@ -3,6 +3,7 @@
  * and the interactive client components, so a figure renders identically on the
  * SSR pass and after a live refetch.
  */
+import type { Chain } from "@thesis/shared";
 /** A signed ETH amount to 4dp, e.g. `+0.1640` / `-0.0190`. Null/unpriced → em
  *  dash, since the backend sends null for values it can't compute yet. */
 export function fmtEthSigned(n: number | null | undefined): string {
@@ -42,6 +43,16 @@ export function fmtRate(rate: number): string {
 export function tokenLabel(symbol: string, contractAddress: string): string {
   if (symbol) return `$${symbol}`;
   return truncate(contractAddress);
+}
+
+/** DexScreener chart URL for a token, chain-aware. Our `Chain` values line up
+ *  with DexScreener's path slugs; testnet/unknown fall back to `base` (the
+ *  primary chain). The legacy site hardcoded `/base/`, which sent Solana tokens
+ *  to the wrong chart — this keeps the link correct per chain. */
+export function dexscreenerUrl(chain: Chain, address: string): string {
+  const slug =
+    chain === "solana" ? "solana" : chain === "ethereum" ? "ethereum" : chain === "bsc" ? "bsc" : "base";
+  return `https://dexscreener.com/${slug}/${encodeURIComponent(address)}`;
 }
 
 /** Middle-truncate an address, e.g. `0x44fC…7A01`. */
