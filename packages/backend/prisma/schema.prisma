@@ -1,0 +1,179 @@
+// THESIS — SQLite persistence schema.
+//
+// This mirrors the in-memory `Data` blob the file-backed store keeps (see
+// src/store/fileStore.ts). It is a behaviour-identical drop-in: the PrismaStore
+// reproduces every FileStore method exactly, so the only thing that matters here
+// is that each column can hold what the JSON store held.
+//
+// Two deliberate type choices keep parity with the JSON round-trip:
+//   - ISO timestamps are stored as String (NOT DateTime). FileStore compares
+//     them lexicographically (e.g. countBuysSince, pruneQueue, lastBuyAt) and
+//     never parses them — so we keep the exact string and the same compare.
+//   - Monetary / numeric fields are Float (SQLite REAL), matching the plain JS
+//     numbers FileStore holds in memory.
+//
+// Nested domain objects (Position.order, QueueItem.submission) are stored as
+// Json; the mapper reconstructs the exact @thesis/shared shape on read.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// Author X-id -> payout wallet link. An author can register one wallet PER
+/// chain (a 0x… on Base, a base58 on Solana), so the primary key is
+/// (xUserId, chain). `chain` defaults to "base" — pre-Solana rows are base.
+model RegistryEntry {
+  xUserId  String
+  handle   String
+  wallet   String
+  chain    String @default("base")
+  linkedAt String
+
+  @@id([xUserId, chain])
+}
+
+/// A trading position, upserted by id. `order` (TradeOrder incl. takeProfits[])
+/// is stored as Json and reconstructed on read.
+model Position {
+  id                   String  @id
+  postId               String
+  authorXId            String
+  authorHandle         String
+  authorAvatarUrl      String?
+  postUrl              String?
+  order                Json
+  status               String
+  entryPriceEth        Float
+  marketCapAtEntryUsd  Float?
+  entryTxHash          String
+  remainingFraction    Float
+  tiersHit             Int
+  realisedPnlEth       Float
+  lastExitPriceEth     Float?
+  lastExitTxHash       String?
+  openedAt             String
+  closedAt             String?
+  /// Settlement durability (PR3). Set when the 25/25/25/25 split has FULLY
+  /// completed. A `closed` position with no `settledAt` is retried by the
+  /// monitor each tick: getUnsettledClosedPositions = closed && settledAt null.
+  settledAt            String?
+  /// Per-leg settlement progress (SettlementProgress), stored as Json so a
+  /// crash-interrupted settlement resumes idempotently. Null until first write.
+  settlement           Json?
+
+  @@index([status])
+}
+
+/// A write-ahead marker for a buy executed (or about to execute) on-chain
+/// BEFORE its Position is persisted — crash recovery against silent loss.
+/// Keyed by postId (one open buy per post); upserted on a re-attempt.
+model PendingBuy {
+  postId          String  @id
+  contractAddress String
+  amountInEth     Float
+  at              String
+  /// Chain the buy is on. Null for pre-Solana markers (treated as base).
+  chain           String?
+}
+
+/// Append-only buy log (for the rate limit). Insertion order recoverable via id.
+/// @@index([isoAt]) makes countBuysSince / lastBuyAt fast — both columns are on
+/// the hot path and the table grows without bound (one row per buy).
+model BuyLog {
+  id    Int    @id @default(autoincrement())
+  isoAt String
+  /// Trading lane. Base and Solana have independent cooldowns + daily limits,
+  /// so counts / last-buy are scoped per chain ("base" default).
+  chain String @default("base")
+
+  @@index([chain, isoAt])
+}
+
+/// An unregistered author's accumulated profit share, per (author, chain) so
+/// ETH and SOL escrow never sum into one figure. `chain` defaults to "base".
+model Escrow {
+  xUserId   String
+  handle    String
+  amountEth Float
+  chain     String @default("base")
+  updatedAt String
+
+  @@id([xUserId, chain])
+}
+
+/// A posted "reply with your wallet" request, keyed by its tweet id.
+model PayoutRequest {
+  requestTweetId String  @id
+  xUserId        String
+  handle         String
+  threadPostId   String
+  requestedAt    String
+  /// Chain the payout is on. Null for pre-Solana requests (treated as base).
+  chain          String?
+
+  @@index([xUserId])
+}
+
+/// Submission dedup log. postId is unique; the Int id drives the 5000-row cap
+/// (keep the last 5000 inserted) and membership ordering.
+model ProcessedPost {
+  id     Int    @id @default(autoincrement())
+  postId String @unique
+}
+
+/// A persisted Faculty review summary. FileStore PUSHES these — duplicate
+/// postIds are allowed, so postId is a plain (non-unique) field. Oldest-first
+/// ordering is recovered via the autoincrement id.
+model Review {
+  id              Int     @id @default(autoincrement())
+  reviewedAt      String
+  postId          String
+  postUrl         String
+  authorXId       String
+  authorHandle    String
+  contractAddress String
+  chain           String
+  authorScore     Float
+  tokenScore      Float
+  grade           String
+  decision        String
+  confidence      Float
+  rationale       String
+  positionId      String?
+  skippedReason   String?
+}
+
+/// A profit distribution (the 25/25/25/25 split). FileStore PUSHES these —
+/// positionId is non-unique; oldest-first ordering via the autoincrement id.
+model Distribution {
+  id              Int     @id @default(autoincrement())
+  positionId      String
+  totalProfitEth  Float
+  toAuthorEth     Float
+  toPortfolioEth  Float
+  toTeamEth       Float
+  toBuybackEth    Float
+  authorWallet    String?
+}
+
+/// The review queue. `submission` (Submission) is stored as Json. The
+/// autoincrement id gives a stable insertion order for the dequeueHighest
+/// "highest priority, first-enqueued on ties" tiebreak.
+model QueueItem {
+  id         Int    @id @default(autoincrement())
+  submission Json
+  priority   Float
+  enqueuedAt String
+}
+
+/// Cumulative triage funnel counters — a single fixed row.
+model Funnel {
+  id     Int @id @default(1)
+  seen   Int @default(0)
+  passed Int @default(0)
+}

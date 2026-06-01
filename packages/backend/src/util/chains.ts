@@ -1,5 +1,9 @@
 import type { Chain } from "@thesis/shared";
 
+// nativeSymbol (ETH/SOL word form) is the ONE shared definition (web uses it
+// too) — re-exported so backend callers keep importing it from util/chains.
+export { nativeSymbol } from "@thesis/shared";
+
 /**
  * Chain helpers — native unit + block-explorer URLs.
  *
@@ -10,6 +14,26 @@ import type { Chain } from "@thesis/shared";
  * BaseScan (the project trades Base mainnet).
  */
 
+/** Every recognised chain — the runtime mirror of the `Chain` union, used by
+ *  `asChain` to validate a persisted string. Keep in sync with @thesis/shared. */
+const CHAINS: readonly Chain[] = [
+  "base",
+  "base-sepolia",
+  "ethereum",
+  "bsc",
+  "solana",
+  "unknown",
+];
+
+/** Narrow a persisted/string value to a `Chain`, throwing on an unrecognised
+ *  one. Used at the DB read seam (escrow/registry/payout/pending-buy `chain`
+ *  columns) so a corrupt value fails LOUD rather than silently minting a bad
+ *  Chain that could mis-route money. */
+export function asChain(value: string): Chain {
+  if ((CHAINS as readonly string[]).includes(value)) return value as Chain;
+  throw new Error(`invalid chain value: ${JSON.stringify(value)}`);
+}
+
 /** True for EVM chains (viem / KyberSwap path); false for Solana. */
 export function isEvm(chain: Chain): boolean {
   return (
@@ -18,11 +42,6 @@ export function isEvm(chain: Chain): boolean {
     chain === "ethereum" ||
     chain === "bsc"
   );
-}
-
-/** Native gas-token ticker, word form ("ETH" / "SOL"). */
-export function nativeSymbol(chain: Chain): string {
-  return chain === "solana" ? "SOL" : "ETH";
 }
 
 /** Native gas-token glyph, for compact UI/ticker strings ("Ξ" / "◎"). */

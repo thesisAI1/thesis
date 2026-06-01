@@ -14,6 +14,7 @@ import type {
 } from "@thesis/shared";
 import { config } from "../config.js";
 import { FileStore } from "./fileStore.js";
+import { PrismaStore } from "./prismaStore.js";
 
 /** A profit share owed to an author who has not linked a wallet yet.
  *  Escrow is per (author, chain) — a Solana win owes SOL, a Base win owes ETH,
@@ -63,6 +64,10 @@ export interface PendingBuy {
   contractAddress: string;
   amountInEth: number;
   at: string;
+  /** Chain the buy is on — lets the startup orphan-reconcile route a recovered
+   *  non-Base buy to the right adapter. Optional (absent ⇒ base) for back-compat
+   *  with pre-Solana markers on disk. */
+  chain?: Chain;
 }
 
 /** A submission waiting in the review queue, with its triage priority. */
@@ -167,8 +172,15 @@ export interface Store {
 
 let singleton: Store | null = null;
 
-/** The process-wide store. File-backed locally; swap for Postgres in production. */
+/** The process-wide store. The legacy JSON file store by default (the path the
+ *  whole suite + production run against); set THESIS_STORE=sqlite to opt into
+ *  the Prisma/SQLite store. Both implement the same interface. */
 export function getStore(): Store {
-  if (!singleton) singleton = new FileStore(config.service.dataDir);
+  if (!singleton) {
+    singleton =
+      config.service.store === "sqlite"
+        ? new PrismaStore(config.service.dataDir)
+        : new FileStore(config.service.dataDir);
+  }
   return singleton;
 }

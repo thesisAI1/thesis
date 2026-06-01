@@ -16,6 +16,14 @@ export type Chain =
   | "solana"
   | "unknown";
 
+/** Native gas-token ticker for a chain: "SOL" on Solana, "ETH" on Base / every
+ *  EVM chain. Lives here so the backend (X output, profit cards) and the web
+ *  dashboard share ONE definition that can't drift. Accepts `undefined` (a row
+ *  may lack `chain`) and falls back to ETH — anything not exactly "solana". */
+export function nativeSymbol(chain: Chain | undefined): string {
+  return chain === "solana" ? "SOL" : "ETH";
+}
+
 /** A parsed submission: an X post that tagged the agent with a thesis + contract. */
 export interface Submission {
   /** X post (tweet) id. */

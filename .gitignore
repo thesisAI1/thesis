@@ -7,8 +7,15 @@ build/
 coverage/
 *.tsbuildinfo
 
-# Runtime data — the file-backed store the service writes into
+# Runtime data — the store the service writes into (JSON file or SQLite db)
 data/
+# SQLite sidecar files (journal / write-ahead log)
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Prisma — generated client (when output is set outside node_modules)
+prisma/generated/
 
 # Secrets — NEVER commit the real .env, only the .env.example template
 .env

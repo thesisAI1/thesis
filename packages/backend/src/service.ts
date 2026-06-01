@@ -17,6 +17,7 @@ import { reviewSubmission, type ReviewResult } from "./pipeline/index.js";
 import { recordActivity } from "./activity.js";
 import { getStore } from "./store/index.js";
 import { triageMentions } from "./triage/index.js";
+import { nativeSymbol } from "./util/chains.js";
 import { log } from "./util/log.js";
 import {
   buyReplyText,
@@ -241,7 +242,7 @@ async function reconcilePendingBuys(): Promise<void> {
     const orphans = await getStore().getPendingBuys();
     for (const b of orphans) {
       log.error(
-        `bursar: ORPHANED BUY — ${b.amountInEth} ETH for ${b.contractAddress} (post ${b.postId}, ` +
+        `bursar: ORPHANED BUY — ${b.amountInEth} ${nativeSymbol(b.chain ?? "base")} for ${b.contractAddress} (post ${b.postId}, ` +
           `recorded ${b.at}) has NO saved position. The buy MAY have executed on-chain and the bot ` +
           `is NOT monitoring those tokens. Check the wallet balance for that token, then recover via ` +
           `/admin/rebuy-position or open a position manually.`,

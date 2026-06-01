@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================================
+   Base — the void. Tokens are imported before this file in app/layout.tsx.
+   ============================================================================ */
+html,
+body {
+  background: var(--void);
+  color: var(--text);
+}
+body {
+  font-family: var(--sans);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* ============================================================================
+   The fixed background field: a faint 48px grid, radially masked so it fades
+   in from the top-centre and disappears toward the edges, with two soft radial
+   glows (amber top-right, blue upper-left) over near-black. Grid + glow only —
+   no photography, no busy gradients.
+   ============================================================================ */
+.bg-field {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--void);
+}
+.bg-field::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+  -webkit-mask-image: radial-gradient(circle at 50% 0%, #000 0%, transparent 70%);
+  mask-image: radial-gradient(circle at 50% 0%, #000 0%, transparent 70%);
+}
+.bg-field::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--bg-glow);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

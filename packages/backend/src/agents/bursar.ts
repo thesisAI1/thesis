@@ -118,6 +118,7 @@ export async function runBursar(verdict: Verdict): Promise<BursarResult> {
     contractAddress: order.contractAddress,
     amountInEth,
     at: new Date().toISOString(),
+    chain: tradeChain,
   });
   let fill: Awaited<ReturnType<typeof chain.buy>>;
   try {
