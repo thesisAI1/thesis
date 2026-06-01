@@ -790,6 +790,43 @@
   color: var(--muted);
   text-transform: uppercase;
 }
+/* launchpad source badge — small uppercase mono pill after the token label.
+   Per-source accent via [data-lp]; falls back to a muted chip for any unknown. */
+.lpBadge {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--border-2);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.lpBadge[data-lp="virtuals"] {
+  color: #4fd1c5;
+  border-color: color-mix(in srgb, #4fd1c5 40%, transparent);
+  background: color-mix(in srgb, #4fd1c5 12%, transparent);
+}
+.lpBadge[data-lp="clanker"] {
+  color: var(--blue);
+  border-color: color-mix(in srgb, var(--blue) 40%, transparent);
+  background: color-mix(in srgb, var(--blue) 12%, transparent);
+}
+.lpBadge[data-lp="bankr"] {
+  color: #b58bf0;
+  border-color: color-mix(in srgb, #b58bf0 40%, transparent);
+  background: color-mix(in srgb, #b58bf0 12%, transparent);
+}
+.lpBadge[data-lp="pumpfun"] {
+  color: #6dd58c;
+  border-color: color-mix(in srgb, #6dd58c 40%, transparent);
+  background: color-mix(in srgb, #6dd58c 12%, transparent);
+}
 .author {
   color: var(--muted);
   font-family: var(--mono);

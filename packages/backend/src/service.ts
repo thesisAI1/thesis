@@ -130,6 +130,7 @@ async function processSubmission(submission: Submission): Promise<void> {
       chain: submission.chain,
       authorScore: v.authorReport.score,
       tokenScore: v.tokenReport.score,
+      launchpad: v.tokenReport.launchpad,
       grade: v.grade,
       decision: v.decision,
       confidence: v.confidence,

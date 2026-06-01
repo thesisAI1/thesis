@@ -975,6 +975,9 @@ interface OpenPositionView {
   /** Token logo URL from DexScreener's info.imageUrl (populated when the
    *  creator paid for the socials/profile upgrade). null when unavailable. */
   tokenLogoUrl: string | null;
+  /** Launchpad source — "clanker" | "bankr" | "virtuals" | "pumpfun" — for the
+   *  per-token source badge. null when unknown (e.g. pre-launchpad-field rows). */
+  launchpad: string | null;
   authorHandle: string;
   /** X profile image URL of the author (display only). */
   authorAvatarUrl: string | null;
@@ -1070,6 +1073,21 @@ async function buildDashboardPayload(): Promise<object> {
       .filter((r) => r.positionId && r.postUrl)
       .map((r) => [r.positionId as string, r.postUrl] as const),
   );
+  // Launchpad source per position (for the dashboard's source badge). Primary
+  // key is the position id from its review; the by-address map is a fallback for
+  // positions whose review predates the launchpad field (backfilled to null) or
+  // isn't linked by positionId.
+  const launchpadByPosition = new Map(
+    reviews
+      .filter((r) => r.positionId && r.launchpad)
+      .map((r) => [r.positionId as string, r.launchpad as string] as const),
+  );
+  const launchpadByAddress = new Map<string, string>();
+  for (const r of reviews) {
+    if (r.launchpad) launchpadByAddress.set(r.contractAddress.toLowerCase(), r.launchpad);
+  }
+  const launchpadFor = (positionId: string, address: string): string | null =>
+    launchpadByPosition.get(positionId) ?? launchpadByAddress.get(address.toLowerCase()) ?? null;
 
   // Pre-warm the ticker cache for every position address (parallel; cached).
   // Same for DexScreener logos — paid socials-upgrade tokens carry an
@@ -1154,6 +1172,7 @@ async function buildDashboardPayload(): Promise<object> {
       chain: p.order.chain,
       tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
       tokenLogoUrl: logoCache.get(p.order.contractAddress.toLowerCase()) ?? null,
+      launchpad: launchpadFor(p.id, p.order.contractAddress),
       authorHandle: p.authorHandle,
       authorAvatarUrl: p.authorAvatarUrl ?? null,
       grade: gradeByPosition.get(p.id) ?? null,
@@ -1209,6 +1228,7 @@ async function buildDashboardPayload(): Promise<object> {
         chain: p.order.chain,
         tokenSymbol: symbolCache.get(p.order.contractAddress.toLowerCase()) ?? "",
         tokenLogoUrl: logoCache.get(p.order.contractAddress.toLowerCase()) ?? null,
+        launchpad: launchpadFor(p.id, p.order.contractAddress),
         authorHandle: p.authorHandle,
         authorAvatarUrl: p.authorAvatarUrl ?? null,
         postUrl: postUrlByPosition.get(p.id) ?? null,

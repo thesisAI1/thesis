@@ -44,6 +44,9 @@ export interface OpenPositionView {
   tokenSymbol: string;
   /** Token logo (DexScreener), or null when none is on file. */
   tokenLogoUrl: string | null;
+  /** Launchpad source — "clanker" | "bankr" | "virtuals" | "pumpfun" — shown as
+   *  a small source badge next to the token. null when unknown. */
+  launchpad: string | null;
   authorHandle: string;
   authorAvatarUrl: string | null;
   grade: string | null;
@@ -75,6 +78,9 @@ export interface ClosedPositionView {
   tokenSymbol: string;
   /** Token logo (DexScreener), or null when none is on file. */
   tokenLogoUrl: string | null;
+  /** Launchpad source — "clanker" | "bankr" | "virtuals" | "pumpfun" — shown as
+   *  a small source badge next to the token. null when unknown. */
+  launchpad: string | null;
   authorHandle: string;
   /** Author X avatar — already on the wire from the backend; null when none. */
   authorAvatarUrl: string | null;

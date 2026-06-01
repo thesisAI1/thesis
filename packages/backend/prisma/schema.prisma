@@ -145,6 +145,7 @@ model Review {
   chain           String
   authorScore     Float
   tokenScore      Float
+  launchpad       String?
   grade           String
   decision        String
   confidence      Float

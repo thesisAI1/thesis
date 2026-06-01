@@ -269,6 +269,10 @@ export interface ReviewRecord {
   authorScore: number;
   /** The Auditor's token score, 0-100. */
   tokenScore: number;
+  /** The launchpad the Auditor attributed the token to ("clanker" | "bankr" |
+   *  "virtuals" on Base, "pumpfun" on Solana), or null if none/untrusted.
+   *  Surfaced as a per-token source badge in the dashboard. */
+  launchpad: string | null;
   grade: Grade;
   decision: Decision;
   confidence: number;
