@@ -17,6 +17,7 @@
  */
 
 import { formatEther } from "viem";
+import { log } from "../../util/log.js";
 
 /** Clamped wallet ETH delta, in wei. A swap can never legitimately reduce the
  *  wallet's ETH below zero proceeds, so a non-positive delta (gas exceeded the
@@ -57,9 +58,35 @@ export interface SwapProceeds {
 export async function measureEthProceeds(
   readEthWei: () => Promise<bigint>,
   swap: () => Promise<string>,
+  opts?: { maxReadAttempts?: number; readDelayMs?: number },
 ): Promise<SwapProceeds> {
+  const maxReadAttempts = Math.max(1, opts?.maxReadAttempts ?? 5);
+  const readDelayMs = Math.max(0, opts?.readDelayMs ?? 2_000);
   const before = await readEthWei();
   const txHash = await swap();
-  const after = await readEthWei();
+  // The post-swap read is subject to Alchemy read-replica lag: the swap is
+  // confirmed on one replica while this read can hit a sibling a block behind
+  // that hasn't yet credited the ETH, making after ≈ before → a false 0. Retry
+  // until the credit is visible (after > before), mirroring RealChain.buy's
+  // balance-after loop. A genuine net-zero sell (gas ≥ output) exhausts the
+  // retries and correctly reports 0.
+  let after = before;
+  for (let attempt = 0; attempt < maxReadAttempts; attempt++) {
+    after = await readEthWei();
+    if (after > before) break;
+    if (attempt < maxReadAttempts - 1) await new Promise((r) => setTimeout(r, readDelayMs));
+  }
+  // Exhausted every read without seeing the wallet grow: either a genuine
+  // net-zero sell (gas ≥ output) or a replica that stayed a block behind the
+  // whole budget. The loop CANNOT tell these apart, so surface it — mirroring
+  // buy()'s zero-delta warn — instead of silently reporting 0 to the reply tweet
+  // and realisedPnlEth. A stuck-replica false 0 is then visible/alertable (grep
+  // the txHash on-chain) rather than invisible in monitoring.
+  if (after <= before) {
+    log.warn(
+      `chain: sell proceeds read saw no ETH credit after ${maxReadAttempts} attempt(s) for tx ${txHash} — ` +
+        `reporting 0 (genuine net-zero sell OR persistent replica lag; indistinguishable here)`,
+    );
+  }
   return { txHash, amountOut: Number(formatEther(netReceivedEthWei(before, after))) };
 }
