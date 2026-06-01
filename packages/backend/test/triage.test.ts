@@ -23,10 +23,27 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { config } from "../src/config.js";
 import { triageMentions } from "../src/triage/index.js";
+import { triageRejectReplyText } from "../src/util/replies.js";
 import type { XPost } from "../src/adapters/x/index.js";
 
 const A = "0x1111111111111111111111111111111111110001";
 const GOOD_THESIS = "strong real fundamentals and a growing engaged community here";
+/** Valid base58 Solana mints (guessChain → "solana"). Distinct so the suite's
+ *  process-wide contract dedup can't cross-contaminate the two Solana tests. */
+const SOL_CA_1 = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
+const SOL_CA_2 = "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB";
+
+/** Run with the Solana trading wallet forced to a value, then restored. */
+async function withSolanaWallet(key: string, fn: () => Promise<void>): Promise<void> {
+  const s = config.solana as { tradingWalletKey: string };
+  const prev = s.tradingWalletKey;
+  s.tradingWalletKey = key;
+  try {
+    await fn();
+  } finally {
+    s.tradingWalletKey = prev;
+  }
+}
 
 /** Pin triage thresholds for deterministic assertions; restore afterwards so
  *  the mutation doesn't leak into other suite files (same process). */
@@ -139,6 +156,37 @@ test("triage: the same author twice in a batch → second is rejected (author_co
     assert.equal(res.rejected.length, 1);
     assert.equal(res.rejected[0]?.reason.kind, "author_cooldown");
   });
+});
+
+test("triage: a Solana CA is rejected (solana_not_live) while Solana trading is off", async () => {
+  await withTriage(async () => {
+    await withSolanaWallet("", async () => {
+      const res = await triageMentions([
+        mention({ postId: "tr-sol-off", authorXId: "u-sol-off", text: `${SOL_CA_1} ${GOOD_THESIS}` }),
+      ]);
+      assert.equal(res.eligible.length, 0, "a Solana CA must not reach the committee while Solana is off");
+      assert.equal(res.rejected.length, 1);
+      assert.equal(res.rejected[0]?.reason.kind, "solana_not_live");
+    });
+  });
+});
+
+test("triage: a Solana CA flows to review once a Solana wallet is configured", async () => {
+  await withTriage(async () => {
+    await withSolanaWallet("dummy-solana-key", async () => {
+      const res = await triageMentions([
+        mention({ postId: "tr-sol-on", authorXId: "u-sol-on", text: `${SOL_CA_2} ${GOOD_THESIS}` }),
+      ]);
+      assert.equal(res.eligible.length, 1, "with a wallet configured, a Solana CA is eligible");
+      assert.equal(res.eligible[0]?.submission.chain, "solana");
+    });
+  });
+});
+
+test("triage: the solana_not_live rejection produces a 'coming soon' reply", () => {
+  const text = triageRejectReplyText({ kind: "solana_not_live" });
+  assert.match(text, /Solana/i);
+  assert.match(text, /not yet|soon|activat/i);
 });
 
 test("triage: an already-processed post is skipped", async () => {

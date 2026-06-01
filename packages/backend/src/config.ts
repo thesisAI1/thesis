@@ -229,6 +229,15 @@ export function useMock(): boolean {
   return config.mode !== "live";
 }
 
+/** True when Solana trading is configured — i.e. a Solana trading wallet key is
+ *  present. The launch posture (Option A) ships WITHOUT one, so this is false and
+ *  a Solana CA is declined at triage with a "coming soon" reply rather than
+ *  reviewed/traded. Base is unaffected. Setting SOLANA_TRADING_WALLET_KEY later
+ *  flips Solana on with no code change. */
+export function solanaTradingEnabled(): boolean {
+  return config.solana.tradingWalletKey.trim().length > 0;
+}
+
 /** Thrown by {@link validateConfig} when the loaded config is unusable. */
 export class ConfigError extends Error {
   constructor(message: string) {
