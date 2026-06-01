@@ -64,6 +64,10 @@ export interface PendingBuy {
   contractAddress: string;
   amountInEth: number;
   at: string;
+  /** Chain the buy is on — lets the startup orphan-reconcile route a recovered
+   *  non-Base buy to the right adapter. Optional (absent ⇒ base) for back-compat
+   *  with pre-Solana markers on disk. */
+  chain?: Chain;
 }
 
 /** A submission waiting in the review queue, with its triage priority. */

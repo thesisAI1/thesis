@@ -556,6 +556,12 @@ describe.each(cases)("Store contract — $name", ({ name, make }) => {
 
     await store.clearPendingBuy("p1");
     expect((await store.getPendingBuys()).map((b) => b.postId)).toEqual(["p2"]);
+
+    // chain round-trips: absent -> undefined; an explicit solana -> "solana"
+    await store.recordPendingBuy(makePendingBuy({ postId: "p3", chain: "solana" }));
+    const got = await store.getPendingBuys();
+    expect(got.find((b) => b.postId === "p2")?.chain).toBeUndefined();
+    expect(got.find((b) => b.postId === "p3")?.chain).toBe("solana");
   });
 
   // ---- per-chain escrow isolation ----

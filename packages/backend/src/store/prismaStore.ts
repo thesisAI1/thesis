@@ -1,8 +1,11 @@
 /**
  * A SQLite/Prisma-backed Store — a behaviour-identical drop-in for FileStore.
  *
- * Every method reproduces the file store's semantics EXACTLY (see fileStore.ts),
- * because this is money-handling persistence. The two places that need care:
+ * Every method reproduces the file store's observable semantics (see
+ * fileStore.ts) — the contract spec pins exact parity — because this is
+ * money-handling persistence. One deliberate normalization: getRegistryEntry
+ * reads a base-chain row back as `chain: undefined` (documented at the method).
+ * The two places that need care:
  *
  *   - Optional-field parity. FileStore round-trips through JSON, so a field that
  *     was never set comes back as `undefined`. SQLite gives us `null`. The
@@ -31,6 +34,7 @@ import type {
   Submission,
   TradeOrder,
 } from "@thesis/shared";
+import { asChain } from "../util/chains.js";
 import type { EscrowEntry, Funnel, PayoutRequest, PendingBuy, QueueItem, Store } from "./index.js";
 
 /** The fixed primary key of the single funnel-counters row. */
@@ -199,7 +203,7 @@ export class PrismaStore implements Store {
       threadPostId: row.threadPostId,
       requestedAt: row.requestedAt,
       // null (pre-Solana) -> undefined, mirroring FileStore's JSON round-trip.
-      chain: row.chain === null ? undefined : (row.chain as Chain),
+      chain: row.chain === null ? undefined : asChain(row.chain),
     };
   }
 
@@ -239,7 +243,7 @@ export class PrismaStore implements Store {
     // FileStore stores the entry verbatim, so a no-chain link round-trips as
     // chain:undefined (the shared type treats absent ⇒ base). Mirror that: a
     // "base" row reads back WITHOUT an explicit chain; other chains keep theirs.
-    return { ...row, chain: row.chain === "base" ? undefined : (row.chain as Chain) };
+    return { ...row, chain: row.chain === "base" ? undefined : asChain(row.chain) };
   }
 
   // ---- positions -----------------------------------------------------------
@@ -314,11 +318,13 @@ export class PrismaStore implements Store {
         contractAddress: buy.contractAddress,
         amountInEth: buy.amountInEth,
         at: buy.at,
+        chain: buy.chain ?? null,
       },
       update: {
         contractAddress: buy.contractAddress,
         amountInEth: buy.amountInEth,
         at: buy.at,
+        chain: buy.chain ?? null,
       },
     });
   }
@@ -331,6 +337,8 @@ export class PrismaStore implements Store {
       contractAddress: r.contractAddress,
       amountInEth: r.amountInEth,
       at: r.at,
+      // null (no chain recorded) -> undefined, mirroring FileStore's round-trip.
+      chain: r.chain === null ? undefined : asChain(r.chain),
     }));
   }
 
@@ -383,7 +391,7 @@ export class PrismaStore implements Store {
     const row = await this.prisma.escrow.findUnique({
       where: { xUserId_chain: { xUserId, chain } },
     });
-    return row === null ? null : { ...row, chain: row.chain as Chain };
+    return row === null ? null : { ...row, chain: asChain(row.chain) };
   }
 
   async clearEscrow(xUserId: string, chain: Chain = "base"): Promise<void> {
@@ -406,8 +414,8 @@ export class PrismaStore implements Store {
       update: {}, // already present — no-op
     });
     // Cap the dedup log to the last 5000 inserted (id ASC = insertion order).
-    // Find the id of the row at position (count - PROCESSED_CAP) from the end;
-    // delete everything with a lower id. Two queries instead of N+2.
+    // Walk back PROCESSED_CAP-1 rows from the newest (id DESC) to find the
+    // 5000th-newest id, then delete everything older. Two queries, no COUNT.
     const cutoffRow = await this.prisma.processedPost.findFirst({
       orderBy: { id: "desc" },
       skip: PROCESSED_CAP - 1,

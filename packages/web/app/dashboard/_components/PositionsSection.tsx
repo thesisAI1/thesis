@@ -59,8 +59,11 @@ export function PositionsSection({
         setOpen(data.openPositions);
         setClosed(data.closedPositions);
         onRefreshRef.current?.();
-      } catch {
-        // transient network/backend blip — keep the last good snapshot
+      } catch (err) {
+        // Transient network/backend blip — keep the last good snapshot, but
+        // surface it (don't fail fully silent) so a persistent outage is
+        // visible in the console rather than looking like frozen-but-fine data.
+        if (!cancelled) console.warn("[dashboard] live poll failed; keeping last snapshot:", err);
       }
     };
 

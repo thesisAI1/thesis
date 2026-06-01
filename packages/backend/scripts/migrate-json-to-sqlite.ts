@@ -27,6 +27,7 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import type {
   Chain,
   Distribution,
@@ -91,10 +92,29 @@ function loadFileData(path: string): FileData {
   return { ...EMPTY, ...parsed };
 }
 
-async function migrate(): Promise<void> {
-  const sourcePath = resolveSourcePath();
+export async function migrate(
+  sourcePath: string = resolveSourcePath(),
+  dataDir: string = config.service.dataDir,
+): Promise<void> {
   const data = loadFileData(sourcePath);
-  const store = new PrismaStore(config.service.dataDir);
+  const store = new PrismaStore(dataDir);
+
+  // Refuse to migrate onto a NON-EMPTY store: re-running would double the
+  // append-style collections (buys, reviews, distributions, queue) and leave a
+  // corrupt, mixed db. This is a one-shot — run it against a fresh SQLite db.
+  const [existingPositions, existingReviews, existingDistributions] = await Promise.all([
+    store.getAllPositions(),
+    store.getReviews(),
+    store.getDistributions(),
+  ]);
+  if (existingPositions.length + existingReviews.length + existingDistributions.length > 0) {
+    await store.disconnect();
+    throw new Error(
+      `[migrate] target store is not empty (${existingPositions.length} positions, ` +
+        `${existingReviews.length} reviews, ${existingDistributions.length} distributions) — ` +
+        `refusing to migrate onto it (would double append-style rows). Use a fresh db.`,
+    );
+  }
 
   // Upsert-style collections — safe to re-run.
   for (const entry of Object.values(data.registry)) {
@@ -185,7 +205,13 @@ async function migrate(): Promise<void> {
   );
 }
 
-migrate().catch((err) => {
-  console.error("[migrate] failed:", err);
-  process.exitCode = 1;
-});
+// Auto-run only when invoked directly (`tsx scripts/migrate-json-to-sqlite.ts`),
+// NOT when imported by a test — the test calls migrate(sourcePath, dataDir).
+const invokedDirectly =
+  process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
+if (invokedDirectly) {
+  migrate().catch((err) => {
+    console.error("[migrate] failed:", err);
+    process.exitCode = 1;
+  });
+}

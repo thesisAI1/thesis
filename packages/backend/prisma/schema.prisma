@@ -73,10 +73,12 @@ model Position {
 /// BEFORE its Position is persisted — crash recovery against silent loss.
 /// Keyed by postId (one open buy per post); upserted on a re-attempt.
 model PendingBuy {
-  postId          String @id
+  postId          String  @id
   contractAddress String
   amountInEth     Float
   at              String
+  /// Chain the buy is on. Null for pre-Solana markers (treated as base).
+  chain           String?
 }
 
 /// Append-only buy log (for the rate limit). Insertion order recoverable via id.

@@ -1,20 +1,14 @@
 /**
- * Per-chain native-currency symbol for the UI — the web mirror of the backend's
- * `nativeSymbol` (packages/backend/src/util/chains.ts). THESIS reuses the `*Eth`
- * value fields as NATIVE gas-token units scoped to a position's chain (SOL on
- * Solana, ETH on Base), so a per-row amount must be labelled with the symbol for
- * THAT row's chain.
+ * The web's native-currency-symbol import point. `nativeSymbol` itself lives in
+ * @thesis/shared — ONE definition shared with the backend so the two can't
+ * drift. This module re-exports it and documents the web's USAGE policy:
  *
- * Use this for PER-POSITION / PER-TRADE values (which carry a `chain`). Portfolio
- * and distribution AGGREGATES use the plain word "ETH": they are ETH-denominated
- * sums and, per the backend's escrow design, ETH and SOL are never summed.
+ *   - PER-ROW values (a position / trade carries a `chain`) use
+ *     `nativeSymbol(chain)` → "ETH" on Base, "SOL" on Solana.
+ *   - AGGREGATES (portfolio, paid-to-authors, equity axis, leaderboard totals)
+ *     render the plain word "ETH": they are ETH-denominated sums, and ETH and
+ *     SOL are never summed.
  *
- * We render the WORD ("ETH" / "SOL"), never the bare Greek-letter glyph — it
- * reads clearer and unambiguous.
+ * We always render the WORD ("ETH" / "SOL"), never the bare Greek-letter glyph.
  */
-import type { Chain } from "@thesis/shared";
-
-/** Native gas-token ticker: "SOL" on Solana, "ETH" on Base and every other EVM chain. */
-export function nativeSymbol(chain: Chain): string {
-  return chain === "solana" ? "SOL" : "ETH";
-}
+export { nativeSymbol } from "@thesis/shared";

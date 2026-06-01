@@ -38,7 +38,8 @@ CREATE TABLE "PendingBuy" (
     "postId" TEXT NOT NULL PRIMARY KEY,
     "contractAddress" TEXT NOT NULL,
     "amountInEth" REAL NOT NULL,
-    "at" TEXT NOT NULL
+    "at" TEXT NOT NULL,
+    "chain" TEXT
 );
 
 -- CreateTable
