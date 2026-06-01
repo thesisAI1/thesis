@@ -32,6 +32,27 @@ export const metadata: Metadata = {
     "The committee's live trading record: open positions, closed trades, every graded thesis, and the authors paid the most — on-chain and verifiable.",
 };
 
+/** The backend sends `null` for the portfolio *value* fields when there are no
+ *  open positions to value, even though the contract types them as `number`.
+ *  Coerce to 0 at the boundary so the KPI formatters (`.toFixed`, etc.) never
+ *  crash the page. */
+function num(v: number | null | undefined): number {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+function withSafePortfolio(d: DashboardData): DashboardData {
+  const p = d.portfolio;
+  return {
+    ...d,
+    portfolio: {
+      ...p,
+      openPositionsValueEth: num(p.openPositionsValueEth),
+      totalPortfolioValueEth: num(p.totalPortfolioValueEth),
+      openPositionsValueUsd: num(p.openPositionsValueUsd),
+      totalPortfolioValueUsd: num(p.totalPortfolioValueUsd),
+    },
+  };
+}
+
 /** Fetch both payloads, tolerating a downed backend by returning nulls so the
  *  page can render its empty state instead of throwing. */
 async function loadData(): Promise<{
@@ -48,7 +69,7 @@ async function loadData(): Promise<{
       throw err;
     }),
   ]);
-  return { dashboard, leaderboard };
+  return { dashboard: dashboard ? withSafePortfolio(dashboard) : null, leaderboard };
 }
 
 function EmptyState() {

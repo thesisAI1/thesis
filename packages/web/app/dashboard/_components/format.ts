@@ -3,13 +3,16 @@
  * and the interactive client components, so a figure renders identically on the
  * SSR pass and after a live refetch.
  */
-/** A signed ETH amount to 4dp, e.g. `+0.1640` / `-0.0190`. */
-export function fmtEthSigned(n: number): string {
+/** A signed ETH amount to 4dp, e.g. `+0.1640` / `-0.0190`. Null/unpriced → em
+ *  dash, since the backend sends null for values it can't compute yet. */
+export function fmtEthSigned(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
   return `${n >= 0 ? "+" : ""}${n.toFixed(4)}`;
 }
 
-/** A signed percent. Drops decimals past ±100% to match the mockup. */
-export function fmtPct(n: number): string {
+/** A signed percent. Drops decimals past ±100% to match the mockup. Null → em dash. */
+export function fmtPct(n: number | null | undefined): string {
+  if (n == null || !Number.isFinite(n)) return "—";
   const sign = n >= 0 ? "+" : "";
   const decimals = n >= 100 || n <= -100 ? 0 : 1;
   return `${sign}${n.toFixed(decimals)}%`;
@@ -23,8 +26,9 @@ export function fmtMc(usd: number | null): string {
   return `$${Math.round(usd)}`;
 }
 
-/** A grouped USD figure, e.g. `$48,210`. Rounds to whole dollars. */
-export function fmtUsd(usd: number): string {
+/** A grouped USD figure, e.g. `$48,210`. Rounds to whole dollars. Null → em dash. */
+export function fmtUsd(usd: number | null | undefined): string {
+  if (usd == null || !Number.isFinite(usd)) return "—";
   return `$${Math.round(usd).toLocaleString("en-US")}`;
 }
 
