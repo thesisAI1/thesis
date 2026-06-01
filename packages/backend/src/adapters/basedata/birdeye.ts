@@ -1,6 +1,7 @@
 import type { Holder } from "@thesis/shared";
 import { config } from "../../config.js";
 import { log } from "../../util/log.js";
+import { detectVirtualsLaunchpad } from "./base-launchpad.js";
 import type { BaseDataAdapter, TokenOnChain } from "./index.js";
 
 /**
@@ -23,8 +24,8 @@ import type { BaseDataAdapter, TokenOnChain } from "./index.js";
  *      one extra call only for the rare unindexed token.
  *
  * Holders and honeypot detection are intentionally NOT surfaced — the
- * Auditor's launchpad gate (Clanker or Bankr only) already covers the rug
- * risk those checks were guarding against.
+ * Auditor's launchpad gate (Clanker / Bankr / Virtuals on Base) already covers
+ * the rug risk those checks were guarding against.
  *
  * Launchpad detection:
  *   - Bankr → its own public fee endpoint (HTTP 200 with non-error body)
@@ -33,6 +34,8 @@ import type { BaseDataAdapter, TokenOnChain } from "./index.js";
  *     (e.g. "ClankerToken" for v4). The old deployer-vs-factory check is kept
  *     as a secondary path for when a paid BaseScan plan is configured, but
  *     Blockscout is the source that actually works on the free tier.
+ *   - Virtuals → a graduated agent token whose DexScreener pool is quoted in
+ *     $VIRTUAL (detected off the same call used for the launch date).
  *
  * launchedAt has a 3-tier fallback chain because no single source is reliable
  * on Base:
@@ -91,17 +94,22 @@ export class BirdeyeBaseData implements BaseDataAdapter {
     // but the free Etherscan v2 plan rejects Base, so DexScreener pairCreatedAt
     // is fetched in parallel as a free fallback. All three calls are run in
     // parallel so the slowest one (typically DexScreener) sets the latency.
-    const [overview, creation, dexLaunchedAt] = await Promise.all([
+    const [overview, creation, dex] = await Promise.all([
       this.fetchOverview(address),
       this.fetchCreationInfo(address),
-      this.fetchDexScreenerLaunchedAt(address),
+      this.fetchDexScreenerPairInfo(address),
     ]);
-    const launchpad = await this.classifyLaunchpad(address, creation?.deployer ?? null);
+    // Bankr/Clanker win first (explicit fee-API / deployer proof). A graduated
+    // Virtuals agent token is neither, so it falls through to the VIRTUAL-paired
+    // signal derived from the SAME DexScreener call we already make for the
+    // launch date — no extra request. Mirrors RealBaseData's layering exactly.
+    const launchpad =
+      (await this.classifyLaunchpad(address, creation?.deployer ?? null)) ?? dex.virtualsLaunchpad;
     // Prefer BaseScan (exact contract creation), fall back to DexScreener
     // (earliest pair created — usually within seconds of the token deploy on
     // launchpads like Clanker / Bankr), then finally to overview.launchedAt
     // which is just now() and would make every token look brand new.
-    const launchedAt = creation?.launchedAt ?? dexLaunchedAt ?? overview.launchedAt;
+    const launchedAt = creation?.launchedAt ?? dex.launchedAt ?? overview.launchedAt;
     return {
       contractAddress: address,
       chain: "base",
@@ -331,19 +339,25 @@ export class BirdeyeBaseData implements BaseDataAdapter {
     }
   }
 
-  /** Fallback launch timestamp via DexScreener. We pick the earliest
-   *  `pairCreatedAt` across all base pairs because Clanker / Bankr deploys
-   *  spawn the first pool atomically with the token, so the first pair
-   *  creation tracks the actual token launch within a few seconds. Returns
-   *  null if DexScreener hasn't indexed the token yet (typical only for
-   *  brand-new launches, in which case the Auditor's age gate would block
-   *  it anyway under the under-1h rule). */
-  private async fetchDexScreenerLaunchedAt(address: string): Promise<string | null> {
+  /** Fallback launch timestamp via DexScreener, AND the Virtuals-launchpad
+   *  signal — both off one call. We pick the earliest `pairCreatedAt` across all
+   *  base pairs because Clanker / Bankr deploys spawn the first pool atomically
+   *  with the token, so the first pair creation tracks the actual token launch
+   *  within a few seconds. `virtualsLaunchpad` is "virtuals" when any base pool
+   *  is quoted in $VIRTUAL (a graduated Virtuals agent token). Both fields are
+   *  null when DexScreener hasn't indexed the token yet. */
+  private async fetchDexScreenerPairInfo(
+    address: string,
+  ): Promise<{ launchedAt: string | null; virtualsLaunchpad: "virtuals" | null }> {
     try {
       const res = await fetch(`${DEXSCREENER_API}/latest/dex/tokens/${address}`);
-      if (!res.ok) return null;
+      if (!res.ok) return { launchedAt: null, virtualsLaunchpad: null };
       const json = (await res.json()) as {
-        pairs?: Array<{ chainId?: string; pairCreatedAt?: number }>;
+        pairs?: Array<{
+          chainId?: string;
+          pairCreatedAt?: number;
+          quoteToken?: { address?: string };
+        }>;
       };
       const basePairs = (json.pairs ?? []).filter((p) => p.chainId === "base");
       let earliest = Number.POSITIVE_INFINITY;
@@ -351,10 +365,11 @@ export class BirdeyeBaseData implements BaseDataAdapter {
         const ts = Number(p.pairCreatedAt ?? 0);
         if (ts > 0 && ts < earliest) earliest = ts;
       }
-      if (!Number.isFinite(earliest)) return null;
-      return new Date(earliest).toISOString();
+      const launchedAt = Number.isFinite(earliest) ? new Date(earliest).toISOString() : null;
+      const virtualsLaunchpad = detectVirtualsLaunchpad(basePairs, config.chain.virtualToken);
+      return { launchedAt, virtualsLaunchpad };
     } catch {
-      return null;
+      return { launchedAt: null, virtualsLaunchpad: null };
     }
   }
 }

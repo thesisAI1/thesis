@@ -24,6 +24,12 @@ export class MockBaseData implements BaseDataAdapter {
 
     // Launchpad — most via Clanker/Bankr, some launched outside them.
     const launchpads = ["clanker", "bankr", "clanker", "uniswap"];
+    // Deterministic test/demo hook: an address tagged "virtuals" is a graduated
+    // (VIRTUAL-paired) Virtuals Protocol token. Mirrors the Solana "pump"-suffix
+    // rule in solana.mock.ts so suites can exercise the Virtuals path stably.
+    const launchpad = address.toLowerCase().includes("virtuals")
+      ? "virtuals"
+      : (launchpads[Math.floor(seed(address, "lp") * launchpads.length)] ?? null);
 
     return {
       contractAddress: address,
@@ -32,7 +38,7 @@ export class MockBaseData implements BaseDataAdapter {
       liquidityUsd,
       marketCapUsd,
       launchedAt,
-      launchpad: launchpads[Math.floor(seed(address, "lp") * launchpads.length)] ?? null,
+      launchpad,
       isHoneypot: seed(address, "honey") > 0.9,
       topHolders,
     };
