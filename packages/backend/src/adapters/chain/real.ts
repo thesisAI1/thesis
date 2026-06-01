@@ -136,19 +136,80 @@ export class RealChain implements ChainAdapter {
     this.ensureArmed();
     const price = await this.getTokenPriceEth(address);
     const amountIn = parseEther(amountInEth.toFixed(18));
+
+    // Measure the ACTUAL delivered tokens (on-chain balance delta), not the
+    // router's `built.amountOut` quote. Many Bankr/Doppler tokens deliver FEWER
+    // tokens than quoted (anti-MEV / anti-snipe / first-block trim, or dynamic
+    // transfer pricing). The Bursar records this as the Position's `entryTokens`
+    // and the Monitor sizes every take-profit tier off it — so if the wallet
+    // received half the quote, a tier still sells the intended fraction of the
+    // tokens we ACTUALLY hold instead of ~2× it (which then clamps to the live
+    // balance and silently liquidates nearly the whole position).
+    //
+    // Incident this fixes — 2026-06-01 @GamerGuyz5 pos-2061177421601427598:
+    //   - Router quoted 46.3M tokens for 0.020 ETH; wallet actually received 23.9M
+    //   - A 50%-first-tier sized off the quote = 23.15M tokens ≈ the FULL bag
+    //   - Clamp to live balance sold ~97%; the reply tweet still said "Holding the rest"
+    const tokenAddress = address as Address;
+    const balanceBefore = (await this.publicClient.readContract({
+      address: tokenAddress,
+      abi: ERC20_ABI,
+      functionName: "balanceOf",
+      args: [this.account.address],
+    })) as bigint;
+
     // Native ETH input — no approval needed, the router is paid via tx.value.
     const route = await this.fetchKyberRoute(ETH_SENTINEL, address, amountIn);
     const built = await this.buildKyberTx(route);
     const txHash = await this.sendSwap(built, /* hasEthInput */ true);
-    // NOTE (deliberate asymmetry vs sell's L5 fix): buy() amountOut is the Kyber
-    // QUOTE of tokens out, not a measured delta. It is informational only — it
-    // feeds the buyback's tokensBurned LOG line and is NEVER stored on the
-    // Position or used to size a sell (sells size off amountInEth/entryPriceEth
-    // and then clamp to the live on-chain balance). PnL/settlement money-math
-    // flows exclusively through sell() proceeds, which L5 measures on-chain.
-    const amountOut = Number(formatEther(BigInt(built.amountOut)));
+
+    // Read balance AFTER with the same retry-loop pattern as buybackAndBurn —
+    // Alchemy's read endpoint serves balanceOf from a pool of replicas, and a
+    // fresh swap can be visible on one replica while the next read hits a
+    // sibling that's a block behind. Retry up to 5 times with 2s spacing until
+    // we see balance growth.
+    let balanceAfter = balanceBefore;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      balanceAfter = (await this.publicClient.readContract({
+        address: tokenAddress,
+        abi: ERC20_ABI,
+        functionName: "balanceOf",
+        args: [this.account.address],
+      })) as bigint;
+      if (balanceAfter > balanceBefore) break;
+      if (attempt < 4) await new Promise((r) => setTimeout(r, 2_000));
+    }
+
+    const actualDelta = balanceAfter > balanceBefore ? balanceAfter - balanceBefore : 0n;
+    const routerAmountOut = Number(formatEther(BigInt(built.amountOut)));
+    const actualReceived = Number(formatEther(actualDelta));
+
+    // Defensive fallback: if the balance genuinely didn't grow after 5 retries
+    // (rebase-failed buy, extreme tax that took everything), fall back to the
+    // router quote so the caller still gets a non-zero amountOut and downstream
+    // divide-by-zero is avoided. Better to log + degrade than hard-fail the buy
+    // after the on-chain swap already happened.
+    if (actualReceived === 0) {
+      log.warn(
+        `chain: buy delta read returned 0 for ${address} — falling back to router quote ${routerAmountOut.toFixed(2)}`,
+      );
+      log.info(`chain: buy via KyberSwap — ${describeRoute(route)} — tx ${txHash}`);
+      return { txHash, amountOut: routerAmountOut, priceEth: price };
+    }
+
+    // Surface significant delivery shortfalls so we know which tokens have
+    // aggressive transfer mechanics. < 95% delivery = real signal, not slippage.
+    const deliveryRatio = actualReceived / routerAmountOut;
+    if (deliveryRatio < 0.95) {
+      log.warn(
+        `chain: buy delivery shortfall for ${address} — router quoted ${routerAmountOut.toFixed(2)} tokens, ` +
+          `wallet received ${actualReceived.toFixed(2)} (${(deliveryRatio * 100).toFixed(1)}% delivery rate). ` +
+          `Likely transfer-tax / anti-MEV / Doppler dynamic-pricing mechanics.`,
+      );
+    }
+
     log.info(`chain: buy via KyberSwap — ${describeRoute(route)} — tx ${txHash}`);
-    return { txHash, amountOut, priceEth: price };
+    return { txHash, amountOut: actualReceived, priceEth: price };
   }
 
   async sell(
