@@ -15,7 +15,7 @@
 
 import type { Submission } from "@thesis/shared";
 import type { XPost } from "../adapters/x/index.js";
-import { config } from "../config.js";
+import { config, solanaTradingEnabled } from "../config.js";
 import { getStore, type QueueItem } from "../store/index.js";
 import { extractContract, guessChain } from "../util/contracts.js";
 
@@ -26,7 +26,8 @@ import { extractContract, guessChain } from "../util/contracts.js";
 export type TriageRejection =
   | { kind: "author_cooldown"; hoursLeft: number }
   | { kind: "contract_dedup"; hoursLeft: number }
-  | { kind: "thesis_too_short"; words: number; minWords: number };
+  | { kind: "thesis_too_short"; words: number; minWords: number }
+  | { kind: "solana_not_live" };
 
 export interface TriageResult {
   /** Submissions that passed every Step 1 filter. */
@@ -96,6 +97,16 @@ export async function triageMentions(posts: XPost[]): Promise<TriageResult> {
     // Low follower count is intentionally silent — calling that out publicly
     // would be rude, and the threshold is a soft signal anyway.
     if (post.authorFollowers < config.triage.minAuthorFollowers) continue;
+
+    // Solana not live yet (launch Option A): decline a Solana CA up front with a
+    // "coming soon" reply, rather than running it through the committee to a token
+    // we can't trade. Flips on automatically once a Solana wallet is configured.
+    const chain = guessChain(contract);
+    if (chain === "solana" && !solanaTradingEnabled()) {
+      rejected.push({ post, reason: { kind: "solana_not_live" } });
+      continue;
+    }
+
     const wordsInThesis = wordCount(thesisText(post.text, contract));
     if (wordsInThesis < config.triage.minThesisWords) {
       rejected.push({
@@ -147,7 +158,7 @@ export async function triageMentions(posts: XPost[]): Promise<TriageResult> {
       authorAvatarUrl: post.authorAvatarUrl,
       thesisText: post.text,
       contractAddress: contract,
-      chain: guessChain(contract),
+      chain,
       postUrl: post.url,
       postedAt: post.createdAt,
     };

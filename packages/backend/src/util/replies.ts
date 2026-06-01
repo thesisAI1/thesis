@@ -90,7 +90,8 @@ export function skipReplyText(o: SkipKind): string | null {
 export type TriageRejectKind =
   | { kind: "author_cooldown"; hoursLeft: number }
   | { kind: "contract_dedup"; hoursLeft: number }
-  | { kind: "thesis_too_short"; words: number; minWords: number };
+  | { kind: "thesis_too_short"; words: number; minWords: number }
+  | { kind: "solana_not_live" };
 
 /** Reply text for a mention that failed Step-1 triage. */
 export function triageRejectReplyText(r: TriageRejectKind): string {
@@ -109,6 +110,12 @@ export function triageRejectReplyText(r: TriageRejectKind): string {
     return [
       "That contract was already reviewed by the committee very recently — skipping to avoid a duplicate position.",
       `Re-eligible in ${formatHours(r.hoursLeft)}. Tag the committee again then if your read still holds.`,
+    ].join("\n");
+  }
+  if (r.kind === "solana_not_live") {
+    return [
+      "Solana support is not yet activated — the committee trades Base only for now.",
+      "The team is working to bring it to life soon. Re-tag us once Solana is live and we'll grade your call.",
     ].join("\n");
   }
   return [
