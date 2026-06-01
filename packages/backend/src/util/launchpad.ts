@@ -5,15 +5,20 @@ import type { Chain } from "@thesis/shared";
  *
  * The Auditor's hard gate trusts only launchpads that deploy a standard,
  * audited token + LP, so contract-level honeypot / rug risk is removed:
- *   - Base   → Clanker, Bankr
+ *   - Base   → Clanker, Bankr, Virtuals (graduated agent tokens)
  *   - Solana → pump.fun ONLY
+ *
+ * "virtuals" covers Virtuals Protocol agent tokens that have GRADUATED off the
+ * bonding curve to a VIRTUAL-paired Uniswap V2 pool — a standard, locked-LP
+ * setup the KyberSwap aggregator can route ETH↔token through. Pre-graduation
+ * (bonding-curve) tokens have no DEX pool, so they never reach a trusted state.
  *
  * Canonical keys are lowercased, dot-free ("pumpfun"). Anything not in a
  * chain's set fails the gate (Auditor scores it 0 → the buy gate vetoes it).
  */
 const TRUSTED: Partial<Record<Chain, string[]>> = {
-  base: ["clanker", "bankr"],
-  "base-sepolia": ["clanker", "bankr"],
+  base: ["clanker", "bankr", "virtuals"],
+  "base-sepolia": ["clanker", "bankr", "virtuals"],
   solana: ["pumpfun"],
 };
 

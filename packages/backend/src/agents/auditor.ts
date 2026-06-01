@@ -2,10 +2,11 @@
  * THE AUDITOR — on-chain forensics on the token.
  *
  * A strict gate model — a token must clear EVERY hard requirement:
- *   1. Launched via a trusted, per-chain launchpad — Clanker/Bankr on Base,
- *      pump.fun on Solana. Those launchpads deploy a standard, audited token +
- *      LP, so contract-level honeypot / rug risk is removed — no separate
- *      honeypot check is needed.
+ *   1. Launched via a trusted, per-chain launchpad — Clanker/Bankr/Virtuals on
+ *      Base, pump.fun on Solana. Those launchpads deploy a standard, audited
+ *      token + LP, so contract-level honeypot / rug risk is removed — no
+ *      separate honeypot check is needed. ("virtuals" = a Virtuals Protocol
+ *      agent token that has graduated to a VIRTUAL-paired DEX pool.)
  *   2. At least `minTokenAgeHours` old — avoids the instant pump-and-dumps.
  *   3. Top 10 *real* holders (excluding LP pools, burn addresses and locked
  *      positions) control no more than `maxTop10Pct` of supply.
