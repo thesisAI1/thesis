@@ -57,9 +57,23 @@ export interface SwapProceeds {
 export async function measureEthProceeds(
   readEthWei: () => Promise<bigint>,
   swap: () => Promise<string>,
+  opts?: { maxReadAttempts?: number; readDelayMs?: number },
 ): Promise<SwapProceeds> {
+  const maxReadAttempts = Math.max(1, opts?.maxReadAttempts ?? 5);
+  const readDelayMs = Math.max(0, opts?.readDelayMs ?? 2_000);
   const before = await readEthWei();
   const txHash = await swap();
-  const after = await readEthWei();
+  // The post-swap read is subject to Alchemy read-replica lag: the swap is
+  // confirmed on one replica while this read can hit a sibling a block behind
+  // that hasn't yet credited the ETH, making after ≈ before → a false 0. Retry
+  // until the credit is visible (after > before), mirroring RealChain.buy's
+  // balance-after loop. A genuine net-zero sell (gas ≥ output) exhausts the
+  // retries and correctly reports 0.
+  let after = before;
+  for (let attempt = 0; attempt < maxReadAttempts; attempt++) {
+    after = await readEthWei();
+    if (after > before) break;
+    if (attempt < maxReadAttempts - 1) await new Promise((r) => setTimeout(r, readDelayMs));
+  }
   return { txHash, amountOut: Number(formatEther(netReceivedEthWei(before, after))) };
 }

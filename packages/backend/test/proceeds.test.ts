@@ -46,11 +46,32 @@ test("measureEthProceeds reports the on-chain delta (after − before), not a qu
 });
 
 test("measureEthProceeds reports 0 when gas ate the output (never negative)", async () => {
-  const reads = [parseEther("1.0"), parseEther("0.999")]; // net loss after gas
-  let i = 0;
+  const before = parseEther("1.0");
+  const stale = parseEther("0.999"); // net loss after gas — stays below `before`
+  let reads = 0;
   const result = await measureEthProceeds(
-    async () => reads[i++]!,
+    async () => (reads++ === 0 ? before : stale),
     async () => "0xtx",
+    { maxReadAttempts: 5, readDelayMs: 0 },
   );
   assert.equal(result.amountOut, 0);
+});
+
+test("measureEthProceeds retries past a lagging replica that shows no credit yet", async () => {
+  // Alchemy replica lag: the first post-swap read is a block behind and still
+  // reports the pre-swap balance (false 0); a later read sees the real credit.
+  const before = parseEther("1.0");
+  const sequence = [
+    before, // pre-swap read
+    before, // lagging replica — no credit visible yet (would be a false 0)
+    before, // still lagging
+    parseEther("1.033"), // replica caught up — 0.033 ETH actually arrived
+  ];
+  let i = 0;
+  const result = await measureEthProceeds(
+    async () => sequence[i++]!,
+    async () => "0xtx",
+    { maxReadAttempts: 5, readDelayMs: 0 },
+  );
+  assert.equal(result.amountOut, 0.033);
 });
