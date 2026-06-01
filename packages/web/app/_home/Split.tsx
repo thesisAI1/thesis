@@ -1,5 +1,5 @@
 /**
- * The 25% split — a slim four-segment bar (author · portfolio · maintenance ·
+ * The 25% split — a slim four-segment bar (author · portfolio · holder lottery ·
  * buyback & burn), each in its agent-adjacent colour. Lives in the $THESIS
  * section; the emotional "you get paid" copy now lives in the Manifesto, so this
  * is just the at-a-glance breakdown of where a winning trade goes.
@@ -9,7 +9,7 @@ import { Reveal } from "./Reveal";
 const QUARTERS: Array<{ label: string; color: string }> = [
   { label: "To the author", color: "var(--blue)" },
   { label: "To the portfolio", color: "var(--green)" },
-  { label: "To maintenance", color: "var(--purple)" },
+  { label: "To the lottery", color: "var(--purple)" },
   { label: "Buyback & burn", color: "var(--red)" },
 ];
 
