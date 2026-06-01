@@ -26,6 +26,7 @@ import { createBaseDataAdapter } from "../adapters/basedata/index.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter, type XPost } from "../adapters/x/index.js";
 import { closeByAuthor } from "../monitor/index.js";
+import { tokensRemaining } from "../domain/sizing.js";
 import { getStore } from "../store/index.js";
 import { log } from "../util/log.js";
 import { manualCloseRejectText } from "../util/replies.js";
@@ -130,10 +131,11 @@ async function handleCloseRequest(pos: Position, mention: XPost): Promise<void> 
   // returns the exact post-routing ETH amount. No cache, no indexing
   // delay, no Birdeye 429 fallbacks — it IS the price we'd fill at.
   const chain = createChainAdapter(pos.order.chain);
-  const remainingTokens =
-    pos.entryPriceEth > 0
-      ? (pos.order.amountInEth * pos.remainingFraction) / pos.entryPriceEth
-      : 0;
+  // Size off the tokens actually delivered at entry (not the market-mid cost
+  // basis) so the live-quote profit gate judges the REAL bag — a delivery-
+  // shortfall token would otherwise quote ~2× the tokens we hold and misjudge
+  // the +20% threshold (and print a wrong % in the reply tweet).
+  const remainingTokens = tokensRemaining(pos);
   if (remainingTokens <= 0) {
     log.warn(`author-close: ${pos.id} has 0 tokens remaining, skipping`);
     return;

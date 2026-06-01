@@ -49,6 +49,11 @@ model Position {
   order                Json
   status               String
   entryPriceEth        Float
+  /// Tokens ACTUALLY delivered by the entry buy (measured on-chain delta, not
+  /// the router quote). Tier sells size off this so a delivery shortfall can't
+  /// oversell. Nullable: positions opened before this column fall back to the
+  /// market-mid cost-basis estimate (amountInEth / entryPriceEth).
+  entryTokens          Float?
   marketCapAtEntryUsd  Float?
   entryTxHash          String
   remainingFraction    Float

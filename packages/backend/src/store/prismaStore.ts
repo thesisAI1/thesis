@@ -80,6 +80,7 @@ export class PrismaStore implements Store {
     order: Prisma.JsonValue;
     status: string;
     entryPriceEth: number;
+    entryTokens: number | null;
     marketCapAtEntryUsd: number | null;
     entryTxHash: string;
     remainingFraction: number;
@@ -102,6 +103,7 @@ export class PrismaStore implements Store {
       order: row.order as unknown as TradeOrder,
       status: row.status as Position["status"],
       entryPriceEth: row.entryPriceEth,
+      entryTokens: undef(row.entryTokens),
       marketCapAtEntryUsd: undef(row.marketCapAtEntryUsd),
       entryTxHash: row.entryTxHash,
       remainingFraction: row.remainingFraction,
@@ -258,6 +260,7 @@ export class PrismaStore implements Store {
       order: position.order as unknown as Prisma.InputJsonValue,
       status: position.status,
       entryPriceEth: position.entryPriceEth,
+      entryTokens: position.entryTokens ?? null,
       marketCapAtEntryUsd: position.marketCapAtEntryUsd ?? null,
       entryTxHash: position.entryTxHash,
       remainingFraction: position.remainingFraction,

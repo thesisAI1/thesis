@@ -162,6 +162,13 @@ export interface Position {
   order: TradeOrder;
   status: "open" | "closed";
   entryPriceEth: number;
+  /** Tokens ACTUALLY delivered to the wallet by the entry buy — the measured
+   *  on-chain balance delta, not the router's optimistic quote. Tier sells size
+   *  off this (entryTokens × sellFraction) so a token that delivers fewer tokens
+   *  than quoted (Doppler/Bankr dynamic pricing, transfer tax) can't make a tier
+   *  oversell. Optional for back-compat: positions opened before this field fall
+   *  back to the cost-basis estimate (amountInEth / entryPriceEth). */
+  entryTokens?: number;
   /** Token market cap in USD at the moment the buy executed. Used by the UI
    *  to show the entry-vs-now spread without an extra historical-price fetch. */
   marketCapAtEntryUsd?: number;

@@ -15,7 +15,7 @@
  * committed init migration against that dir's SQLite file.
  */
 
-import { mkdtempSync, readFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,14 +33,7 @@ import type { PayoutRequest, PendingBuy, QueueItem, Store } from "../src/store/i
 import { PrismaStore } from "../src/store/prismaStore.js";
 
 const HERE = resolve(fileURLToPath(new URL(".", import.meta.url)));
-const MIGRATION_SQL = resolve(
-  HERE,
-  "..",
-  "prisma",
-  "migrations",
-  "20260529232305_init",
-  "migration.sql",
-);
+const MIGRATIONS_DIR = resolve(HERE, "..", "prisma", "migrations");
 
 /** A guaranteed-unique temp dir per test (mkdtempSync atomically creates a dir
  *  with a unique suffix — no Date.now()/Math.random(), no collision risk). The
@@ -49,28 +42,36 @@ function freshDir(label: string): string {
   return mkdtempSync(join(tmpdir(), `thesis-store-${label}-`));
 }
 
-/** Apply the committed init migration to a per-test SQLite file, so the
- *  PrismaStore case is schema-isolated and uses the SAME DDL as production. */
+/** Apply EVERY committed migration (in lexical order) to a per-test SQLite
+ *  file, so the PrismaStore case is schema-isolated and uses the SAME DDL as
+ *  production gets via `prisma migrate deploy`. Replaying all migrations (not
+ *  just the init) means new columns are picked up automatically. */
 async function applySchema(dataDir: string): Promise<void> {
   const dbPath = resolve(dataDir, "thesis.db");
   const client = new PrismaClient({
     datasources: { db: { url: `file:${dbPath}` } },
   });
-  const sql = readFileSync(MIGRATION_SQL, "utf8");
-  const statements = sql
-    .split(";")
-    // Drop `-- comment` lines inside each chunk (they precede every statement),
-    // then keep only chunks that still hold real DDL.
-    .map((chunk) =>
-      chunk
-        .split("\n")
-        .filter((line) => !line.trim().startsWith("--"))
-        .join("\n")
-        .trim(),
-    )
-    .filter((stmt) => stmt.length > 0);
-  for (const stmt of statements) {
-    await client.$executeRawUnsafe(stmt);
+  const migrationDirs = readdirSync(MIGRATIONS_DIR, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
+  for (const dir of migrationDirs) {
+    const sql = readFileSync(resolve(MIGRATIONS_DIR, dir, "migration.sql"), "utf8");
+    const statements = sql
+      .split(";")
+      // Drop `-- comment` lines inside each chunk (they precede every statement),
+      // then keep only chunks that still hold real DDL.
+      .map((chunk) =>
+        chunk
+          .split("\n")
+          .filter((line) => !line.trim().startsWith("--"))
+          .join("\n")
+          .trim(),
+      )
+      .filter((stmt) => stmt.length > 0);
+    for (const stmt of statements) {
+      await client.$executeRawUnsafe(stmt);
+    }
   }
   await client.$disconnect();
 }

@@ -12,7 +12,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,31 +21,33 @@ import { PrismaStore } from "../src/store/prismaStore.js";
 import { migrate } from "../scripts/migrate-json-to-sqlite.js";
 
 const HERE = resolve(fileURLToPath(new URL(".", import.meta.url)));
-const MIGRATION_SQL = resolve(
-  HERE,
-  "..",
-  "prisma",
-  "migrations",
-  "20260529232305_init",
-  "migration.sql",
-);
+const MIGRATIONS_DIR = resolve(HERE, "..", "prisma", "migrations");
 
-/** Apply the committed init migration to a per-test SQLite file. */
+/** Apply EVERY committed migration (in lexical order) to a per-test SQLite
+ *  file — the same DDL production gets via `prisma migrate deploy`. Replaying
+ *  all migrations (not just the init) means new columns are picked up
+ *  automatically instead of silently missing from the test schema. */
 async function applySchema(dataDir: string): Promise<void> {
   const dbPath = resolve(dataDir, "thesis.db");
   const client = new PrismaClient({ datasources: { db: { url: `file:${dbPath}` } } });
-  const sql = readFileSync(MIGRATION_SQL, "utf8");
-  const statements = sql
-    .split(";")
-    .map((chunk) =>
-      chunk
-        .split("\n")
-        .filter((line) => !line.trim().startsWith("--"))
-        .join("\n")
-        .trim(),
-    )
-    .filter((stmt) => stmt.length > 0);
-  for (const stmt of statements) await client.$executeRawUnsafe(stmt);
+  const migrationDirs = readdirSync(MIGRATIONS_DIR, { withFileTypes: true })
+    .filter((e) => e.isDirectory())
+    .map((e) => e.name)
+    .sort();
+  for (const dir of migrationDirs) {
+    const sql = readFileSync(resolve(MIGRATIONS_DIR, dir, "migration.sql"), "utf8");
+    const statements = sql
+      .split(";")
+      .map((chunk) =>
+        chunk
+          .split("\n")
+          .filter((line) => !line.trim().startsWith("--"))
+          .join("\n")
+          .trim(),
+      )
+      .filter((stmt) => stmt.length > 0);
+    for (const stmt of statements) await client.$executeRawUnsafe(stmt);
+  }
   await client.$disconnect();
 }
 

@@ -59,6 +59,7 @@ import { createXAdapter } from "../adapters/x/index.js";
 import { config, useMock } from "../config.js";
 import { subscribe, type StreamEvent } from "../events.js";
 import { closeByAuthor } from "../monitor/index.js";
+import { tokensRemaining } from "../domain/sizing.js";
 import { getStore } from "../store/index.js";
 import { log } from "../util/log.js";
 import { payoutSentText } from "../util/replies.js";
@@ -582,6 +583,8 @@ async function adminRebuyPosition(req: IncomingMessage, res: ServerResponse): Pr
   }
 
   pos.entryPriceEth = buy.priceEth;
+  // Fresh entry → refresh the measured delivery so tier sizing matches the new bag.
+  pos.entryTokens = buy.amountOut;
   pos.entryTxHash = buy.txHash;
   pos.openedAt = new Date().toISOString();
   pos.tiersHit = 0;
@@ -1130,9 +1133,11 @@ async function buildDashboardPayload(): Promise<object> {
   for (const p of open) {
     const cached = livePrices.get(p.order.contractAddress.toLowerCase());
     const currentPriceEth = cached && cached > 0 ? cached : p.entryPriceEth;
-    // Unrealised PnL is measured on the slice still held.
+    // Unrealised PnL is measured on the slice still held. Tokens come from the
+    // measured entry delivery (not the market-mid cost basis) so delivery-
+    // shortfall positions don't show an inflated bag / unrealised PnL.
     const remainingCost = p.order.amountInEth * p.remainingFraction;
-    const remainingTokens = p.entryPriceEth > 0 ? remainingCost / p.entryPriceEth : 0;
+    const remainingTokens = tokensRemaining(p);
     const liveValueEth = remainingTokens * currentPriceEth;
     const unrealizedPnlEth = liveValueEth - remainingCost;
     openPositionsValueEth += liveValueEth;

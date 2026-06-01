@@ -141,6 +141,9 @@ export async function runBursar(verdict: Verdict): Promise<BursarResult> {
     order,
     status: "open",
     entryPriceEth: fill.priceEth,
+    // Measured on-chain delivery (see RealChain.buy) — tier sells size off this,
+    // not the market-mid cost basis, so a delivery shortfall can't oversell.
+    entryTokens: fill.amountOut,
     entryTxHash: fill.txHash,
     // Snapshot the on-chain market cap at the moment the buy fills, so the
     // dashboard can show the entry-vs-now spread without a historical lookup.

@@ -25,6 +25,7 @@ import { fetchAvatarAsDataUri, rasterise } from "../cards/render.js";
 import { recordActivity } from "../activity.js";
 import { publish } from "../events.js";
 import { settlePosition } from "../pipeline/index.js";
+import { tokensForCost } from "../domain/sizing.js";
 import { getStore } from "../store/index.js";
 import { withLock } from "../store/lock.js";
 import { log } from "../util/log.js";
@@ -504,10 +505,7 @@ async function sell(
   _exitPrice: number,
   opts?: { maxAttempts?: number; delayBetweenMs?: number },
 ): Promise<{ proceeds: number; profit: number; txHash: string }> {
-  const originalTokens =
-    pos.entryPriceEth > 0 ? pos.order.amountInEth / pos.entryPriceEth : 0;
-  const tokens =
-    pos.order.amountInEth > 0 ? originalTokens * (costEth / pos.order.amountInEth) : 0;
+  const tokens = tokensForCost(pos, costEth);
 
   // opts pass-through is used by the manual-close path: the author asked us
   // to keep trying through any transient Clanker anti-MEV / transfer-tax
