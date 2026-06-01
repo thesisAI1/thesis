@@ -1516,8 +1516,14 @@ function apiStream(req: IncomingMessage, res: ServerResponse): void {
 
   res.writeHead(200, {
     "content-type": "text/event-stream",
-    "cache-control": "no-cache",
+    // `no-transform` forbids intermediaries (nginx, CDNs) from gzipping the
+    // stream — compression buffers SSE so events never reach the EventSource.
+    "cache-control": "no-cache, no-transform",
     connection: "keep-alive",
+    // Tell nginx-style reverse proxies not to buffer this response; without it
+    // `proxy_buffering on` (the default) holds events back and the live feed
+    // looks dead even while reviews are streaming.
+    "x-accel-buffering": "no",
   });
   res.write(": connected\n\n");
   const unsubscribe = subscribe((event: StreamEvent) => {
