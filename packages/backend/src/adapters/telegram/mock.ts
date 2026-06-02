@@ -1,12 +1,12 @@
-import type { TelegramAdapter, TelegramMediaSource, TelegramSendResult, TelegramUpdate } from "./index.js";
+import type { SendMessageOpts, TelegramAdapter, TelegramMediaSource, TelegramSendResult, TelegramUpdate } from "./index.js";
 
 export class MockTelegram implements TelegramAdapter {
-  public sent: { chatId: string; text: string }[] = [];
+  public sent: { chatId: string; text: string; parseMode?: "HTML" }[] = [];
   public sentAnimations: { chatId: string; source: TelegramMediaSource; caption?: string }[] = [];
   public sentVideos: { chatId: string; source: TelegramMediaSource; caption?: string }[] = [];
 
-  async sendMessage(chatId: string, text: string): Promise<boolean> {
-    this.sent.push({ chatId, text });
+  async sendMessage(chatId: string, text: string, opts?: SendMessageOpts): Promise<boolean> {
+    this.sent.push({ chatId, text, ...(opts?.parseMode ? { parseMode: opts.parseMode } : {}) });
     console.log("[telegram:mock] → " + chatId + ": " + text.split("\n")[0]);
     return true;
   }

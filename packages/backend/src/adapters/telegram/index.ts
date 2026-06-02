@@ -15,8 +15,12 @@ export interface TelegramSendResult {
   fileId?: string;
 }
 
+export interface SendMessageOpts {
+  parseMode?: "HTML";
+}
+
 export interface TelegramAdapter {
-  sendMessage(chatId: string, text: string): Promise<boolean>;
+  sendMessage(chatId: string, text: string, opts?: SendMessageOpts): Promise<boolean>;
   getUpdates(offset?: number): Promise<TelegramUpdate[]>;
   sendAnimation(chatId: string, source: TelegramMediaSource, caption?: string): Promise<TelegramSendResult>;
   sendVideo(chatId: string, source: TelegramMediaSource, caption?: string): Promise<TelegramSendResult>;

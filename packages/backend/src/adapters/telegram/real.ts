@@ -1,6 +1,6 @@
 import { config } from "../../config.js";
 import { log } from "../../util/log.js";
-import type { TelegramAdapter, TelegramMediaSource, TelegramSendResult, TelegramUpdate } from "./index.js";
+import type { SendMessageOpts, TelegramAdapter, TelegramMediaSource, TelegramSendResult, TelegramUpdate } from "./index.js";
 import { redactText } from "./redact.js";
 
 interface TgResponse {
@@ -39,14 +39,19 @@ export class RealTelegram implements TelegramAdapter {
     return this.base;
   }
 
-  async sendMessage(chatId: string, text: string): Promise<boolean> {
+  async sendMessage(chatId: string, text: string, opts?: SendMessageOpts): Promise<boolean> {
     if (!this.botToken) return false;
 
     try {
+      const body: Record<string, unknown> = { chat_id: chatId, text };
+      if (opts?.parseMode) {
+        body["parse_mode"] = opts.parseMode;
+        body["link_preview_options"] = { is_disabled: true };
+      }
       const res = await fetch(`${this.base}/sendMessage`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: chatId, text }),
+        body: JSON.stringify(body),
         signal: AbortSignal.timeout(15_000),
       });
 

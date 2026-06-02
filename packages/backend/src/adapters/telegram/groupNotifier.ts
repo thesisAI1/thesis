@@ -112,6 +112,8 @@ export async function formatGroupEvent(
     }
 
     case "payout:sent": {
+      // `direct` payouts are already announced by `settle:summary`; only the later
+      // `escrow` claim is standalone — both emit, so this guard prevents a double-post.
       if (e.path !== "escrow") return null;
       const unit = nativeSymbol(e.chain);
       const text = redactText(
@@ -120,8 +122,23 @@ export async function formatGroupEvent(
       return { text, gif: "author-claim" };
     }
 
-    default:
+    // Explicit safety drops — these variants carry chain-error strings with
+    // wallet addresses / tx hashes and must NEVER reach the public group.
+    case "payout:failed":
+    case "settle:done":
+    case "settle:failed":
+    case "tweet:posted":
+    case "error":
+    case "liveness:stale":
       return null;
+
+    default: {
+      // A NEW OpsEvent variant now fails to compile here until consciously
+      // classified as "announce" or "drop" — silent-to-public by default is
+      // preserved, but no longer silent to the developer.
+      const _exhaustive: never = e;
+      return null;
+    }
   }
 }
 

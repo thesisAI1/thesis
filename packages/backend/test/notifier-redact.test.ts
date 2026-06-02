@@ -46,6 +46,7 @@ describe("formatOpsEvent — payout:failed branch redacts tx hashes (RED)", () =
     const out = formatOpsEvent({
       type: "payout:failed",
       at: "t",
+      chain: "base" as const,
       handle: "@a",
       amountEth: 0.5,
       reason: `reverted tx ${fullTx}`,

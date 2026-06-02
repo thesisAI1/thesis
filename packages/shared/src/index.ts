@@ -9,7 +9,9 @@
 // ── Observability ────────────────────────────────────────────────────────────
 
 /** One structured entry in the operational event log.
- *  `at` is an ISO-8601 timestamp string; `msg` is pre-redacted by the server. */
+ *  `at` is an ISO-8601 timestamp string.
+ *  `msg` is stored RAW (may contain wallet addresses / tx hashes / error strings);
+ *  consumers MUST redact at egress (`redactText`) before any public surface. */
 export interface EventLogEntry {
   at: string;
   level: "info" | "warn" | "error";

@@ -54,13 +54,15 @@ describe("formatOpsEvent — liveness:stale", () => {
 });
 
 describe("formatOpsEvent — address redaction (AC8)", () => {
-  it("truncates wallet and txHash — never emits full 0x addresses", () => {
+  it("truncates wallet and txHash in labels — full addrs only inside hrefs", () => {
     const fullWallet = "0x1234567890abcdef1234567890abcdef12345678";
     const fullTx = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
 
     const out = formatOpsEvent({
       type: "payout:sent",
       at: new Date().toISOString(),
+      path: "direct",
+      chain: "base",
       handle: "@alice",
       amountEth: 0.5,
       wallet: fullWallet,
@@ -68,12 +70,15 @@ describe("formatOpsEvent — address redaction (AC8)", () => {
     });
 
     assert.ok(out !== null, "should return a string for payout:sent");
-    assert.ok(!out!.includes(fullWallet), `SECURITY: full wallet address must not appear in message. Got: ${out}`);
-    assert.ok(!out!.includes(fullTx), `SECURITY: full txHash must not appear in message. Got: ${out}`);
-    // Truncated form should be present (e.g. "0x1234…5678")
+    // Full addresses MAY appear inside href (admin channel — intentional).
+    // But the visible label (outside href) must be truncated.
+    const plainText = out!.replace(/<a href="[^"]*">([^<]*)<\/a>/g, "$1");
+    assert.ok(!plainText.includes(fullWallet), `SECURITY: full wallet must not appear in label. Plain: ${plainText}`);
+    assert.ok(!plainText.includes(fullTx), `SECURITY: full txHash must not appear in label. Plain: ${plainText}`);
+    // Truncated form should be present in visible label (e.g. "0x1234…5678")
     assert.ok(
-      out!.includes("0x1234") && out!.includes("5678"),
-      `truncated wallet should appear, got: ${out}`,
+      plainText.includes("0x1234") && plainText.includes("5678"),
+      `truncated wallet should appear in label, got: ${plainText}`,
     );
   });
 });

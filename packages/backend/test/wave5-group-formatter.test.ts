@@ -40,6 +40,7 @@ describe("formatGroupEvent trade:buy", () => {
       handle: "@alice",
       amountEth: 0.1,
       contract: "0xabcdef1234567890abcdef1234567890abcdef12",
+      chain: "base",
     };
     const msg = await formatGroupEvent(e, deps);
     assert.ok(msg !== null, "expected non-null");
@@ -56,6 +57,7 @@ describe("formatGroupEvent trade:buy", () => {
       handle: "@alice",
       amountEth: 0.1,
       contract: "0xabcdef1234567890abcdef1234567890abcdef12",
+      chain: "base",
     };
     const msg = await formatGroupEvent(e, deps);
     assert.ok(msg !== null);
@@ -83,6 +85,7 @@ describe("formatGroupEvent trade:sell", () => {
       tier: 1,
       proceedsEth: 0.5,
       profitEth: 0.4,
+      chain: "base",
     };
     const msg = await formatGroupEvent(e, deps);
     assert.ok(msg !== null, "expected non-null");
@@ -184,6 +187,7 @@ describe("formatGroupEvent position:close", () => {
       positionId: "p1",
       netPnlEth: 0.5,
       reason: "tp",
+      chain: "base",
     };
     const msg = await formatGroupEvent(e, deps);
     assert.equal(msg, null);
@@ -196,6 +200,7 @@ describe("formatGroupEvent position:close", () => {
       positionId: "p1",
       netPnlEth: -0.05,
       reason: "sl",
+      chain: "base",
     };
     // pnlPct(-0.05, 0.1) = -50
     const msg = await formatGroupEvent(e, deps);
@@ -211,6 +216,7 @@ describe("formatGroupEvent position:close", () => {
       positionId: "p1",
       netPnlEth: 0,
       reason: "manual",
+      chain: "base",
     };
     const msg = await formatGroupEvent(e, deps);
     assert.ok(msg !== null, "expected non-null for netPnl===0");
@@ -283,6 +289,7 @@ describe("formatGroupEvent security no-leak", () => {
       tier: 1,
       proceedsEth: 0.15,
       profitEth: 0.05,
+      chain: "base",
     };
     const msg = await formatGroupEvent(e, deps);
     assert.ok(msg !== null);
@@ -303,6 +310,7 @@ describe("formatGroupEvent security no-leak", () => {
       positionId: "p1",
       netPnlEth: -0.05,
       reason: "sl",
+      chain: "base",
     };
     const msg = await formatGroupEvent(e, deps);
     assert.ok(msg !== null);
@@ -365,7 +373,29 @@ describe("formatGroupEvent noise events", () => {
   });
 
   test("settle:done → null", async () => {
-    const e: OpsEvent = { type: "settle:done", at: "", positionId: "p", toAuthorEth: 0, totalProfitEth: 0 };
+    const e: OpsEvent = { type: "settle:done", at: "", chain: "base", positionId: "p", toAuthorEth: 0, totalProfitEth: 0 };
+    assert.equal(await formatGroupEvent(e, deps), null);
+  });
+
+  test("payout:failed → null (carries chain-error strings with wallets/hashes)", async () => {
+    const e: OpsEvent = {
+      type: "payout:failed",
+      at: "",
+      chain: "base",
+      handle: "@alice",
+      amountEth: 0.1,
+      reason: "execution reverted: 0xdeadbeef wallet=0xA1Ace00000000000000000000000000000001A1A",
+    };
+    assert.equal(await formatGroupEvent(e, deps), null);
+  });
+
+  test("settle:failed → null (carries chain-error strings with positionId/tx hashes)", async () => {
+    const e: OpsEvent = {
+      type: "settle:failed",
+      at: "",
+      positionId: "p1",
+      reason: "tx 0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab reverted",
+    };
     assert.equal(await formatGroupEvent(e, deps), null);
   });
 });

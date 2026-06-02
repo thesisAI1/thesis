@@ -151,7 +151,7 @@ async function handleWalletReply(post: XPost, req: PayoutRequest): Promise<void>
   } catch (err) {
     // Keep the escrow and the request so the payout can be retried next poll.
     log.error(`payout: send to ${req.handle} failed — ${String(err)}`);
-    logEvent({ level: "error", area: "payout", type: "payout:failed", msg: `payout: send to ${req.handle} failed — ${String(err)}`, ops: { type: "payout:failed", at: new Date().toISOString(), handle: req.handle, amountEth: owed, reason: String(err) } });
+    logEvent({ level: "error", area: "payout", type: "payout:failed", msg: `payout: send to ${req.handle} failed — ${String(err)}`, ops: { type: "payout:failed", at: new Date().toISOString(), chain, handle: req.handle, amountEth: owed, reason: String(err) } });
     return;
   }
 

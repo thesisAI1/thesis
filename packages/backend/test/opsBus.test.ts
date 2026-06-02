@@ -50,4 +50,23 @@ describe("opsBus", () => {
     assert.deepEqual(a[0], event);
     assert.deepEqual(b[0], event);
   });
+
+  it("a throwing subscriber does NOT crash publishOps (money-path guard)", () => {
+    const good: unknown[] = [];
+
+    // Subscriber that throws — must not propagate
+    const unsubBad = subscribeOps((_e) => { throw new Error("subscriber boom"); });
+    // Good subscriber must still receive the event
+    const unsubGood = subscribeOps((e) => good.push(e));
+
+    const event = { type: "error" as const, at: new Date().toISOString(), area: "test", msg: "safe" };
+    // publishOps must not throw even though one subscriber throws
+    assert.doesNotThrow(() => publishOps(event));
+
+    unsubBad();
+    unsubGood();
+
+    assert.equal(good.length, 1, "good subscriber must still receive the event");
+    assert.deepEqual(good[0], event);
+  });
 });

@@ -42,9 +42,26 @@ function nullResolve(_kind: string): null {
   return null;
 }
 
-// Helper: flush fire-and-forget promises
-async function flush(): Promise<void> {
-  await new Promise((r) => setTimeout(r, 20));
+// Poll until condition is met or timeout expires (default 500ms, polls every 5ms).
+// Use this for tests that expect at least N sends — eliminates fixed-timeout flake.
+async function waitUntil(
+  condition: () => boolean,
+  timeoutMs = 500,
+  intervalMs = 5,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) {
+      throw new Error(`waitUntil: condition not met within ${timeoutMs}ms`);
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}
+
+// For "sends nothing" tests there is no positive signal to poll.
+// Drain the microtask/promise queue with one event-loop tick.
+async function drainMicrotasks(): Promise<void> {
+  await new Promise((r) => setImmediate(r));
 }
 
 const CHAT_ID = "-100123";
@@ -66,8 +83,8 @@ describe("startGroupNotifier — gating", () => {
       resolveAsset: nullResolve,
     });
 
-    publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: "p1", handle: "@alice", amountEth: 0.1, contract: "0xdeadbeef" });
-    await flush();
+    publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: "p1", handle: "@alice", amountEth: 0.1, contract: "0xdeadbeef", chain: "base" });
+    await drainMicrotasks();
     stop();
 
     assert.equal(mock.sent.length, 0, "disabled → nothing sent");
@@ -85,8 +102,8 @@ describe("startGroupNotifier — gating", () => {
       resolveAsset: nullResolve,
     });
 
-    publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: "p1", handle: "@alice", amountEth: 0.1, contract: "0xdeadbeef" });
-    await flush();
+    publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: "p1", handle: "@alice", amountEth: 0.1, contract: "0xdeadbeef", chain: "base" });
+    await drainMicrotasks();
     stop();
 
     assert.equal(mock.sent.length, 0, "empty chatId → nothing sent");
@@ -103,8 +120,8 @@ describe("startGroupNotifier — gating", () => {
       resolveAsset: nullResolve,
     });
 
-    publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: "p1", handle: "@alice", amountEth: 0.1, contract: "0xdeadbeef" });
-    await flush();
+    publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: "p1", handle: "@alice", amountEth: 0.1, contract: "0xdeadbeef", chain: "base" });
+    await drainMicrotasks();
     stop();
 
     assert.equal(mock.sent.length, 0, "empty botToken → nothing sent");
@@ -130,20 +147,20 @@ describe("startGroupNotifier — event filter", () => {
     const at = new Date().toISOString();
 
     // Should send (5 total)
-    publishOps({ type: "trade:buy",       at, positionId: "p1", handle: "@alice", amountEth: 0.1, contract: "0xabc" });
-    publishOps({ type: "trade:sell",      at, positionId: "p2", tier: 1, proceedsEth: 0.2, profitEth: 0.1 });
+    publishOps({ type: "trade:buy",       at, positionId: "p1", handle: "@alice", amountEth: 0.1, contract: "0xabc", chain: "base" });
+    publishOps({ type: "trade:sell",      at, positionId: "p2", tier: 1, proceedsEth: 0.2, profitEth: 0.1, chain: "base" });
     publishOps({ type: "settle:summary",  at, positionId: "p3", handle: "@alice", totalProfitEth: 0.5, toAuthorEth: 0.1, toPortfolioEth: 0.1, toTeamEth: 0.1, toBuybackEth: 0.1, authorPaid: "direct" });
-    publishOps({ type: "position:close",  at, positionId: "p4", netPnlEth: -0.05, reason: "sl" });  // loss → sends
-    publishOps({ type: "payout:sent",     at, path: "escrow", handle: "@alice", amountEth: 0.1, wallet: "0x1111", txHash: "0x2222" }); // escrow → sends
+    publishOps({ type: "position:close",  at, positionId: "p4", netPnlEth: -0.05, reason: "sl", chain: "base" });  // loss → sends
+    publishOps({ type: "payout:sent",     at, path: "escrow", chain: "base", handle: "@alice", amountEth: 0.1, wallet: "0x1111", txHash: "0x2222" }); // escrow → sends
 
     // Should NOT send
-    publishOps({ type: "payout:sent",     at, path: "direct", handle: "@alice", amountEth: 0.05, wallet: "0x3333", txHash: "0x4444" }); // direct → filtered
-    publishOps({ type: "position:close",  at, positionId: "p5", netPnlEth: 0.2, reason: "tp" });  // win → filtered
+    publishOps({ type: "payout:sent",     at, path: "direct", chain: "base", handle: "@alice", amountEth: 0.05, wallet: "0x3333", txHash: "0x4444" }); // direct → filtered
+    publishOps({ type: "position:close",  at, positionId: "p5", netPnlEth: 0.2, reason: "tp", chain: "base" });  // win → filtered
     publishOps({ type: "error",           at, area: "svc", msg: "boom" });
     publishOps({ type: "liveness:stale",  at, secondsSinceTick: 120 });
     publishOps({ type: "tweet:posted",    at, kind: "buy", replyId: "r1", postId: "p1" });
 
-    await flush();
+    await waitUntil(() => mock.sent.length + mock.sentAnimations.length >= 5);
     stop();
 
     // No animations because resolveAsset always returns null
@@ -168,8 +185,8 @@ describe("startGroupNotifier — caption content", () => {
       resolveAsset: nullResolve,
     });
 
-    publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: "p1", handle: "@alice", amountEth: 0.1, contract: "0xabc" });
-    await flush();
+    publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: "p1", handle: "@alice", amountEth: 0.1, contract: "0xabc", chain: "base" });
+    await waitUntil(() => mock.sent.length >= 1);
     stop();
 
     assert.equal(mock.sent.length, 1, "should have sent 1 message");
@@ -193,14 +210,14 @@ describe("startGroupNotifier — unsubscribe", () => {
       resolveAsset: nullResolve,
     });
 
-    publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: "p1", handle: "@alice", amountEth: 0.1, contract: "0xabc" });
-    await flush();
+    publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: "p1", handle: "@alice", amountEth: 0.1, contract: "0xabc", chain: "base" });
+    await waitUntil(() => mock.sent.length + mock.sentAnimations.length >= 1);
 
     const countBeforeStop = mock.sent.length + mock.sentAnimations.length;
     stop();
 
-    publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: "p2", handle: "@bob", amountEth: 0.2, contract: "0xdef" });
-    await flush();
+    publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: "p2", handle: "@bob", amountEth: 0.2, contract: "0xdef", chain: "base" });
+    await drainMicrotasks();
 
     const countAfterStop = mock.sent.length + mock.sentAnimations.length;
     assert.equal(countAfterStop, countBeforeStop, "stop() must unsubscribe — no further sends after stop()");

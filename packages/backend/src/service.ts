@@ -164,7 +164,7 @@ async function processSubmission(submission: Submission): Promise<void> {
         positionId: result.position.id,
         amountEth: result.position.order.amountInEth,
       });
-      publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: result.position.id, handle: submission.authorHandle, amountEth: result.position.order.amountInEth, contract: result.position.order.contractAddress });
+      publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: result.position.id, handle: submission.authorHandle, amountEth: result.position.order.amountInEth, contract: result.position.order.contractAddress, chain: result.position.order.chain });
       await replyOnBuy(submission, result);
     } else if (result.skippedReason) {
       log.info(`bursar: no buy — ${result.skippedReason}`);
@@ -269,7 +269,14 @@ export async function reconcilePendingBuys(): Promise<void> {
       });
     }
   } catch (err) {
-    log.warn(`service: pending-buy reconcile failed — ${String(err)}`);
+    const msg = `service: pending-buy reconcile failed — ${String(err)}`;
+    logEvent({
+      level: "error",
+      area: "service",
+      type: "reconcile-failed",
+      msg,
+      ops: { type: "error", at: new Date().toISOString(), area: "reconcile", msg },
+    });
   }
 }
 

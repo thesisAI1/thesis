@@ -12,12 +12,12 @@ import type { Chain } from "@thesis/shared";
  * PnL fields (profitEth, netPnlEth) may be negative (loss).
  */
 export type OpsEvent =
-  | { type: "trade:buy"; at: string; positionId: string; handle: string; amountEth: number; contract: string }
-  | { type: "trade:sell"; at: string; positionId: string; tier: number; proceedsEth: number; profitEth: number }
-  | { type: "position:close"; at: string; positionId: string; netPnlEth: number; reason: "tp" | "sl" | "manual" | "aging" }
+  | { type: "trade:buy"; at: string; positionId: string; handle: string; amountEth: number; contract: string; chain: Chain }
+  | { type: "trade:sell"; at: string; positionId: string; tier: number; proceedsEth: number; profitEth: number; chain: Chain }
+  | { type: "position:close"; at: string; positionId: string; netPnlEth: number; reason: "tp" | "sl" | "manual" | "aging"; chain: Chain }
   | { type: "payout:sent"; at: string; path: "direct" | "escrow"; chain: Chain; handle: string; amountEth: number; wallet: string; txHash: string }
-  | { type: "payout:failed"; at: string; handle: string; amountEth: number; reason: string }
-  | { type: "settle:done"; at: string; positionId: string; toAuthorEth: number; totalProfitEth: number }
+  | { type: "payout:failed"; at: string; chain: Chain; handle: string; amountEth: number; reason: string }
+  | { type: "settle:done"; at: string; chain: Chain; positionId: string; toAuthorEth: number; totalProfitEth: number }
   | { type: "settle:summary"; at: string; positionId: string; handle: string; totalProfitEth: number; toAuthorEth: number; toPortfolioEth: number; toTeamEth: number; toBuybackEth: number; authorPaid: "direct" | "escrowed" }
   | { type: "settle:failed"; at: string; positionId: string; reason: string }
   | { type: "tweet:posted"; at: string; kind: string; replyId: string; postId: string }
@@ -36,6 +36,12 @@ export function publishOps(e: OpsEvent): void {
 }
 
 export function subscribeOps(fn: (e: OpsEvent) => void): () => void {
-  bus.on(EVENT, fn);
-  return () => bus.off(EVENT, fn);
+  // Wrap in a try/catch so a throwing subscriber cannot crash the trading loop
+  // (publishOps runs on the money path). Uses console.error directly — NOT logEvent —
+  // to avoid recursive bus re-entry.
+  const safe = (e: OpsEvent) => {
+    try { fn(e); } catch (err) { console.error("[opsBus] subscriber threw:", err instanceof Error ? err.message : err); }
+  };
+  bus.on(EVENT, safe);
+  return () => bus.off(EVENT, safe);
 }

@@ -45,6 +45,7 @@ describe("logEvent", () => {
       handle: "@a",
       amountEth: 0.1,
       contract: "0xabc",
+      chain: "base" as const,
     };
 
     logEvent({
@@ -86,6 +87,7 @@ describe("logEvent", () => {
       handle: "@b",
       amountEth: 0.05,
       contract: "0xdef",
+      chain: "base" as const,
     };
 
     logEvent({ level: "info", area: "x", type: "t", msg: "m", ops: opsPayload });

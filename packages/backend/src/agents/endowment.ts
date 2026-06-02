@@ -406,6 +406,7 @@ async function payAuthorDirect(
       ops: {
         type: "payout:failed",
         at: new Date().toISOString(),
+        chain: position.order.chain,
         handle: entry.handle,
         amountEth,
         reason,

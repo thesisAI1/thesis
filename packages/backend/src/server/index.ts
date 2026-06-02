@@ -426,7 +426,7 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
       area: "admin",
       type: "settle-stuck-payout:failed",
       msg,
-      ops: { type: "payout:failed", at: new Date().toISOString(), handle, amountEth, reason: String(err) },
+      ops: { type: "payout:failed", at: new Date().toISOString(), chain, handle, amountEth, reason: String(err) },
     });
     return sendJson(res, 500, { ok: false, error: "internal error" });
   }
@@ -1550,20 +1550,41 @@ const EVENTS_MAX_N = 500;
 /** Per-IP rate limit for /api/events: max 30 requests per 60 seconds. */
 const EVENTS_RATE_LIMIT = 30;
 const EVENTS_RATE_WINDOW_MS = 60_000;
-const _eventsRateMap = new Map<string, number[]>();
+export const _eventsRateMap = new Map<string, number[]>();
 
-function eventsRateLimitExceeded(req: IncomingMessage): boolean {
+// Call counter used to trigger periodic map sweeps — avoids a separate timer.
+let _eventsRateCallCount = 0;
+export const EVENTS_RATE_SWEEP_INTERVAL = 500;
+
+/** Evict keys whose entire timestamp window has expired. Called every ~500 invocations.
+ * @internal exported for testing only */
+export function _sweepEventsRateMap(now: number): void {
+  const cutoff = now - EVENTS_RATE_WINDOW_MS;
+  for (const [ip, ts] of _eventsRateMap) {
+    if (ts.every((t) => t <= cutoff)) {
+      _eventsRateMap.delete(ip);
+    }
+  }
+}
+
+function eventsRateLimitExceeded(req: IncomingMessage, now: number = Date.now()): boolean {
   const forwarded = req.headers["x-forwarded-for"];
   const firstHop = Array.isArray(forwarded)
     ? (forwarded[0] ?? "")
     : (forwarded ?? "").split(",")[0] ?? "";
   const ip = firstHop.trim() || req.socket.remoteAddress || "unknown";
 
-  const now = Date.now();
   const cutoff = now - EVENTS_RATE_WINDOW_MS;
   const timestamps = (_eventsRateMap.get(ip) ?? []).filter((t) => t > cutoff);
   timestamps.push(now);
+
   _eventsRateMap.set(ip, timestamps);
+
+  // Periodic sweep to prevent unbounded growth from IPs that stopped connecting.
+  _eventsRateCallCount = (_eventsRateCallCount + 1) % EVENTS_RATE_SWEEP_INTERVAL;
+  if (_eventsRateCallCount === 0) {
+    _sweepEventsRateMap(now);
+  }
 
   return timestamps.length > EVENTS_RATE_LIMIT;
 }

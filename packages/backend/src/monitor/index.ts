@@ -244,7 +244,7 @@ async function takeTier(pos: Position): Promise<boolean> {
     positionId: pos.id,
     amountEth: sale.profit,
   });
-  publishOps({ type: "trade:sell", at: new Date().toISOString(), positionId: pos.id, tier: tierNum, proceedsEth: sale.proceeds, profitEth: sale.profit });
+  publishOps({ type: "trade:sell", at: new Date().toISOString(), positionId: pos.id, tier: tierNum, proceedsEth: sale.proceeds, profitEth: sale.profit, chain: pos.order.chain });
 
   // Final tier closes the position. Mark + persist + settle BEFORE the reply
   // so the author-payment + holder-lottery lines can be folded into the
@@ -255,7 +255,7 @@ async function takeTier(pos: Position): Promise<boolean> {
     pos.closedAt = new Date().toISOString();
     await getStore().savePosition(pos);
     log.info(`monitor: ${pos.id} fully closed — all take-profit tiers cleared`);
-    publishOps({ type: "position:close", at: new Date().toISOString(), positionId: pos.id, netPnlEth: pos.realisedPnlEth, reason: "tp" });
+    publishOps({ type: "position:close", at: new Date().toISOString(), positionId: pos.id, netPnlEth: pos.realisedPnlEth, reason: "tp", chain: pos.order.chain });
     settled = await settle(pos);
   }
 
@@ -361,7 +361,7 @@ async function closeOutWithKind(
     positionId: pos.id,
     amountEth: total,
   });
-  publishOps({ type: "position:close", at: new Date().toISOString(), positionId: pos.id, netPnlEth: total, reason: kind });
+  publishOps({ type: "position:close", at: new Date().toISOString(), positionId: pos.id, netPnlEth: total, reason: kind, chain: pos.order.chain });
   // Settle first so we know how the author was paid (direct vs escrow vs
   // failed) AND who won the holder lottery — this gets folded into the
   // close-announcement tweet so the whole story lands as ONE reply.
@@ -521,7 +521,7 @@ async function settle(
       toBuybackEth: result.distribution.toBuybackEth,
       authorWallet: result.distribution.authorWallet,
     });
-    publishOps({ type: "settle:done", at: new Date().toISOString(), positionId: result.distribution.positionId, toAuthorEth: result.distribution.toAuthorEth, totalProfitEth: result.distribution.totalProfitEth });
+    publishOps({ type: "settle:done", at: new Date().toISOString(), chain: pos.order.chain, positionId: result.distribution.positionId, toAuthorEth: result.distribution.toAuthorEth, totalProfitEth: result.distribution.totalProfitEth });
     publishOps({ type: "settle:summary", at: new Date().toISOString(), positionId: result.distribution.positionId, handle: pos.authorHandle, totalProfitEth: result.distribution.totalProfitEth, toAuthorEth: result.distribution.toAuthorEth, toPortfolioEth: result.distribution.toPortfolioEth, toTeamEth: result.distribution.toTeamEth, toBuybackEth: result.distribution.toBuybackEth, authorPaid: result.distribution.authorWallet ? "direct" : "escrowed" });
     p.distributionDone = true;
   }
