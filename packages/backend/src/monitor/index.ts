@@ -799,8 +799,16 @@ async function buildProfitCardPng(
   let entryMarketCapUsd = pos.marketCapAtEntryUsd ?? null;
   let exitMarketCapUsd: number | null = null;
 
-  if (entryMarketCapUsd !== null && pos.entryPriceEth > 0 && pos.lastExitPriceEth != null) {
-    exitMarketCapUsd = entryMarketCapUsd * (pos.lastExitPriceEth / pos.entryPriceEth);
+  // Scale off the market-MID entry price (same snapshot as the cap), not
+  // entryPriceEth — the real fill price (post slippage/tax) understates the MC.
+  // Legacy rows without entryMarketPriceEth fall back to entryPriceEth.
+  const entryPriceBaselineEth =
+    pos.entryMarketPriceEth && pos.entryMarketPriceEth > 0
+      ? pos.entryMarketPriceEth
+      : pos.entryPriceEth;
+
+  if (entryMarketCapUsd !== null && entryPriceBaselineEth > 0 && pos.lastExitPriceEth != null) {
+    exitMarketCapUsd = entryMarketCapUsd * (pos.lastExitPriceEth / entryPriceBaselineEth);
   } else if (pos.entryPriceEth > 0 && pos.lastExitPriceEth != null) {
     // Fallback for pre-redesign positions — pull live MC, treat it as exit MC,
     // back-derive entry MC from the price ratio.

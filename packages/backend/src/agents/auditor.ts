@@ -131,6 +131,7 @@ export async function runAuditor(submission: Submission): Promise<TokenReport> {
     launchpad: token.launchpad,
     liquidityUsd: token.liquidityUsd,
     marketCapUsd: token.marketCapUsd,
+    priceEth: token.priceEth,
     launchedAt: token.launchedAt,
     top10Concentration: top10,
     topHolders: token.topHolders,

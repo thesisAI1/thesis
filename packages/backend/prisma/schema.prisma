@@ -55,6 +55,11 @@ model Position {
   /// market-mid cost-basis estimate (amountInEth / entryPriceEth).
   entryTokens          Float?
   marketCapAtEntryUsd  Float?
+  /// Market-mid token price (ETH) at entry, from the same snapshot as
+  /// marketCapAtEntryUsd. The dashboard scales live MC off this instead of
+  /// entryPriceEth (the post-slippage/tax fill price). Nullable: rows opened
+  /// before this column fall back to entryPriceEth.
+  entryMarketPriceEth  Float?
   entryTxHash          String
   remainingFraction    Float
   tiersHit             Int

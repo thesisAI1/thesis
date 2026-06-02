@@ -117,6 +117,12 @@ export interface TokenReport {
   liquidityUsd: number;
   /** Token market capitalisation in USD. */
   marketCapUsd: number;
+  /** Market-MID token price in ETH, from the SAME pool snapshot as
+   *  marketCapUsd. Persisted on the position at entry (entryMarketPriceEth) so
+   *  live MC scales off a market-mid baseline, not the fill price. Optional only
+   *  for back-compat with hand-built test fixtures — the real Auditor always
+   *  sets it (TokenOnChain.priceEth). */
+  priceEth?: number;
   /** ISO timestamp the token launched (its trading pair was created). */
   launchedAt: string;
   /** Combined share held by the top 10 holders, 0-1. */
@@ -198,6 +204,14 @@ export interface Position {
   /** Token market cap in USD at the moment the buy executed. Used by the UI
    *  to show the entry-vs-now spread without an extra historical-price fetch. */
   marketCapAtEntryUsd?: number;
+  /** Market-MID token price (ETH) at entry, from the SAME snapshot as
+   *  marketCapAtEntryUsd. This — NOT entryPriceEth — is the correct denominator
+   *  for live MC = marketCapAtEntryUsd × (currentPriceEth / entryMarketPriceEth):
+   *  the cap snapshot is market-mid, while entryPriceEth is the real fill price
+   *  (post slippage/tax), so dividing the cap by the fill price understates live
+   *  MC. Optional for back-compat: positions opened before this field fall back
+   *  to entryPriceEth (their displayed live MC stays approximate). */
+  entryMarketPriceEth?: number;
   /** Tx hash of the entry buy. */
   entryTxHash: string;
   /** Fraction of the original position still held (1 -> ... -> moonbag -> 0). */

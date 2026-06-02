@@ -1184,12 +1184,21 @@ async function buildDashboardPayload(): Promise<object> {
     const liveValueEth = remainingTokens * currentPriceEth;
     const unrealizedPnlEth = liveValueEth - remainingCost;
     openPositionsValueEth += liveValueEth;
-    // Current MC = entry MC × (current price / entry price). Token supply is
-    // constant for Clanker/Bankr deploys, so price ratio is a clean proxy.
+    // Current MC = entry MC × (current price / entry-MID price). Token supply is
+    // constant for Clanker/Bankr deploys, so the price ratio is a clean proxy —
+    // BUT the baseline must be the market-MID price from the same snapshot as the
+    // cap, NOT entryPriceEth (the real fill price, inflated by slippage/tax).
+    // Dividing the market-mid cap by the fill price understated live MC for every
+    // position bought into a thin/taxed pool. Fall back to entryPriceEth only for
+    // legacy rows opened before entryMarketPriceEth was recorded.
     const marketCapAtEntryUsd = p.marketCapAtEntryUsd ?? null;
+    const entryPriceBaselineEth =
+      p.entryMarketPriceEth && p.entryMarketPriceEth > 0
+        ? p.entryMarketPriceEth
+        : p.entryPriceEth;
     const marketCapNowUsd =
-      marketCapAtEntryUsd !== null && p.entryPriceEth > 0
-        ? marketCapAtEntryUsd * (currentPriceEth / p.entryPriceEth)
+      marketCapAtEntryUsd !== null && entryPriceBaselineEth > 0
+        ? marketCapAtEntryUsd * (currentPriceEth / entryPriceBaselineEth)
         : null;
     openPositions.push({
       id: p.id,

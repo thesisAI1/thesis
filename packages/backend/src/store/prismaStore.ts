@@ -90,6 +90,7 @@ export class PrismaStore implements Store {
     entryPriceEth: number;
     entryTokens: number | null;
     marketCapAtEntryUsd: number | null;
+    entryMarketPriceEth: number | null;
     entryTxHash: string;
     remainingFraction: number;
     tiersHit: number;
@@ -113,6 +114,7 @@ export class PrismaStore implements Store {
       entryPriceEth: row.entryPriceEth,
       entryTokens: undef(row.entryTokens),
       marketCapAtEntryUsd: undef(row.marketCapAtEntryUsd),
+      entryMarketPriceEth: undef(row.entryMarketPriceEth),
       entryTxHash: row.entryTxHash,
       remainingFraction: row.remainingFraction,
       tiersHit: row.tiersHit,
@@ -272,6 +274,7 @@ export class PrismaStore implements Store {
       entryPriceEth: position.entryPriceEth,
       entryTokens: position.entryTokens ?? null,
       marketCapAtEntryUsd: position.marketCapAtEntryUsd ?? null,
+      entryMarketPriceEth: position.entryMarketPriceEth ?? null,
       entryTxHash: position.entryTxHash,
       remainingFraction: position.remainingFraction,
       tiersHit: position.tiersHit,

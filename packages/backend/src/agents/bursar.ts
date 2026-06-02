@@ -148,6 +148,10 @@ export async function runBursar(verdict: Verdict): Promise<BursarResult> {
     // Snapshot the on-chain market cap at the moment the buy fills, so the
     // dashboard can show the entry-vs-now spread without a historical lookup.
     marketCapAtEntryUsd: verdict.tokenReport.marketCapUsd,
+    // Market-mid price from the SAME snapshot as the cap above. The dashboard
+    // scales live MC off THIS (not entryPriceEth, the post-slippage/tax fill
+    // price) so the cap and its price baseline come from one consistent source.
+    entryMarketPriceEth: verdict.tokenReport.priceEth,
     remainingFraction: 1,
     tiersHit: 0,
     realisedPnlEth: 0,

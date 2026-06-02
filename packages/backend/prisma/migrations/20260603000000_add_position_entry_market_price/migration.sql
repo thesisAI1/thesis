@@ -1,0 +1,13 @@
+-- Add the market-MID entry price (ETH) to Position.
+--
+-- marketCapAtEntryUsd is a market-mid snapshot, but entryPriceEth is the real
+-- fill price (post slippage/tax). The dashboard scaled live MC by
+-- marketCapAtEntryUsd × (currentPriceEth / entryPriceEth), dividing a market-mid
+-- cap by the fill price — which systematically understated live MC (worse for
+-- thin/tax tokens). This column stores the market-mid price from the SAME
+-- snapshot as the cap, so live MC scales off a consistent baseline.
+--
+-- Nullable on purpose: positions opened before this column read back as NULL and
+-- fall back to entryPriceEth (their live MC stays approximate). New buys record
+-- the market-mid price (see The Bursar / TokenReport.priceEth).
+ALTER TABLE "Position" ADD COLUMN "entryMarketPriceEth" REAL;
