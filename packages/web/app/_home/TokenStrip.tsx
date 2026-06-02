@@ -4,7 +4,9 @@
  * DexScreener" link tucked directly beneath the chart. The CA matches the shell
  * footer's THESIS_CA; copy uses the shared CopyButton.
  */
+import type { SVGProps } from "react";
 import { CopyButton } from "@/components/shell/CopyButton";
+import { GitHubIcon, TelegramIcon, XIcon } from "@/components/shell/icons";
 import { Reveal } from "./Reveal";
 
 const THESIS_CA = "0x36e807119529E44d6F36aD5CE24AeB87a4529ba3";
@@ -13,6 +15,20 @@ const EMBED_URL = `${DEXSCREENER_URL}?embed=1&theme=dark&trades=0&info=0`;
 
 const TOP_EDGE =
   "before:absolute before:inset-x-0 before:top-0 before:h-px before:bg-[linear-gradient(90deg,transparent,rgba(255,255,255,0.06),transparent)] before:content-['']";
+
+/** The three community channels, surfaced prominently beneath the chart. */
+interface Social {
+  name: string;
+  handle: string;
+  href: string;
+  Icon: (props: SVGProps<SVGSVGElement>) => React.ReactElement;
+}
+
+const SOCIALS: Social[] = [
+  { name: "X", handle: "@thesisonbase", href: "https://x.com/thesisonbase", Icon: XIcon },
+  { name: "Telegram", handle: "t.me/thesistoken", href: "https://t.me/thesistoken", Icon: TelegramIcon },
+  { name: "GitHub", handle: "thesisAI1/thesis", href: "https://github.com/thesisAI1/thesis", Icon: GitHubIcon },
+];
 
 export function TokenStrip() {
   return (
@@ -65,6 +81,43 @@ export function TokenStrip() {
               open it on DexScreener ↗
             </a>
             .
+          </div>
+        </div>
+      </Reveal>
+
+      {/* community — the three channels, surfaced prominently as a join row */}
+      <Reveal className="mt-[14px]">
+        <div
+          className={`relative overflow-hidden rounded-lg border border-border bg-[linear-gradient(180deg,#131825_0%,#0e1219_100%)] px-6 py-[22px] ${TOP_EDGE}`}
+        >
+          <div className="flex flex-col items-center gap-1 text-center">
+            <span className="font-mono text-[10px] uppercase tracking-[1.6px] text-dim">COMMUNITY</span>
+            <h3 className="font-serif text-[20px] font-bold text-accent">Join the conversation</h3>
+            <p className="mt-0.5 max-w-[52ch] text-[12.5px] leading-[1.5] text-muted">
+              Follow the committee&apos;s verdicts in real time, talk theses with the floor, and read
+              every line of the code.
+            </p>
+          </div>
+          <div className="mx-auto mt-[18px] grid max-w-[640px] gap-3 sm:grid-cols-3">
+            {SOCIALS.map((s) => (
+              <a
+                key={s.href}
+                href={s.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group flex items-center justify-center gap-[11px] rounded-md border border-border-2 bg-panel-2 px-[18px] py-[15px] transition-colors hover:border-border-hi"
+              >
+                <s.Icon
+                  width={20}
+                  height={20}
+                  className="text-muted transition-colors group-hover:text-accent"
+                />
+                <span className="flex flex-col leading-tight">
+                  <span className="text-[14px] font-semibold text-text">{s.name}</span>
+                  <span className="font-mono text-[11px] text-dim">{s.handle}</span>
+                </span>
+              </a>
+            ))}
           </div>
         </div>
       </Reveal>
