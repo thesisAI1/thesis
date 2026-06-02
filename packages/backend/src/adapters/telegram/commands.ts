@@ -1,9 +1,20 @@
 import { config } from "../../config.js";
 import { getEventLog } from "../../observability/eventLog.js";
 import { getStore } from "../../store/index.js";
-import type { Distribution, Position, ReviewRecord } from "@thesis/shared";
+import type { Chain, Distribution, Position, ReviewRecord } from "@thesis/shared";
+import { nativeSymbol } from "@thesis/shared";
 import type { Funnel } from "../../store/index.js";
 import { truncAddr, redactText } from "./redact.js";
+import { parseCommand } from "./parse.js";
+
+/** Sum a Map<Chain, number> into "0.1234 ETH + 0.5 SOL" (per-chain, never the Ξ
+ *  glyph and never summing across chains). Empty → "0 ETH". */
+function fmtByChain(byChain: Map<Chain, number>): string {
+  const parts = [...byChain.entries()]
+    .filter(([, v]) => v !== 0)
+    .map(([chain, v]) => `${v.toFixed(4)} ${nativeSymbol(chain)}`);
+  return parts.length > 0 ? parts.join(" + ") : "0 ETH";
+}
 
 export interface StoreReads {
   getOpenPositions(): Promise<Position[]>;
@@ -23,7 +34,7 @@ export async function handleCommand(
 
   if (!allowedChats.includes(chatId)) return null;
 
-  const cmd = text.trim().split(/\s+/)[0] ?? "";
+  const { cmd } = parseCommand(text);
 
   switch (cmd) {
     case "/help":
@@ -40,7 +51,7 @@ export async function handleCommand(
       if (open.length === 0) return "no open positions.";
       const lines = open.map(
         (p) =>
-          `${p.id} ${truncAddr(p.order.contractAddress)} ${p.authorHandle} pnl ${p.realisedPnlEth.toFixed(4)}Ξ`,
+          `${p.id} ${truncAddr(p.order.contractAddress)} ${p.authorHandle} pnl ${p.realisedPnlEth.toFixed(4)} ${nativeSymbol(p.order.chain)}`,
       );
       return lines.join("\n");
     }
@@ -48,9 +59,20 @@ export async function handleCommand(
     case "/pnl": {
       const all = await store.getAllPositions();
       const dists = await store.getDistributions();
-      const realized = all.reduce((sum, p) => sum + p.realisedPnlEth, 0);
-      const toAuthors = dists.reduce((sum, d) => sum + d.toAuthorEth, 0);
-      return `realized PnL ${realized.toFixed(4)}Ξ · total to authors ${toAuthors.toFixed(4)}Ξ`;
+      // Group per chain — ETH and SOL are different currencies and must never
+      // be summed into one number. Distribution carries no chain, so join it to
+      // its position via positionId (fall back to base for an orphan dist).
+      const chainOf = new Map<string, Chain>(all.map((p) => [p.id, p.order.chain]));
+      const realizedByChain = new Map<Chain, number>();
+      for (const p of all) {
+        realizedByChain.set(p.order.chain, (realizedByChain.get(p.order.chain) ?? 0) + p.realisedPnlEth);
+      }
+      const authorByChain = new Map<Chain, number>();
+      for (const d of dists) {
+        const ch = chainOf.get(d.positionId) ?? "base";
+        authorByChain.set(ch, (authorByChain.get(ch) ?? 0) + d.toAuthorEth);
+      }
+      return `realized PnL ${fmtByChain(realizedByChain)} · total to authors ${fmtByChain(authorByChain)}`;
     }
 
     case "/stats": {
