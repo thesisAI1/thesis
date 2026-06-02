@@ -128,14 +128,13 @@ export interface ReviewsSummary {
   skips: number;
 }
 
-/** Distribution totals across every payout. The four `to*` sums feed the
- *  "total paid to authors" / buyback / team / portfolio KPIs. */
+/** Distribution totals across every payout. The three `to*` sums feed the
+ *  "total paid to authors" / portfolio / buyback KPIs. */
 export interface DistributionsSummary {
   count: number;
   /** Sum of toAuthorEth — the "total paid to authors" figure. */
   toAuthors: number;
   toPortfolio: number;
-  toTeam: number;
   toBuyback: number;
 }
 
@@ -153,7 +152,7 @@ export interface FunnelSummary {
 export interface ActivityItem {
   /** ISO timestamp. */
   at: string;
-  kind: "buy" | "tp" | "sl" | "manual" | "aging" | "lottery" | "burn" | "skip";
+  kind: "buy" | "tp" | "sl" | "manual" | "aging" | "burn" | "skip";
   /** Pre-formatted human-readable line, e.g. "@author hit TP1 (+100%)". */
   summary: string;
   authorHandle?: string;
@@ -166,7 +165,6 @@ export interface ActivityItem {
  *  Each `*TotalEth` is "ever distributed to this leg since launch". */
 export interface CountersSummary {
   authorsTotalEth: number;
-  lotteryTotalEth: number;
   buybackTotalEth: number;
   portfolioTotalEth: number;
   /** 0-1, rolling 7-day. */

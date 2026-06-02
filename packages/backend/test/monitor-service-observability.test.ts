@@ -148,7 +148,7 @@ test.skip("G6b: settlePosition returns null → settle:failed ops event publishe
 // ── G6c — INCOMPLETE settlement → settle:failed ops emitted ─────────────────
 // Drives the monitor INCOMPLETE branch: all payout legs fail (AlwaysFailChain),
 // the position closes but no leg marks done → settle() hits the
-// `!(authorDone && teamDone && buybackDone)` guard and logs log.error.
+// `!(authorDone && buybackDone)` guard and logs log.error.
 // GREEN must publish a `settle:failed` ops event in that branch.
 test("G6c: INCOMPLETE settlement emits settle:failed ops event", async () => {
   const store = getStore();

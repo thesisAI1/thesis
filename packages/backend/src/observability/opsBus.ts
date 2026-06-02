@@ -18,7 +18,7 @@ export type OpsEvent =
   | { type: "payout:sent"; at: string; path: "direct" | "escrow"; chain: Chain; handle: string; amountEth: number; wallet: string; txHash: string }
   | { type: "payout:failed"; at: string; chain: Chain; handle: string; amountEth: number; reason: string }
   | { type: "settle:done"; at: string; chain: Chain; positionId: string; toAuthorEth: number; totalProfitEth: number }
-  | { type: "settle:summary"; at: string; positionId: string; handle: string; totalProfitEth: number; toAuthorEth: number; toPortfolioEth: number; toTeamEth: number; toBuybackEth: number; authorPaid: "direct" | "escrowed" }
+  | { type: "settle:summary"; at: string; positionId: string; handle: string; totalProfitEth: number; toAuthorEth: number; toPortfolioEth: number; toBuybackEth: number; authorPaid: "direct" | "escrowed" }
   | { type: "settle:failed"; at: string; positionId: string; reason: string }
   | { type: "tweet:posted"; at: string; kind: string; replyId: string; postId: string }
   | { type: "error"; at: string; area: string; msg: string }

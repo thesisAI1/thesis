@@ -1,16 +1,15 @@
 /**
- * The 25% split — a slim four-segment bar (author · portfolio · holder lottery ·
- * buyback & burn), each in its agent-adjacent colour. Lives in the $THESIS
+ * The profit split — a slim three-segment bar (author 25% · portfolio 50% ·
+ * buyback & burn 25%), each in its agent-adjacent colour. Lives in the $THESIS
  * section; the emotional "you get paid" copy now lives in the Manifesto, so this
  * is just the at-a-glance breakdown of where a winning trade goes.
  */
 import { Reveal } from "./Reveal";
 
-const QUARTERS: Array<{ label: string; color: string }> = [
-  { label: "To the author", color: "var(--blue)" },
-  { label: "To the portfolio", color: "var(--green)" },
-  { label: "To the lottery", color: "var(--purple)" },
-  { label: "Buyback & burn", color: "var(--red)" },
+const LEGS: Array<{ label: string; pct: string; color: string }> = [
+  { label: "To the author", pct: "25%", color: "var(--blue)" },
+  { label: "To the portfolio", pct: "50%", color: "var(--green)" },
+  { label: "Buyback & burn", pct: "25%", color: "var(--red)" },
 ];
 
 export function Split() {
@@ -24,7 +23,7 @@ export function Split() {
 
       <Reveal>
         <div className="flex overflow-hidden rounded-[10px] border border-border">
-          {QUARTERS.map((q, i) => (
+          {LEGS.map((q, i) => (
             <div
               key={q.label}
               className={`flex flex-1 items-center gap-2.5 px-3 py-[13px] ${i > 0 ? "border-l border-border" : ""}`}
@@ -35,7 +34,7 @@ export function Split() {
                   className="text-[19px] font-extrabold leading-none tracking-[-0.5px] tabular-nums"
                   style={{ color: q.color }}
                 >
-                  25%
+                  {q.pct}
                 </div>
                 <div className="mt-1 font-mono text-[10px] uppercase leading-tight tracking-[0.4px] text-muted">
                   {q.label}

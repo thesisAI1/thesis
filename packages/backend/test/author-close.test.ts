@@ -17,7 +17,6 @@ import "./helpers/isolate-store.js"; // temp DATA_DIR + mock mode before config 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Position } from "@thesis/shared";
-import { config } from "../src/config.js";
 import { createBaseDataAdapter } from "../src/adapters/basedata/index.js";
 import { getStore } from "../src/store/index.js";
 import { isCloseRequest, processAuthorCloseRequests } from "../src/pipeline/author-actions.js";
@@ -134,8 +133,6 @@ test("author-close: the author's close BELOW +20% is rejected (position stays op
 });
 
 test("author-close: the author's close ABOVE +20% executes (position closes)", async () => {
-  const lotteryWas = config.holderLottery.enabled;
-  (config.holderLottery as { enabled: boolean }).enabled = false; // keep settlement simple
   const store = getStore();
   const contract = "0xc105e0000000000000000000000000000000aa03";
   const price = await createBaseDataAdapter().getPriceEth(contract);
@@ -148,14 +145,10 @@ test("author-close: the author's close ABOVE +20% executes (position closes)", a
   });
   await store.savePosition(pos);
 
-  try {
-    await processAuthorCloseRequests([
-      closeReply({ authorXId: "author-above", inReplyToId: "thesis-above", text: "close it", postId: "above-reply" }),
-    ]);
+  await processAuthorCloseRequests([
+    closeReply({ authorXId: "author-above", inReplyToId: "thesis-above", text: "close it", postId: "above-reply" }),
+  ]);
 
-    const fresh = (await store.getAllPositions()).find((p) => p.id === "pos-above");
-    assert.equal(fresh?.status, "closed", "an author close well above +20% must execute");
-  } finally {
-    (config.holderLottery as { enabled: boolean }).enabled = lotteryWas;
-  }
+  const fresh = (await store.getAllPositions()).find((p) => p.id === "pos-above");
+  assert.equal(fresh?.status, "closed", "an author close well above +20% must execute");
 });

@@ -172,7 +172,6 @@ export class PrismaStore implements Store {
     totalProfitEth: number;
     toAuthorEth: number;
     toPortfolioEth: number;
-    toTeamEth: number;
     toBuybackEth: number;
     authorWallet: string | null;
   }): Distribution {
@@ -181,7 +180,6 @@ export class PrismaStore implements Store {
       totalProfitEth: row.totalProfitEth,
       toAuthorEth: row.toAuthorEth,
       toPortfolioEth: row.toPortfolioEth,
-      toTeamEth: row.toTeamEth,
       toBuybackEth: row.toBuybackEth,
       // `authorWallet` is `string | null` (NOT optional) — preserve null.
       authorWallet: row.authorWallet,
@@ -480,7 +478,6 @@ export class PrismaStore implements Store {
         totalProfitEth: dist.totalProfitEth,
         toAuthorEth: dist.toAuthorEth,
         toPortfolioEth: dist.toPortfolioEth,
-        toTeamEth: dist.toTeamEth,
         toBuybackEth: dist.toBuybackEth,
         authorWallet: dist.authorWallet,
       },

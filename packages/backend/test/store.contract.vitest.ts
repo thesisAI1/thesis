@@ -129,8 +129,7 @@ function makeDistribution(over: Partial<Distribution> = {}): Distribution {
     positionId: "pos-1",
     totalProfitEth: 1,
     toAuthorEth: 0.25,
-    toPortfolioEth: 0.25,
-    toTeamEth: 0.25,
+    toPortfolioEth: 0.5,
     toBuybackEth: 0.25,
     authorWallet: "0xWALLET",
     ...over,
@@ -472,7 +471,7 @@ describe.each(cases)("Store contract — $name", ({ name, make }) => {
         status: "closed",
         closedAt: "2026-02-01T00:00:00.000Z",
         settledAt: "2026-02-01T00:05:00.000Z",
-        settlement: { authorDone: true, teamDone: true, buybackDone: true, distributionDone: true },
+        settlement: { authorDone: true, buybackDone: true, distributionDone: true },
       }),
     );
     const unsettled = await store.getUnsettledClosedPositions();
@@ -482,7 +481,6 @@ describe.each(cases)("Store contract — $name", ({ name, make }) => {
   it("PARITY: settledAt + settlement round-trip exactly; never-set reads back undefined", async () => {
     const settlement = {
       authorDone: true,
-      teamDone: false,
       buybackDone: true,
       distributionDone: false,
     };

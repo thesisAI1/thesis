@@ -1,14 +1,12 @@
 /**
- * TDD RED — P2 operational-visibility gaps (G12a, G14, G15).
+ * TDD RED — P2 operational-visibility gaps (G14, G15).
  *
  * These tests assert that the relevant failure paths write a structured entry
- * into getEventLog() (and for G12a an ops event is published). Currently they
- * do not — the production code uses plain log.error / log.warn which writes
- * only to stdout, not to the structured event log. All cases below must FAIL
- * (RED) until the corresponding src changes land.
+ * into getEventLog(). Currently they do not — the production code uses plain
+ * log.error / log.warn which writes only to stdout, not to the structured
+ * event log. All cases below must FAIL (RED) until the corresponding src
+ * changes land.
  *
- * G12a  — holder enumeration hard-fail (stale ceiling exceeded) → error ops +
- *          event-log entry. Currently: log.error only.
  * G14   — closeByAuthor throws (DEX routes exhausted) → event-log warn entry
  *          in area "author-close". Currently: log.warn only.
  * G15   — LLM call fails in dean review committee → event-log warn entry.
@@ -20,59 +18,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { getEventLog } from "../src/observability/eventLog.js";
-import { subscribeOps, type OpsEvent } from "../src/observability/opsBus.js";
-import { getEligibleHolders } from "../src/holders/index.js";
 import { runDean } from "../src/agents/dean.js";
 import { config } from "../src/config.js";
 import type { AuthorReport, Submission, TokenReport } from "@thesis/shared";
-
-// ── G12a — holder enumeration hard-fail → error ops + event-log entry ────────
-//
-// When the snapshot cache is empty (initial state in mock mode, or after an
-// API outage) getEligibleHolders() hits the staleness ceiling:
-//   isSnapshotWithinStaleCeiling(0, 0, now, ttl) → false → log.error (today)
-//
-// Expected (post-fix): logEvent({level:"error", area:"holders",
-//   type:"holder-enum:failed", ops:{type:"error", ...}})
-//
-// Driven by calling getEligibleHolders() in mock mode where fetchHoldersSnapshot
-// returns [] early (no key/token set) — no external network call required.
-
-test("G12a: holder enum hard-fail → logEvent error + ops event published", async () => {
-  // Collect ops events published during this test.
-  const opsReceived: OpsEvent[] = [];
-  const unsub = subscribeOps((e) => opsReceived.push(e));
-
-  // Snapshot the event log before the call.
-  const before = getEventLog().recent(50).length;
-
-  try {
-    // In mock mode (no GOLDRUSH_API_KEY / THESIS_TOKEN_ADDRESS) fetchHoldersSnapshot
-    // returns [] without throwing, so _snapshotCache stays empty.  The staleness
-    // ceiling check (isSnapshotWithinStaleCeiling(0, …) → false) hits log.error.
-    // Post-fix it must call logEvent instead, which writes to the event log.
-    await getEligibleHolders();
-  } finally {
-    unsub();
-  }
-
-  const after = getEventLog().recent(50);
-  const newEntries = after.slice(0, after.length - before);
-
-  const errEntry = newEntries.find(
-    (e) => e.level === "error" && e.area === "holders",
-  );
-  assert.ok(
-    errEntry,
-    "expected an event-log error entry with area='holders' after a stale-ceiling hard-fail — got none (RED: log.error does not write to event log)",
-  );
-
-  const errOps = opsReceived.find((e) => e.type === "error");
-  assert.ok(
-    errOps,
-    "expected an ops event (type='error') after holder enum hard-fail — got none (RED: no logEvent with ops)",
-  );
-});
 
 // ── G14 — closeByAuthor failure → event-log warn in area "author-close" ───────
 //

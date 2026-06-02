@@ -124,16 +124,15 @@ export async function migrate(
   // durable settlement existed has no `settledAt`. Stamp it terminally settled
   // here, exactly as FileStore.migrate() does on load — otherwise the monitor's
   // resume pass (getUnsettledClosedPositions = closed && !settledAt) would treat
-  // every historical closed trade as unsettled and RE-PAY author + team +
-  // buyback on the first tick. A loss-close has nothing to re-run, so stamping
-  // all of them is safe; genuinely-unpaid authors use /admin/settle-stuck-payout.
+  // every historical closed trade as unsettled and RE-PAY author + buyback on
+  // the first tick. A loss-close has nothing to re-run, so stamping all of them
+  // is safe; genuinely-unpaid authors use /admin/settle-stuck-payout.
   let stampedSettled = 0;
   for (const position of data.positions) {
     if (position.status === "closed" && !position.settledAt) {
       position.settledAt = position.closedAt ?? new Date().toISOString();
       position.settlement = {
         authorDone: true,
-        teamDone: true,
         buybackDone: true,
         distributionDone: true,
       };

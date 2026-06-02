@@ -269,7 +269,7 @@ function renderTicker(items) {
   const renderOne = (it) => {
     const kindClass = {
       buy: "tk-buy", tp: "tk-tp", sl: "tk-sl", manual: "tk-manual",
-      aging: "tk-aging", lottery: "tk-lottery", burn: "tk-burn", skip: "tk-skip",
+      aging: "tk-aging", burn: "tk-burn", skip: "tk-skip",
     }[it.kind] || "";
     return `<span class="tk-item ${kindClass}">${esc(it.summary)}</span>`;
   };
@@ -286,7 +286,6 @@ function renderCounters(c) {
   card.hidden = false;
   $("#counter-buyback").textContent = fmtEth(c.buybackTotalEth || 0) + " Ξ";
   $("#counter-authors").textContent = fmtEth(c.authorsTotalEth || 0) + " Ξ";
-  $("#counter-lottery").textContent = fmtEth(c.lotteryTotalEth || 0) + " Ξ";
   const wr = c.winRate7d || 0;
   $("#counter-winrate").textContent = (wr * 100).toFixed(0) + "%";
   $("#counter-winrate-sub").textContent =
@@ -663,8 +662,7 @@ function renderFeed(rows) {
 function renderDist(di) {
   const cards = [
     ["25%", "#4F9DDE", fmtEth(di.toAuthors), "To authors"],
-    ["25%", "#3FB984", fmtEth(di.toPortfolio), "To trading portfolio"],
-    ["25%", "#9B6BDF", fmtEth(di.toTeam), "Holder lottery — 5 winners"],
+    ["50%", "#3FB984", fmtEth(di.toPortfolio), "To trading portfolio"],
     ["25%", "#E0653E", fmtEth(di.toBuyback), "$THESIS buyback & burn"],
   ];
   $("#dist-grid").innerHTML = cards.map(([pct, c, val, label]) => `<div class="dist-card" style="--c:${c}">

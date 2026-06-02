@@ -16,7 +16,6 @@ import { subscribeOps, type OpsEvent } from "../src/observability/opsBus.js";
 import { getStore } from "../src/store/index.js";
 import { runEndowment } from "../src/agents/endowment.js";
 import { runMonitorTick } from "../src/monitor/index.js";
-import { config } from "../src/config.js";
 
 // ── Chain adapter ─────────────────────────────────────────────────────────────
 
@@ -58,14 +57,6 @@ async function collectOps(fn: () => Promise<void>): Promise<OpsEvent[]> {
     unsub();
   }
   return captured;
-}
-
-function withLottery(enabled: boolean, fn: () => Promise<void>): Promise<void> {
-  const prev = config.holderLottery.enabled;
-  (config.holderLottery as { enabled: boolean }).enabled = enabled;
-  return fn().finally(() => {
-    (config.holderLottery as { enabled: boolean }).enabled = prev;
-  });
 }
 
 function makeClosedPosition(opts: { id: string; authorXId: string }): Position {
@@ -130,39 +121,37 @@ test("W1a: payAuthorDirect success emits payout:sent ops event", async () => {
     linkedAt: new Date().toISOString(),
   });
 
-  await withLottery(false, async () => {
-    const chain = new NormalChain();
-    __setChainForTest(chain);
-    try {
-      const ops = await collectOps(() =>
-        runEndowment(
-          makeClosedPosition({ id: "w1a-pos", authorXId }),
-          1.0,
-          { silentAuthorTweet: true },
-        ).then(() => undefined),
-      );
+  const chain = new NormalChain();
+  __setChainForTest(chain);
+  try {
+    const ops = await collectOps(() =>
+      runEndowment(
+        makeClosedPosition({ id: "w1a-pos", authorXId }),
+        1.0,
+        { silentAuthorTweet: true },
+      ).then(() => undefined),
+    );
 
-      const payoutSent = ops.filter((e) => e.type === "payout:sent");
+    const payoutSent = ops.filter((e) => e.type === "payout:sent");
+    assert.ok(
+      payoutSent.length >= 1,
+      `Expected at least one payout:sent ops event, got: [${ops.map((e) => e.type).join(", ")}]`,
+    );
+    const ev = payoutSent[0];
+    assert.equal(ev.type, "payout:sent");
+    if (ev.type === "payout:sent") {
       assert.ok(
-        payoutSent.length >= 1,
-        `Expected at least one payout:sent ops event, got: [${ops.map((e) => e.type).join(", ")}]`,
+        ev.handle === "@w1author" || ev.handle === authorXId,
+        `payout:sent handle must identify the author, got: ${ev.handle}`,
       );
-      const ev = payoutSent[0];
-      assert.equal(ev.type, "payout:sent");
-      if (ev.type === "payout:sent") {
-        assert.ok(
-          ev.handle === "@w1author" || ev.handle === authorXId,
-          `payout:sent handle must identify the author, got: ${ev.handle}`,
-        );
-        assert.ok(ev.amountEth > 0, `payout:sent amountEth must be > 0, got: ${ev.amountEth}`);
-        assert.ok(ev.wallet.length > 0, `payout:sent wallet must be non-empty, got: "${ev.wallet}"`);
-        assert.ok(ev.txHash.length > 0, `payout:sent txHash must be non-empty, got: "${ev.txHash}"`);
-        assert.equal(ev.chain, "base", `payout:sent chain must be "base" for a base position, got: "${ev.chain}"`);
-      }
-    } finally {
-      __setChainForTest(null);
+      assert.ok(ev.amountEth > 0, `payout:sent amountEth must be > 0, got: ${ev.amountEth}`);
+      assert.ok(ev.wallet.length > 0, `payout:sent wallet must be non-empty, got: "${ev.wallet}"`);
+      assert.ok(ev.txHash.length > 0, `payout:sent txHash must be non-empty, got: "${ev.txHash}"`);
+      assert.equal(ev.chain, "base", `payout:sent chain must be "base" for a base position, got: "${ev.chain}"`);
     }
-  });
+  } finally {
+    __setChainForTest(null);
+  }
 });
 
 // ── W1b: settle:summary emitted once when settlement fully completes ──────────
@@ -205,7 +194,6 @@ test("W1b: complete settlement via monitor emits exactly one settle:summary with
     assert.ok(ev.totalProfitEth > 0, `settle:summary totalProfitEth must be > 0, got: ${ev.totalProfitEth}`);
     assert.ok(ev.toAuthorEth > 0, `settle:summary toAuthorEth must be > 0, got: ${ev.toAuthorEth}`);
     assert.ok(typeof ev.toPortfolioEth === "number", `settle:summary toPortfolioEth must be present`);
-    assert.ok(typeof ev.toTeamEth === "number", `settle:summary toTeamEth must be present`);
     assert.ok(typeof ev.toBuybackEth === "number", `settle:summary toBuybackEth must be present`);
   } finally {
     __setChainForTest(null);

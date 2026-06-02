@@ -72,7 +72,6 @@ const dist1: Distribution = {
   totalProfitEth: 1,
   toAuthorEth: 0.4,
   toPortfolioEth: 0,
-  toTeamEth: 0,
   toBuybackEth: 0,
   authorWallet: "0xWALLETwALLETwALLETwALLETwALLETwALLETwA",
 };

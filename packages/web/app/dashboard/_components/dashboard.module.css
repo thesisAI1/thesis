@@ -1270,9 +1270,6 @@ a.ac:hover .acView {
 .tkAging::before {
   background: #e0a33e;
 }
-.tkLottery::before {
-  background: #9b6bdf;
-}
 .tkBurn::before {
   background: var(--accent);
 }

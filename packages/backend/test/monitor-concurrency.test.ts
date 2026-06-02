@@ -23,7 +23,6 @@ import "./helpers/isolate-store.js"; // MUST be first — temp DATA_DIR + mock m
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Position } from "@thesis/shared";
-import { config } from "../src/config.js";
 import { getStore } from "../src/store/index.js";
 import { runMonitorTick } from "../src/monitor/index.js";
 
@@ -58,35 +57,25 @@ function primedToClose(id: string): Position {
 }
 
 test("two concurrent monitor ticks settle a position exactly once", async () => {
-  // Disable the holder lottery so settlement takes the simple team-wallet leg
-  // (no dependency on holder enumeration); we are testing settle-once, not the
-  // lottery.
-  const lotteryWas = config.holderLottery.enabled;
-  (config.holderLottery as { enabled: boolean }).enabled = false;
-
   const store = getStore();
   const pos = primedToClose("pos-concurrent-settle");
   await store.savePosition(pos);
 
-  try {
-    // Fire two ticks at the same time — they interleave on every await.
-    await Promise.all([runMonitorTick(), runMonitorTick()]);
+  // Fire two ticks at the same time — they interleave on every await.
+  await Promise.all([runMonitorTick(), runMonitorTick()]);
 
-    const dists = (await store.getDistributions()).filter(
-      (d) => d.positionId === pos.id,
-    );
-    assert.equal(
-      dists.length,
-      1,
-      `position must settle exactly once — got ${dists.length} distributions`,
-    );
+  const dists = (await store.getDistributions()).filter(
+    (d) => d.positionId === pos.id,
+  );
+  assert.equal(
+    dists.length,
+    1,
+    `position must settle exactly once — got ${dists.length} distributions`,
+  );
 
-    const all = await store.getAllPositions();
-    const closed = all.find((p) => p.id === pos.id);
-    assert.equal(closed?.status, "closed", "position should be closed");
-  } finally {
-    (config.holderLottery as { enabled: boolean }).enabled = lotteryWas;
-  }
+  const all = await store.getAllPositions();
+  const closed = all.find((p) => p.id === pos.id);
+  assert.equal(closed?.status, "closed", "position should be closed");
 });
 
 /** An open position primed to STOP OUT in profit on the next tick. entry 1e-5
@@ -121,29 +110,22 @@ function primedToStopOut(id: string): Position {
 }
 
 test("two concurrent ticks settle a STOP-LOSS close exactly once", async () => {
-  const lotteryWas = config.holderLottery.enabled;
-  (config.holderLottery as { enabled: boolean }).enabled = false;
-
   const store = getStore();
   const pos = primedToStopOut("pos-sl-concurrent-settle");
   await store.savePosition(pos);
 
-  try {
-    await Promise.all([runMonitorTick(), runMonitorTick()]);
+  await Promise.all([runMonitorTick(), runMonitorTick()]);
 
-    const dists = (await store.getDistributions()).filter(
-      (d) => d.positionId === pos.id,
-    );
-    assert.equal(
-      dists.length,
-      1,
-      `stop-loss must settle exactly once — got ${dists.length} distributions`,
-    );
+  const dists = (await store.getDistributions()).filter(
+    (d) => d.positionId === pos.id,
+  );
+  assert.equal(
+    dists.length,
+    1,
+    `stop-loss must settle exactly once — got ${dists.length} distributions`,
+  );
 
-    const all = await store.getAllPositions();
-    const closed = all.find((p) => p.id === pos.id);
-    assert.equal(closed?.status, "closed", "stopped-out position should be closed");
-  } finally {
-    (config.holderLottery as { enabled: boolean }).enabled = lotteryWas;
-  }
+  const all = await store.getAllPositions();
+  const closed = all.find((p) => p.id === pos.id);
+  assert.equal(closed?.status, "closed", "stopped-out position should be closed");
 });

@@ -52,7 +52,6 @@ function num(v: number | null | undefined): number {
  *  widget instead of throwing. */
 const EMPTY_COUNTERS: CountersSummary = {
   authorsTotalEth: 0,
-  lotteryTotalEth: 0,
   buybackTotalEth: 0,
   portfolioTotalEth: 0,
   winRate7d: 0,

@@ -1,13 +1,12 @@
 /**
  * Wave 6 — the Endowment split, per chain.
  *
- * Base: author / lottery-or-team / buyback+burn $THESIS / portfolio (unchanged).
- * Solana: author (SOL) / team (SOL → SOLANA_BUYBACK_WALLET) / portfolio /
- * buyback-substitute (SOL → SOLANA_BUYBACK_WALLET). NO $THESIS burn, NO holder
- * lottery on Solana — even if the lottery is globally enabled.
+ * Base: author / portfolio / buyback+burn $THESIS.
+ * Solana: author (SOL) / portfolio / buyback-substitute (SOL →
+ * SOLANA_BUYBACK_WALLET). NO $THESIS burn on Solana.
  *
- * settlementPolicy is the pure decision (RED until it exists); the integration
- * test confirms a Solana settlement completes with the 25/25/25/25 accounting.
+ * settlementPolicy is the pure decision; the integration test confirms a Solana
+ * settlement completes with the 25/50/25 accounting.
  */
 
 import "./helpers/isolate-store.js";
@@ -16,10 +15,8 @@ import assert from "node:assert/strict";
 import type { Position } from "@thesis/shared";
 import { runEndowment, settlementPolicy } from "../src/agents/endowment.js";
 
-test("settlementPolicy: Solana uses no lottery and no $THESIS burn", () => {
-  const p = settlementPolicy("solana");
-  assert.equal(p.useLottery, false);
-  assert.equal(p.useBurn, false);
+test("settlementPolicy: Solana uses no $THESIS burn", () => {
+  assert.equal(settlementPolicy("solana").useBurn, false);
 });
 
 test("settlementPolicy: Base keeps the $THESIS burn", () => {
@@ -51,14 +48,16 @@ function solPosition(): Position {
   };
 }
 
-test("Endowment: a Solana win settles 25/25/25/25 without burning $THESIS", async () => {
+test("Endowment: a Solana win settles 25/50/25 without burning $THESIS", async () => {
   const result = await runEndowment(solPosition(), 1, { silentAuthorTweet: true });
   assert.ok(result, "expected a distribution for a profitable Solana close");
   const d = result.distribution;
   assert.equal(d.toAuthorEth, 0.25);
-  assert.equal(d.toPortfolioEth, 0.25);
-  assert.equal(d.toTeamEth, 0.25, "team slice paid in SOL");
+  assert.equal(d.toPortfolioEth, 0.5);
   assert.equal(d.toBuybackEth, 0.25, "buyback-substitute slice (SOL → wallet)");
-  // No lottery on Solana even when globally enabled.
-  assert.equal(result.lotteryPayment, null);
+  assert.equal(
+    d.toAuthorEth + d.toPortfolioEth + d.toBuybackEth,
+    1,
+    "the three legs must sum to the whole profit",
+  );
 });

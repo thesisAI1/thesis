@@ -41,11 +41,6 @@ export const config = {
   baseData: {
     provider: str("BASEDATA_PROVIDER", "dexscreener"),
     birdeyeKey: str("BIRDEYE_API_KEY"),
-    /** GoldRush (Covalent) API key — used by the holder lottery to enumerate
-     *  $THESIS holders on Base. Birdeye's holder endpoint is Solana-only, so
-     *  GoldRush is our path to ERC-20 holders. Free tier (25k credits) covers
-     *  our hourly snapshot easily; $10/mo Vibe plan if we ever outgrow it. */
-    goldRushKey: str("GOLDRUSH_API_KEY"),
   },
 
   chain: {
@@ -69,10 +64,6 @@ export const config = {
     slippagePct: num("SWAP_SLIPPAGE_PCT", 8),
     /** The launched $THESIS token contract (for buyback & burn). */
     thesisToken: str("THESIS_TOKEN_ADDRESS"),
-    /** Team / maintenance wallet — receives 25% of each winning trade when
-     *  the holder lottery is disabled. With the lottery on, that 25% is
-     *  split across 5 random eligible $THESIS holders instead. */
-    teamWallet: str("TEAM_WALLET"),
     /** Where bought-back $THESIS is sent to be burned. */
     burnAddress: str("BURN_ADDRESS", "0x000000000000000000000000000000000000dEaD"),
     /** 0x Swap API key. With this, swaps route through 0x's aggregator
@@ -92,9 +83,9 @@ export const config = {
     /** base58-encoded secret key for the Solana trading wallet. Separate from
      *  the EVM wallet — Solana wins trade and pay out from this wallet. */
     tradingWalletKey: str("SOLANA_TRADING_WALLET_KEY"),
-    /** Where a Solana win's 25% "buyback" slice goes. There is no $THESIS on
-     *  Solana to burn, so this leg pays a dedicated wallet instead of a
-     *  buyback-and-burn. Mirrors TEAM_WALLET but for the Solana substitute leg. */
+    /** Where a Solana win's 25% buyback slice accrues. There is no $THESIS on
+     *  Solana to burn, so this leg sends the SOL to a dedicated collection
+     *  wallet for a later manual bridge → buyback → burn (phase 2). */
     buybackWallet: str("SOLANA_BUYBACK_WALLET"),
     /** Jupiter aggregator API base (v6 quote + swap). */
     jupiterApiBase: str("JUPITER_API_BASE", "https://quote-api.jup.ag/v6"),
@@ -211,31 +202,6 @@ export const config = {
       .filter((s) => s.length > 0),
   },
 
-  /** Holder lottery — replaces the team payout with 5 random $THESIS
-   *  holders getting 5% each. See packages/backend/src/holders for the
-   *  full pipeline. Master switch: set ENABLED=false to revert to the
-   *  classic team payout. */
-  holderLottery: {
-    enabled: str("HOLDER_LOTTERY_ENABLED", "true") !== "false",
-    /** How many winners per winning trade. 5 by default (each gets 5%). */
-    winnersPerTrade: num("HOLDER_LOTTERY_WINNERS", 5),
-    /** Minimum $THESIS balance (raw tokens, not wei) for a wallet to be
-     *  eligible. Default 10M — at the current price (~$0.000002 per token)
-     *  that's roughly a $20 buy-in. Scales naturally as the token appreciates. */
-    minHoldingTokens: num("HOLDER_LOTTERY_MIN_TOKENS", 10_000_000),
-    /** Hard exclusion list — addresses that are NEVER eligible regardless
-     *  of balance. LP contracts get auto-detected from DexScreener pairs;
-     *  this is for anything else (e.g. CEX hot wallets, team-controlled
-     *  multisig). Comma-separated. */
-    extraExcludes: str("HOLDER_LOTTERY_EXTRA_EXCLUDES")
-      .split(",")
-      .map((s) => s.trim().toLowerCase())
-      .filter((s) => s.length > 0),
-    /** Cache TTL for the holder snapshot, in minutes. Birdeye lookups are
-     *  rate-limited so we don't refetch on every close. 60 min default. */
-    snapshotTtlMin: num("HOLDER_LOTTERY_SNAPSHOT_TTL_MIN", 60),
-  },
-
   trading: {
     positionSizeMinPct: num("POSITION_SIZE_MIN_PCT", 5),
     positionSizeMaxPct: num("POSITION_SIZE_MAX_PCT", 10),
@@ -343,11 +309,6 @@ export function validateConfig(): void {
   range("CONTRACT_DEDUP_HOURS", config.triage.contractDedupHours, 0, HOURS_PER_YEAR);
   range("REVIEW_BUDGET_PER_HOUR", config.triage.reviewBudgetPerHour, 0, BIG);
   range("QUEUE_TTL_MIN", config.triage.queueTtlMin, 0, BIG);
-
-  // holder lottery
-  range("HOLDER_LOTTERY_WINNERS", config.holderLottery.winnersPerTrade, 0, 1_000);
-  range("HOLDER_LOTTERY_MIN_TOKENS", config.holderLottery.minHoldingTokens, 0, BIG);
-  range("HOLDER_LOTTERY_SNAPSHOT_TTL_MIN", config.holderLottery.snapshotTtlMin, 0, BIG);
 
   // trading — the money-affecting knobs
   range("POSITION_SIZE_MIN_PCT", config.trading.positionSizeMinPct, 0, 100);
