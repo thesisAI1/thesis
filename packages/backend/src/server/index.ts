@@ -62,7 +62,8 @@ import { closeByAuthor } from "../monitor/index.js";
 import { tokensRemaining } from "../domain/sizing.js";
 import { buildLaunchpadResolver } from "../domain/launchpad-view.js";
 import { getStore } from "../store/index.js";
-import { log } from "../util/log.js";
+import { log, logEvent } from "../util/log.js";
+import { publishOps } from "../observability/opsBus.js";
 import { payoutSentText } from "../util/replies.js";
 
 /** Lightweight ETH/USD rate cache. CoinGecko's free public endpoint is
@@ -415,7 +416,14 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
   try {
     txHash = await createChainAdapter(chain).sendEth(wallet, amountEth);
   } catch (err) {
-    log.error(`admin: settle-stuck-payout sendEth failed — ${String(err)}`);
+    const msg = `admin: settle-stuck-payout sendEth failed — ${String(err)}`;
+    logEvent({
+      level: "error",
+      area: "admin",
+      type: "settle-stuck-payout:failed",
+      msg,
+      ops: { type: "payout:failed", at: new Date().toISOString(), handle, amountEth, reason: String(err) },
+    });
     return sendJson(res, 500, { ok: false, error: "internal error" });
   }
 
@@ -431,6 +439,7 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
   await store.clearEscrow(xUserId, chain);
   await store.clearPayoutRequestsForUser(xUserId, chain);
   log.info(`admin: settle-stuck-payout — cleared ${chain} escrow + open requests for ${handle}`);
+  publishOps({ type: "payout:sent", at: new Date().toISOString(), handle, amountEth, wallet, txHash });
 
   // Confirm in the thesis thread if a postId was provided.
   let replyId: string | undefined;
@@ -579,7 +588,14 @@ async function adminRebuyPosition(req: IncomingMessage, res: ServerResponse): Pr
   try {
     buy = await createChainAdapter(pos.order.chain).buy(pos.order.contractAddress, amountInEth);
   } catch (err) {
-    log.error(`admin: rebuy-position buy failed — ${String(err)}`);
+    const msg = `admin: rebuy-position buy failed — ${String(err)}`;
+    logEvent({
+      level: "error",
+      area: "admin",
+      type: "rebuy:failed",
+      msg,
+      ops: { type: "error", at: new Date().toISOString(), area: "admin", msg: `rebuy ${positionId} failed: ${String(err)}` },
+    });
     return sendJson(res, 500, { ok: false, error: "internal error" });
   }
 
@@ -772,7 +788,14 @@ async function adminForceClosePosition(
   try {
     await closeByAuthor(pos, currentPrice);
   } catch (err) {
-    log.error(`admin: force-close ${positionId} failed — ${String(err)}`);
+    const msg = `admin: force-close ${positionId} failed — ${String(err)}`;
+    logEvent({
+      level: "error",
+      area: "admin",
+      type: "force-close:failed",
+      msg,
+      ops: { type: "error", at: new Date().toISOString(), area: "admin", msg: `force-close ${positionId} failed: ${String(err)}` },
+    });
     return sendJson(res, 500, {
       ok: false,
       positionId,
@@ -882,7 +905,14 @@ async function adminRepostCloseAnnouncement(
     replyId = await createXAdapter().replyToPost(pos.postId, text);
     log.info(`admin: repost-close — tweeted reply ${replyId}`);
   } catch (err) {
-    log.error(`admin: repost-close failed for ${positionId} — ${String(err)}`);
+    const msg = `admin: repost-close failed for ${positionId} — ${String(err)}`;
+    logEvent({
+      level: "error",
+      area: "admin",
+      type: "repost-close:failed",
+      msg,
+      ops: { type: "error", at: new Date().toISOString(), area: "admin", msg: `repost-close failed: ${String(err)}` },
+    });
     return sendJson(res, 502, { ok: false, error: "upstream post failed" });
   }
 
@@ -1114,7 +1144,8 @@ async function buildDashboardPayload(): Promise<object> {
         const got = await createBaseDataAdapter(c).getPricesEth(Array.from(new Set(addrs)));
         for (const [addr, price] of got) livePrices.set(addr, price);
       } catch (err) {
-        log.warn(`dashboard: ${c} batch price fetch failed — entry-price fallback for its positions: ${String(err)}`);
+        const msg = `dashboard: ${c} batch price fetch failed — entry-price fallback for its positions: ${String(err)}`;
+        logEvent({ level: "warn", area: "server", type: "dashboard-price:failed", msg });
       }
     }),
   );
