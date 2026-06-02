@@ -249,7 +249,7 @@ export async function runOnce(): Promise<void> {
  * one loudly for manual recovery. We do NOT auto-clear: the alert should persist
  * across restarts until the operator reconciles against the on-chain balance.
  */
-async function reconcilePendingBuys(): Promise<void> {
+export async function reconcilePendingBuys(): Promise<void> {
   try {
     const orphans = await getStore().getPendingBuys();
     for (const b of orphans) {
@@ -259,6 +259,12 @@ async function reconcilePendingBuys(): Promise<void> {
           `is NOT monitoring those tokens. Check the wallet balance for that token, then recover via ` +
           `/admin/rebuy-position or open a position manually.`,
       );
+      publishOps({
+        type: "error",
+        at: new Date().toISOString(),
+        area: "service",
+        msg: `ORPHANED BUY ${b.contractAddress} (post ${b.postId}) — un-monitored, manual recovery needed`,
+      });
     }
   } catch (err) {
     log.warn(`service: pending-buy reconcile failed — ${String(err)}`);

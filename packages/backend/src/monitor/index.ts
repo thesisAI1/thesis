@@ -37,6 +37,11 @@ import { exitReplyText, payoutRequestText, payoutSentText } from "../util/replie
  *  (warn → error after a few in a row). Reset to 0 on a successful fetch. */
 const priceFetchFailStreak = new Map<Chain, number>();
 
+/** Position ids for which an INCOMPLETE settle:failed ops event has already
+ *  been emitted this process lifetime. Guards against flooding ops on every
+ *  monitor tick while a payout leg is stuck. */
+const incompleteEmitted = new Set<string>();
+
 /** Check every open position once; act on take-profit tiers and the stop-loss.
  *  Serialized via withLock so two ticks (or a tick racing an author/admin
  *  close) can't both run the same position to close and settle it twice. */
@@ -462,11 +467,20 @@ async function settle(
     ...(pos.settlement ?? {}),
   };
   if (!(p.authorDone && p.teamDone && p.buybackDone)) {
-    log.error(
+    const incompleteMsg =
       `monitor: settlement INCOMPLETE for ${pos.id} ` +
         `(author=${!!p.authorDone} team=${!!p.teamDone} buyback=${!!p.buybackDone}) — ` +
-        `will retry next tick`,
-    );
+        `will retry next tick`;
+    log.error(incompleteMsg);
+    if (!incompleteEmitted.has(pos.id)) {
+      incompleteEmitted.add(pos.id);
+      publishOps({
+        type: "settle:failed",
+        at: new Date().toISOString(),
+        positionId: pos.id,
+        reason: `incomplete: author=${!!p.authorDone} team=${!!p.teamDone} buyback=${!!p.buybackDone}`,
+      });
+    }
     return { authorPayment: result.authorPayment, lotteryPayment: result.lotteryPayment };
   }
 
