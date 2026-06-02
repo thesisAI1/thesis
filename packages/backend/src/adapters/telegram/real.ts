@@ -25,19 +25,24 @@ export class RealTelegram implements TelegramAdapter {
   async sendMessage(chatId: string, text: string): Promise<boolean> {
     if (!config.telegram.botToken) return false;
 
-    const res = await fetch(`${BASE}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text }),
-      signal: AbortSignal.timeout(15_000),
-    });
+    try {
+      const res = await fetch(`${BASE}/sendMessage`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chat_id: chatId, text }),
+        signal: AbortSignal.timeout(15_000),
+      });
 
-    const data = (await res.json()) as TgResponse;
-    if (!res.ok) {
-      log.warn(redactText(`telegram: sendMessage failed: ${JSON.stringify(data)}`));
+      const data = (await res.json()) as TgResponse;
+      if (!res.ok) {
+        log.warn(redactText(`telegram: sendMessage failed: ${JSON.stringify(data)}`));
+        return false;
+      }
+      return true;
+    } catch (err) {
+      log.warn(redactText(`telegram: sendMessage network error: ${String(err)}`));
       return false;
     }
-    return true;
   }
 
   async getUpdates(offset?: number): Promise<TelegramUpdate[]> {
@@ -46,34 +51,39 @@ export class RealTelegram implements TelegramAdapter {
     const params = new URLSearchParams({ timeout: String(config.telegram.pollIntervalSec) });
     if (offset !== undefined) params.set("offset", String(offset));
 
-    const res = await fetch(`${BASE}/getUpdates?${params}`, {
-      signal: AbortSignal.timeout((config.telegram.pollIntervalSec * 2 + 5) * 1000),
-    });
-    const data = (await res.json()) as TgResponse;
+    try {
+      const res = await fetch(`${BASE}/getUpdates?${params}`, {
+        signal: AbortSignal.timeout((config.telegram.pollIntervalSec * 2 + 5) * 1000),
+      });
+      const data = (await res.json()) as TgResponse;
 
-    if (!res.ok) {
-      log.warn(redactText(`telegram: getUpdates failed: ${JSON.stringify(data)}`));
+      if (!res.ok) {
+        log.warn(redactText(`telegram: getUpdates failed: ${JSON.stringify(data)}`));
+        return [];
+      }
+
+      if (!Array.isArray(data.result)) return [];
+
+      const results = data.result as TgUpdate[];
+      const updates: TelegramUpdate[] = [];
+
+      for (const u of results) {
+        const msg = u.message;
+        if (!msg) continue;
+        if (typeof msg.text !== "string") continue;
+        if (msg.chat?.id === undefined || msg.chat?.id === null) continue;
+
+        updates.push({
+          updateId: u.update_id,
+          chatId: String(msg.chat.id),
+          text: msg.text,
+        });
+      }
+
+      return updates;
+    } catch (err) {
+      log.warn(redactText(`telegram: getUpdates network error: ${String(err)}`));
       return [];
     }
-
-    if (!Array.isArray(data.result)) return [];
-
-    const results = data.result as TgUpdate[];
-    const updates: TelegramUpdate[] = [];
-
-    for (const u of results) {
-      const msg = u.message;
-      if (!msg) continue;
-      if (typeof msg.text !== "string") continue;
-      if (msg.chat?.id === undefined || msg.chat?.id === null) continue;
-
-      updates.push({
-        updateId: u.update_id,
-        chatId: String(msg.chat.id),
-        text: msg.text,
-      });
-    }
-
-    return updates;
   }
 }

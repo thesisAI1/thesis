@@ -1546,6 +1546,27 @@ async function apiLeaderboard(res: ServerResponse): Promise<void> {
 const EVENTS_DEFAULT_N = 100;
 const EVENTS_MAX_N = 500;
 
+/** Per-IP rate limit for /api/events: max 30 requests per 60 seconds. */
+const EVENTS_RATE_LIMIT = 30;
+const EVENTS_RATE_WINDOW_MS = 60_000;
+const _eventsRateMap = new Map<string, number[]>();
+
+function eventsRateLimitExceeded(req: IncomingMessage): boolean {
+  const forwarded = req.headers["x-forwarded-for"];
+  const firstHop = Array.isArray(forwarded)
+    ? (forwarded[0] ?? "")
+    : (forwarded ?? "").split(",")[0] ?? "";
+  const ip = firstHop.trim() || req.socket.remoteAddress || "unknown";
+
+  const now = Date.now();
+  const cutoff = now - EVENTS_RATE_WINDOW_MS;
+  const timestamps = (_eventsRateMap.get(ip) ?? []).filter((t) => t > cutoff);
+  timestamps.push(now);
+  _eventsRateMap.set(ip, timestamps);
+
+  return timestamps.length > EVENTS_RATE_LIMIT;
+}
+
 /**
  * GET /api/events — read-only structured event log.
  *
@@ -1559,6 +1580,11 @@ const EVENTS_MAX_N = 500;
  * the public website.
  */
 function apiEvents(req: IncomingMessage, res: ServerResponse): void {
+  if (eventsRateLimitExceeded(req)) {
+    sendJsonNoStore(res, 429, { error: "rate limit exceeded" });
+    return;
+  }
+
   const url = new URL(req.url ?? "/", config.server.publicBaseUrl);
   const area = url.searchParams.get("area") ?? undefined;
   const level = url.searchParams.get("level") ?? undefined;
@@ -1570,7 +1596,7 @@ function apiEvents(req: IncomingMessage, res: ServerResponse): void {
   if (level !== undefined) entries = entries.filter((e) => e.level === level);
 
   const events = entries.map((e) => ({ ...e, msg: redactText(e.msg) }));
-  sendJson(res, 200, { events });
+  sendJsonNoStore(res, 200, { events });
 }
 
 /** Cap concurrent SSE connections so an attacker can't exhaust file
@@ -1655,5 +1681,12 @@ async function serveStatic(path: string, res: ServerResponse): Promise<void> {
 
 function sendJson(res: ServerResponse, status: number, data: unknown): void {
   res.writeHead(status, { "content-type": "application/json" });
+  res.end(JSON.stringify(data));
+}
+
+/** Like sendJson but also sets cache-control: no-store so sensitive event
+ *  data is never cached by browsers or intermediary proxies. */
+function sendJsonNoStore(res: ServerResponse, status: number, data: unknown): void {
+  res.writeHead(status, { "content-type": "application/json", "cache-control": "no-store" });
   res.end(JSON.stringify(data));
 }
