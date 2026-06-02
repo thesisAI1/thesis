@@ -211,6 +211,54 @@ test("GET /api/events?n=2 — returns at most 2 entries", async () => {
   assert.ok(events.length <= 2, `expected ≤2 entries with ?n=2, got ${events.length}`);
 });
 
+// ── PR-review RED: cache-control header ──────────────────────────────────────
+
+/** Capture headers set via writeHead(status, headers). */
+function captureResWithHeaders(): {
+  res: ServerResponse;
+  result: () => { status: number; body: unknown; headers: Record<string, string> };
+} {
+  let status = 0;
+  let body: unknown = null;
+  const headers: Record<string, string> = {};
+  const res = {
+    headersSent: false,
+    writeHead(s: number, hdrs?: Record<string, string>) {
+      status = s;
+      (this as { headersSent: boolean }).headersSent = true;
+      if (hdrs) {
+        for (const [k, v] of Object.entries(hdrs)) {
+          headers[k.toLowerCase()] = String(v);
+        }
+      }
+      return this;
+    },
+    end(chunk?: string) {
+      if (chunk) body = JSON.parse(chunk);
+      return this;
+    },
+    setHeader(name: string, value: string) {
+      headers[name.toLowerCase()] = String(value);
+    },
+  } as unknown as ServerResponse;
+  return { res, result: () => ({ status, body, headers }) };
+}
+
+test("GET /api/events — response includes cache-control: no-store (RED)", async () => {
+  const { res, result } = captureResWithHeaders();
+  await handle(getReq("/api/events"), res);
+
+  const { status, headers } = result();
+  assert.equal(status, 200, "expected 200");
+
+  // RED: sendJson only sets content-type; cache-control header is absent.
+  const cc = headers["cache-control"] ?? "";
+  assert.ok(
+    cc.includes("no-store") || cc.includes("no-cache"),
+    `cache-control must include 'no-store' or 'no-cache' to prevent sensitive event data from being cached. Got: "${cc}"`,
+  );
+});
+
 test("GET /api/events — wallet address in msg is redacted (security guard)", async () => {
   const fullAddr = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd";
   getEventLog().record({

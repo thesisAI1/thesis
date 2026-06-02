@@ -107,6 +107,32 @@ test("G6a: settlePosition throws → settle:failed ops event published (honest g
   // Tracked in logging-gaps.md G6.
 });
 
+// ── G6a-throw: PR-review RED — settle() THREW branch emits settle:failed ────
+// The monitor/index.ts settle() has a THREW catch block (catches errors thrown
+// by settlePosition itself). That branch calls log.error but does NOT emit a
+// settle:failed OpsEvent. This test documents the missing publish.
+//
+// HONEST GAP: settlePosition cannot be made to throw via external injection
+// without a __setSettlePositionForTest seam (settlePosition is module-private
+// in pipeline/index.ts and is imported directly into monitor/index.ts). No
+// such seam exists today. Forcing a throw would require modifying src files,
+// which is out of scope for the RED phase.
+//
+// The skip below pins the gap explicitly. When GREEN adds a settlePosition
+// injection seam, replace this skip with an active assertion.
+test.skip(
+  "G6a-throw: settle() THREW branch emits settle:failed ops event (honest gap: settlePosition throw not injectable)",
+  async () => {
+    // To implement this test when GREEN lands:
+    //   1. Export __setSettlePositionForTest(fn) from monitor/index.ts (or pipeline)
+    //   2. Inject a settlePosition stub that throws new Error("forced throw")
+    //   3. Drive the monitor tick with a position primed to close (like G6c above)
+    //   4. Assert ops.some(e => e.type === "settle:failed") is true
+    //   5. Assert the settle:failed event carries positionId + reason mentioning "threw"
+    assert.fail("not implemented — store/settle seam absent");
+  },
+);
+
 // ── G6b — settlePosition returns null despite profit > 0 → settle:failed ────
 // HONEST GAP: runEndowment returns null only when profitEth <= 0, but monitor's
 // settle() guards `if (pos.realisedPnlEth <= 0) return null` before calling

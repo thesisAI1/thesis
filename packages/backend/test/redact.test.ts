@@ -50,4 +50,51 @@ describe("redactText", () => {
     const clean = "hello world";
     assert.equal(redactText(clean), clean);
   });
+
+  // ── PR-review RED cases ────────────────────────────────────────────────────
+
+  it("redacts a base58 Solana address (44 chars)", () => {
+    // So11111111111111111111111111111111111111112 is the canonical SOL mint
+    const addr = "So11111111111111111111111111111111111111112";
+    const input = `swap to ${addr} failed`;
+    const out = redactText(input);
+    assert.ok(
+      !out.includes(addr),
+      `base58 Solana address must be redacted; got: ${out}`,
+    );
+  });
+
+  it("redacts a base58 Solana transaction signature (~88 chars)", () => {
+    // Realistic base58 tx sig: 87-88 base58 chars
+    const sig =
+      "5KtPn1LGuxhFiwjxErkxTb97kRNDoGLwHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHHH";
+    const input = `tx ${sig} rejected`;
+    const out = redactText(input);
+    assert.ok(
+      !out.includes(sig),
+      `base58 tx signature must be redacted; got: ${out}`,
+    );
+  });
+
+  it("redacts a bare 64-hex string (no 0x prefix, private-key-shaped)", () => {
+    const privKey =
+      "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890ab";
+    const input = `exported key: ${privKey}`;
+    const out = redactText(input);
+    assert.ok(
+      !out.includes(privKey),
+      `bare 64-hex (private-key-shaped) string must be redacted; got: ${out}`,
+    );
+  });
+
+  it("redacts a 0x-prefixed hex run of length 50 (between 40 and 64)", () => {
+    // 0x + 50 hex chars — covered by the current {40,64} bound (or a broadened {40,})
+    const mid = "0x" + "a".repeat(50);
+    const input = `address ${mid} checked`;
+    const out = redactText(input);
+    assert.ok(
+      !out.includes(mid),
+      `0x+50-hex string must be redacted; got: ${out}`,
+    );
+  });
 });
