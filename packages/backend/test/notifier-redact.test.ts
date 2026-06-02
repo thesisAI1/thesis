@@ -60,6 +60,53 @@ describe("formatOpsEvent — payout:failed branch redacts tx hashes (RED)", () =
 });
 
 // ---------------------------------------------------------------------------
+// 3b. startNotifier — crash-safety: rejected sendMessage must not escape
+// ---------------------------------------------------------------------------
+
+describe("startNotifier — crash-safety: rejected adapter does not throw (RED)", () => {
+  it("does not surface an unhandled rejection when sendMessage rejects", async () => {
+    // Adapter whose sendMessage always rejects — simulates network error.
+    const throwingAdapter = {
+      async sendMessage(_chatId: string, _text: string): Promise<boolean> {
+        throw new Error("simulated send failure");
+      },
+      async getUpdates(): Promise<[]> {
+        return [];
+      },
+    };
+
+    // Track any unhandledRejection fired during this test.
+    const unhandled: Error[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason instanceof Error ? reason : new Error(String(reason)));
+    };
+
+    // Subscribe, publish, then immediately unsubscribe SYNCHRONOUSLY before any
+    // async rejection can escape and contaminate subsequent tests.
+    const stop = startNotifier({ adapter: throwingAdapter as never, allowedChats: ["111"] });
+    process.on("unhandledRejection", onUnhandled);
+    publishOps({ type: "error", at: "t", area: "svc", msg: "crash-safety test" });
+    // Unsubscribe synchronously — no more deliveries to throwingAdapter after this.
+    stop();
+
+    // Give the void promise a chance to settle (or reject) into unhandledRejection.
+    await new Promise<void>((r) => setImmediate(r));
+    // One extra tick for Node's unhandledRejection detection cycle.
+    await new Promise<void>((r) => setImmediate(r));
+
+    process.off("unhandledRejection", onUnhandled);
+
+    // RED: the notifier uses `void adapter.sendMessage(...)` with no .catch,
+    // so a rejected promise fires an unhandledRejection.
+    assert.equal(
+      unhandled.length,
+      0,
+      `unhandledRejection must not fire when sendMessage rejects. Got ${unhandled.length} rejection(s): ${unhandled.map((e) => e.message).join(", ")}`,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 3. startNotifier — respects injected enabled:false (seam does not exist yet)
 // ---------------------------------------------------------------------------
 
