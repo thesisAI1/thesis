@@ -19,12 +19,17 @@
  */
 
 import "./helpers/isolate-store.js"; // temp DATA_DIR + mock mode before config loads
-import { test } from "node:test";
+import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { handle } from "../src/server/index.js";
-import { getEventLog } from "../src/observability/eventLog.js";
+import { getEventLog, resetEventLogForTest } from "../src/observability/eventLog.js";
 import type { EventLogEntry } from "../src/observability/eventLog.js";
+
+// Reset singleton before each test so entries don't leak across tests.
+beforeEach(() => {
+  resetEventLogForTest();
+});
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -280,4 +285,181 @@ test("GET /api/events — wallet address in msg is redacted (security guard)", a
     !responseText.includes(fullAddr),
     `full 40-hex address must not appear in response — redaction failed`,
   );
+});
+
+// ── Wave 4: ?history=1 durable branch (RED) ───────────────────────────────────
+
+const SENTINEL: EventLogEntry = {
+  at: new Date(9_999_999).toISOString(),
+  level: "info",
+  area: "test",
+  type: "test:sentinel",
+  msg: "sentinel from history()",
+};
+
+const SENTINEL_ADDR = "0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef";
+const SENTINEL_WITH_ADDR: EventLogEntry = {
+  at: new Date(9_999_998).toISOString(),
+  level: "error",
+  area: "payout",
+  type: "payout:failed",
+  msg: `payout failed addr=${SENTINEL_ADDR}`,
+};
+
+test("GET /api/events?history=1 — response built from history(), not recent() (RED)", async () => {
+  const log = getEventLog();
+  const originalHistory = log.history.bind(log);
+
+  // Monkeypatch: history() returns the sentinel regardless of what's in recent()
+  log.history = async (_opts) => [SENTINEL];
+
+  try {
+    const { res, result } = captureResWithHeaders();
+    await handle(getReq("/api/events?history=1"), res);
+
+    const { status, body, headers } = result();
+    assert.equal(status, 200, "expected 200");
+
+    const { events } = body as { events: EventLogEntry[] };
+    assert.ok(Array.isArray(events), "body.events must be an array");
+
+    // Sentinel must appear — proves history() was called, not recent()
+    const found = events.find((e) => e.type === SENTINEL.type);
+    assert.ok(
+      found !== undefined,
+      `sentinel entry (type=${SENTINEL.type}) not found — handler did not call history() (RED)`,
+    );
+
+    // Same JSON shape as default path
+    assert.ok("at" in found!, "entry must have 'at'");
+    assert.ok("level" in found!, "entry must have 'level'");
+    assert.ok("area" in found!, "entry must have 'area'");
+    assert.ok("type" in found!, "entry must have 'type'");
+    assert.ok("msg" in found!, "entry must have 'msg'");
+
+    // Same headers as default path: cache-control must include no-store
+    const cc = headers["cache-control"] ?? "";
+    assert.ok(
+      cc.includes("no-store") || cc.includes("no-cache"),
+      `cache-control must include 'no-store' on ?history=1 path. Got: "${cc}"`,
+    );
+  } finally {
+    log.history = originalHistory;
+  }
+});
+
+test("GET /api/events (default, no ?history) — still uses recent(), NOT history() (RED)", async () => {
+  const log = getEventLog();
+  const originalHistory = log.history.bind(log);
+
+  let historyCalled = false;
+  log.history = async (opts) => {
+    historyCalled = true;
+    return originalHistory(opts);
+  };
+
+  try {
+    // Seed a known entry so recent() has something
+    log.record({
+      at: new Date(8_000_000).toISOString(),
+      level: "info",
+      area: "service",
+      type: "service:ping",
+      msg: "ping",
+    });
+
+    const { res, result } = captureRes();
+    await handle(getReq("/api/events"), res);
+
+    const { status, body } = result();
+    assert.equal(status, 200, "expected 200 on default path");
+    assert.ok(
+      (body as { events: unknown[] }).events !== undefined,
+      "body.events must exist",
+    );
+    assert.ok(
+      !historyCalled,
+      "default path must NOT call history() — it must use recent() only",
+    );
+  } finally {
+    log.history = originalHistory;
+  }
+});
+
+test("GET /api/events?history=1 — wallet address in msg is redacted (security guard)", async () => {
+  const log = getEventLog();
+  const originalHistory = log.history.bind(log);
+
+  log.history = async (_opts) => [SENTINEL_WITH_ADDR];
+
+  try {
+    const { res, result } = captureRes();
+    await handle(getReq("/api/events?history=1"), res);
+
+    const { status, body } = result();
+    assert.equal(status, 200, "expected 200");
+
+    const responseText = JSON.stringify(body);
+    assert.ok(
+      !responseText.includes(SENTINEL_ADDR),
+      `full address must not appear in ?history=1 response — redaction must apply to history path too`,
+    );
+  } finally {
+    log.history = originalHistory;
+  }
+});
+
+test("GET /api/events?history=1&opsType=trade:buy,settle:win — opsTypes forwarded to history() (RED)", async () => {
+  const log = getEventLog();
+  const originalHistory = log.history.bind(log);
+
+  let capturedOpts: { limit: number; opsTypes?: string[] } | undefined;
+  log.history = async (opts) => {
+    capturedOpts = opts;
+    return [SENTINEL];
+  };
+
+  try {
+    const { res } = captureRes();
+    await handle(getReq("/api/events?history=1&opsType=trade:buy,settle:win"), res);
+
+    assert.ok(capturedOpts !== undefined, "history() must have been called");
+    assert.deepEqual(
+      capturedOpts!.opsTypes,
+      ["trade:buy", "settle:win"],
+      `opsTypes must be parsed from ?opsType= param and forwarded. Got: ${JSON.stringify(capturedOpts!.opsTypes)}`,
+    );
+  } finally {
+    log.history = originalHistory;
+  }
+});
+
+test("GET /api/events?history=1&area=monitor&level=error — area+level forwarded to history() opts", async () => {
+  const log = getEventLog();
+  const originalHistory = log.history.bind(log);
+
+  let capturedOpts: { limit: number; opsTypes?: string[]; area?: string; level?: string } | undefined;
+  log.history = async (opts) => {
+    capturedOpts = opts;
+    return [SENTINEL];
+  };
+
+  try {
+    const { res } = captureRes();
+    await handle(getReq("/api/events?history=1&area=monitor&level=error"), res);
+
+    assert.ok(capturedOpts !== undefined, "history() must have been called");
+    assert.equal(
+      capturedOpts!.area,
+      "monitor",
+      `area must be forwarded to history(). Got: ${JSON.stringify(capturedOpts!.area)}`,
+    );
+    assert.equal(
+      capturedOpts!.level,
+      "error",
+      `level must be forwarded to history(). Got: ${JSON.stringify(capturedOpts!.level)}`,
+    );
+  } finally {
+    log.history = originalHistory;
+  }
 });

@@ -66,6 +66,7 @@ import { log, logEvent } from "../util/log.js";
 import { publishOps } from "../observability/opsBus.js";
 import { payoutSentText } from "../util/replies.js";
 import { getEventLog } from "../observability/eventLog.js";
+import type { EventLogEntry } from "../observability/eventLog.js";
 import { redactText } from "../adapters/telegram/redact.js";
 
 /** Lightweight ETH/USD rate cache. CoinGecko's free public endpoint is
@@ -1571,15 +1572,20 @@ function eventsRateLimitExceeded(req: IncomingMessage): boolean {
  * GET /api/events — read-only structured event log.
  *
  * Query params:
- *   ?area=<string>   filter to one area
- *   ?level=<string>  filter to one level (info|warn|error)
- *   ?n=<number>      cap result count (default 100, max 500)
+ *   ?area=<string>     filter to one area
+ *   ?level=<string>    filter to one level (info|warn|error)
+ *   ?n=<number>        cap result count (default 100, max 500 for recent; max 200 for
+ *                      ?history=1 — the 200-row sub-cap keeps history queries cheap
+ *                      against a potentially unbounded SQLite table)
+ *   ?history=1         serve durable history via EventLog.history() instead of recent();
+ *                      area/level filters are pushed down into the DB query
+ *   ?opsType=a,b,c     (only with ?history=1) filter by opsType values (comma-separated)
  *
  * Response: { events: EventLogEntry[] } — newest-first, with msg redacted
  * (wallet addresses and bot tokens stripped) so no sensitive data reaches
  * the public website.
  */
-function apiEvents(req: IncomingMessage, res: ServerResponse): void {
+async function apiEvents(req: IncomingMessage, res: ServerResponse): Promise<void> {
   if (eventsRateLimitExceeded(req)) {
     sendJsonNoStore(res, 429, { error: "rate limit exceeded" });
     return;
@@ -1591,11 +1597,28 @@ function apiEvents(req: IncomingMessage, res: ServerResponse): void {
   const rawN = Number(url.searchParams.get("n") ?? EVENTS_DEFAULT_N);
   const n = Number.isFinite(rawN) && rawN > 0 ? Math.min(Math.floor(rawN), EVENTS_MAX_N) : EVENTS_DEFAULT_N;
 
-  let entries = getEventLog().recent(n);
-  if (area !== undefined) entries = entries.filter((e) => e.area === area);
-  if (level !== undefined) entries = entries.filter((e) => e.level === level);
+  const useHistory = url.searchParams.get("history") === "1";
 
-  const events = entries.map((e) => ({ ...e, msg: redactText(e.msg) }));
+  /** Shared redaction: applied to every entry regardless of data source. */
+  const redactEntry = (e: EventLogEntry) => ({ ...e, msg: redactText(e.msg) });
+
+  let entries: EventLogEntry[];
+  if (useHistory) {
+    const opsTypeRaw = url.searchParams.get("opsType");
+    const opsTypes = opsTypeRaw ? opsTypeRaw.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
+    const HISTORY_MAX_N = 200;
+    const histLimit = Math.min(n, HISTORY_MAX_N);
+    // area and level are pushed down into the DB query (not post-filtered) so only
+    // the relevant rows are fetched from a potentially large SQLite table.
+    entries = await getEventLog().history({ limit: histLimit, opsTypes, area, level });
+  } else {
+    entries = getEventLog().recent(n);
+    // Client-side filtering for the in-memory recent() path.
+    if (area !== undefined) entries = entries.filter((e) => e.area === area);
+    if (level !== undefined) entries = entries.filter((e) => e.level === level);
+  }
+
+  const events = entries.map(redactEntry);
   sendJsonNoStore(res, 200, { events });
 }
 
