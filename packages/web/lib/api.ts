@@ -205,6 +205,31 @@ export interface DashboardData {
   recentActivity: ActivityItem[];
 }
 
+// --- /api/events -----------------------------------------------------------
+
+/** One structured event log entry — mirrors EventLogEntry from
+ *  packages/backend/src/observability/eventLog.ts. The `msg` field is
+ *  pre-redacted by the server (wallet addresses and bot tokens stripped). */
+export interface EventLogEntry {
+  at: string;
+  level: "info" | "warn" | "error";
+  area: string;
+  type: string;
+  msg: string;
+}
+
+/** Optional filter params for GET /api/events. */
+export interface EventsParams {
+  area?: string;
+  level?: string;
+  n?: number;
+}
+
+/** GET /api/events — { events: EventLogEntry[] }. */
+export interface EventsData {
+  events: EventLogEntry[];
+}
+
 // --- /api/leaderboard ------------------------------------------------------
 
 /** One author row — apiLeaderboard() LeaderboardEntry. */
@@ -281,6 +306,17 @@ export function getDashboard(): Promise<DashboardData> {
 /** GET /api/leaderboard — author ranking by realised author share. */
 export function getLeaderboard(): Promise<LeaderboardData> {
   return getJson<LeaderboardData>("/api/leaderboard");
+}
+
+/** GET /api/events — structured event log (newest-first, msg redacted).
+ *  Optional params: area, level, n (max count). */
+export function getEvents(params?: EventsParams): Promise<EventsData> {
+  const qs = new URLSearchParams();
+  if (params?.area !== undefined) qs.set("area", params.area);
+  if (params?.level !== undefined) qs.set("level", params.level);
+  if (params?.n !== undefined) qs.set("n", String(params.n));
+  const query = qs.toString();
+  return getJson<EventsData>(`/api/events${query ? `?${query}` : ""}`);
 }
 
 /** Verdict/grade re-exports so consumers can pin tape/badge values to the
