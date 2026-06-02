@@ -60,7 +60,18 @@ export function parseBondingCurveComplete(data: Buffer): boolean {
       `bonding-curve account too short: ${data.length} bytes (need > ${COMPLETE_OFFSET})`,
     );
   }
-  return data.readUInt8(COMPLETE_OFFSET) === 1;
+  // Fail CLOSED on an ambiguous byte. No verified 8-byte Anchor discriminator
+  // is pinned in-repo, so we can't pre-validate the account shape; the residual
+  // risk is a non-curve account whose byte 48 happens to be 0x00/0x01. Rejecting
+  // anything other than {0,1} closes the dangerous direction: a corrupt / shifted
+  // / look-alike layout can no longer coerce a non-1 byte into "graduated" (buy).
+  const flag = data.readUInt8(COMPLETE_OFFSET);
+  if (flag !== 0 && flag !== 1) {
+    throw new Error(
+      `pumpfun: unexpected complete byte ${flag} at offset ${COMPLETE_OFFSET} — refusing to classify`,
+    );
+  }
+  return flag === 1;
 }
 
 /**

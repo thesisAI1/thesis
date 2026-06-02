@@ -60,6 +60,12 @@ test("parseBondingCurveComplete: throws on a too-short buffer (never silently pa
   assert.throws(() => parseBondingCurveComplete(Buffer.alloc(40)), /too short/i);
 });
 
+test("parseBondingCurveComplete: throws on a non-{0,1} complete byte (fails closed, never coerces a rug to graduated)", () => {
+  const buf = curveBuffer(false);
+  buf.writeUInt8(0x02, 48);
+  assert.throws(() => parseBondingCurveComplete(buf), /unexpected complete byte/i);
+});
+
 // --- bondingCurvePda ---
 
 test('bondingCurvePda: derives the ["bonding-curve", mint] PDA under the pump.fun program', () => {
