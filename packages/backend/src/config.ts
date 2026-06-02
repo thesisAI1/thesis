@@ -147,6 +147,8 @@ export const config = {
       enabled: str("TELEGRAM_GROUP_ENABLED", "true") !== "false",
       botToken: str("TELEGRAM_GROUP_BOT_TOKEN"),
       chatId: str("TELEGRAM_GROUP_CHAT_ID"),
+      /** Per-user cooldown (seconds) between public command replies — anti-spam. */
+      cmdCooldownSec: num("TELEGRAM_GROUP_CMD_COOLDOWN_SEC", 30),
     },
   },
 
@@ -329,6 +331,10 @@ export function validateConfig(): void {
   range("POLL_INTERVAL_SEC", config.service.pollIntervalSec, 1, DAY_SEC);
   range("REVIEW_INTERVAL_SEC", config.service.reviewIntervalSec, 1, DAY_SEC);
   range("MONITOR_INTERVAL_SEC", config.service.monitorIntervalSec, 1, DAY_SEC);
+
+  // telegram — a NaN poll interval would hot-loop the bot pollers (getUpdates).
+  range("TELEGRAM_POLL_INTERVAL_SEC", config.telegram.pollIntervalSec, 1, DAY_SEC);
+  range("TELEGRAM_GROUP_CMD_COOLDOWN_SEC", config.telegram.group.cmdCooldownSec, 0, DAY_SEC);
 
   // auditor gates
   range("MIN_TOKEN_AGE_HOURS", config.auditor.minTokenAgeHours, 0, HOURS_PER_YEAR);

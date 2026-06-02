@@ -70,3 +70,18 @@ export function explorerTokenUrl(chain: Chain, address: string): string {
     ? `${SOLSCAN}/token/${address}`
     : `${BASESCAN}/token/${address}`;
 }
+
+/** DexScreener chart slug per chain (the public group `/open` ticker links here).
+ *  Unknown/testnet → "base" so the link is always well-formed. */
+function dexSlug(chain: Chain): string {
+  if (chain === "solana") return "solana";
+  if (chain === "bsc") return "bsc";
+  if (chain === "ethereum") return "ethereum";
+  return "base";
+}
+
+/** DexScreener chart URL for a token / mint — the one public surface that
+ *  surfaces a contract (inside a clickable chart link). Never a wallet/tx. */
+export function chartUrl(chain: Chain, address: string): string {
+  return `https://dexscreener.com/${dexSlug(chain)}/${address}`;
+}

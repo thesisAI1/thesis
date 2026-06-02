@@ -11,6 +11,7 @@ interface TgResponse {
 interface TgMessage {
   message_id?: number;
   chat?: { id?: unknown };
+  from?: { id?: unknown };
   text?: string;
 }
 
@@ -95,10 +96,13 @@ export class RealTelegram implements TelegramAdapter {
         if (typeof msg.text !== "string") continue;
         if (msg.chat?.id === undefined || msg.chat?.id === null) continue;
 
+        const fromId =
+          msg.from?.id !== undefined && msg.from?.id !== null ? String(msg.from.id) : undefined;
         updates.push({
           updateId: u.update_id,
           chatId: String(msg.chat.id),
           text: msg.text,
+          ...(fromId ? { fromId } : {}),
         });
       }
 

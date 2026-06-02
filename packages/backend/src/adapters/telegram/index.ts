@@ -6,6 +6,9 @@ export interface TelegramUpdate {
   updateId: number;
   chatId: string;
   text: string;
+  /** Sender's numeric user id (stringified). Used for the public group bot's
+   *  per-user command cooldown. Absent for service messages / channel posts. */
+  fromId?: string;
 }
 
 export type TelegramMediaSource = { path: string } | { fileId: string } | { url: string };
