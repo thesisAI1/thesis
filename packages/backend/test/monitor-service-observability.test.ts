@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import type { Position } from "@thesis/shared";
 import type { ChainAdapter, SwapResult } from "../src/adapters/chain/index.js";
 import { __setChainForTest } from "../src/adapters/chain/index.js";
+import { MockBaseData } from "../src/adapters/basedata/mock.js";
 import { getStore } from "../src/store/index.js";
 import { runMonitorTick } from "../src/monitor/index.js";
 import { subscribeOps } from "../src/observability/opsBus.js";
@@ -156,7 +157,7 @@ test("G6c: INCOMPLETE settlement emits settle:failed ops event", async () => {
 
   // No wallet on file → author leg goes to escrow (avoids payAuthorDirect which
   // has its own send, keeping the failure surface clean). AlwaysFailChain still
-  // fails the team + buyback sends, leaving all three legs undone.
+  // fails the buyback send, leaving both legs undone.
   const chain = new AlwaysFailChain();
   __setChainForTest(chain);
   try {
@@ -166,7 +167,7 @@ test("G6c: INCOMPLETE settlement emits settle:failed ops event", async () => {
 
     // The monitor's INCOMPLETE branch (monitor/index.ts settle()) should emit a
     // single settle:failed event that SUMMARISES which legs are still pending —
-    // its reason must mention leg completion flags (e.g. "author=... team=...
+    // its reason must mention leg completion flags (e.g. "author=...
     // buyback=..."). This is DISTINCT from per-leg settle:failed events emitted
     // by runLeg() (those carry on-chain error messages, not a flags summary).
     const monitorIncompleteEvents = ops.filter(
@@ -174,7 +175,6 @@ test("G6c: INCOMPLETE settlement emits settle:failed ops event", async () => {
         e.type === "settle:failed" &&
         // Monitor summary reason includes completion-flag format
         /author=/.test(e.reason) &&
-        /team=/.test(e.reason) &&
         /buyback=/.test(e.reason),
     );
 
@@ -184,17 +184,66 @@ test("G6c: INCOMPLETE settlement emits settle:failed ops event", async () => {
       `Expected 1 settle:failed ops event from the monitor INCOMPLETE branch for ${id}, ` +
         `got ${monitorIncompleteEvents.length}. ` +
         `GREEN: monitor/index.ts settle() INCOMPLETE branch must call ` +
-        `publishOps({type:"settle:failed", positionId, reason:"author=... team=... buyback=..."}).`,
+        `publishOps({type:"settle:failed", positionId, reason:"author=... buyback=..."}).`,
     );
 
     const ev = monitorIncompleteEvents[0];
     assert.equal(ev.positionId, id, "settle:failed event must carry the positionId");
     assert.ok(
-      /author=/.test(ev.reason) && /team=/.test(ev.reason) && /buyback=/.test(ev.reason),
+      /author=/.test(ev.reason) && /buyback=/.test(ev.reason),
       `reason must name leg completion flags, got: "${ev.reason}"`,
     );
   } finally {
     __setChainForTest(null);
+  }
+});
+
+// ── C1 — wedged price feed → opsBus surfaces SL-starvation (regression guard) ─
+// A chain whose batch price feed is wedged gets ZERO stop-loss evaluation every
+// tick — a silent money risk. The catch escalates warn→error after 3 consecutive
+// failures via logEvent({level:"error", area:"monitor", ...}); logEvent's
+// auto-publish (util/log.ts: level==="error" && ops===undefined → publishOps
+// {type:"error",...}) forwards that to the opsBus the admin bot / /api/events
+// consume. This guard pins that the stall surfaces on the bus EXACTLY ONCE
+// (only on the streak-3 escalation, not on the streak-1/2 warns) so a future
+// change to that escalation can't silently drop the alert.
+test("C1: a wedged price feed surfaces on the opsBus once on the 3rd consecutive failure", async () => {
+  const store = getStore();
+  const id = "pos-price-stall";
+
+  // One open base position so byChain includes "base" and the fetch is attempted.
+  await store.savePosition(primedToClose(id, `${id}-author`));
+
+  // Force every batch price fetch to throw — simulates a wedged data provider.
+  const origGetPrices = MockBaseData.prototype.getPricesEth;
+  MockBaseData.prototype.getPricesEth = async () => {
+    throw new Error("forced price-feed wedge");
+  };
+  try {
+    const ops = await captureOps(async () => {
+      await runMonitorTick(); // streak 1 — warn only, no ops
+      await runMonitorTick(); // streak 2 — warn only, no ops
+      await runMonitorTick(); // streak 3 — escalate to error → ops published
+    });
+
+    const stallEvents = ops.filter(
+      (e): e is Extract<OpsEvent, { type: "error" }> =>
+        e.type === "error" && e.area === "monitor" && /base/.test(e.msg),
+    );
+
+    assert.equal(
+      stallEvents.length,
+      1,
+      `Expected exactly 1 monitor error ops event (streak-3 escalation only), ` +
+        `got ${stallEvents.length}. The wedged-feed SL-starvation alert must ` +
+        `reach the opsBus.`,
+    );
+    assert.ok(
+      /3 consecutive/.test(stallEvents[0].msg),
+      `the published ops msg must name the consecutive-failure streak, got: "${stallEvents[0].msg}"`,
+    );
+  } finally {
+    MockBaseData.prototype.getPricesEth = origGetPrices;
   }
 });
 
