@@ -874,9 +874,8 @@ async function adminRepostCloseAnnouncement(
   const isEscrowed = Boolean(escrow && escrow.amountEth > 0);
 
   // Build a tight, address-free announcement. Repost intentionally skips the
-  // card image and the per-winner lottery block — both of those tripped X's
-  // crypto-address filter the first time. The explorer tx link is the one
-  // reliable receipt for on-chain delivery.
+  // card image — it tripped X's crypto-address filter the first time. The
+  // explorer tx link is the one reliable receipt for on-chain delivery.
   const sign = pos.realisedPnlEth >= 0 ? "+" : "";
   const lines: string[] = [
     `Closing summary for the thesis above.`,
@@ -886,7 +885,7 @@ async function adminRepostCloseAnnouncement(
     lines.push(
       chain === "solana"
         ? `Author share: 25% of profit. Treasury split + portfolio — all settled on-chain.`
-        : `Author share: 25% of profit. Buyback + holder lottery + portfolio split — all settled on-chain.`,
+        : `Author share: 25% of profit. Buyback & burn + portfolio split — all settled on-chain.`,
     );
   }
   if (isEscrowed && escrow) {
@@ -1285,10 +1284,9 @@ async function buildDashboardPayload(): Promise<object> {
     (a, d) => ({
       toAuthors: a.toAuthors + d.toAuthorEth,
       toPortfolio: a.toPortfolio + d.toPortfolioEth,
-      toTeam: a.toTeam + d.toTeamEth,
       toBuyback: a.toBuyback + d.toBuybackEth,
     }),
-    { toAuthors: 0, toPortfolio: 0, toTeam: 0, toBuyback: 0 },
+    { toAuthors: 0, toPortfolio: 0, toBuyback: 0 },
   );
 
   // ETH/USD reference — used for the portfolio total-value display. Comes
@@ -1388,7 +1386,6 @@ async function buildDashboardPayload(): Promise<object> {
      *  here is ETH "ever distributed to this leg" since launch. */
     counters: {
       authorsTotalEth: dist.toAuthors,
-      lotteryTotalEth: dist.toTeam, // toTeam holds the lottery slice post-rename
       buybackTotalEth: dist.toBuyback, // proxy for "$THESIS burned ever"
       portfolioTotalEth: dist.toPortfolio,
       winRate7d,

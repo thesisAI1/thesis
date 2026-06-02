@@ -102,7 +102,7 @@ describe("formatGroupEvent trade:sell", () => {
 // ── settle:summary ────────────────────────────────────────────────────────────
 
 describe("formatGroupEvent settle:summary", () => {
-  test("direct pay: contains WIF, pnlPct, @alice, all four split legs, gif === close-split", async () => {
+  test("direct pay: contains WIF, pnlPct, @alice, all three split legs, gif === close-split", async () => {
     const e: OpsEvent = {
       type: "settle:summary",
       at: new Date().toISOString(),
@@ -111,7 +111,6 @@ describe("formatGroupEvent settle:summary", () => {
       totalProfitEth: 0.8,
       toAuthorEth: 0.2,
       toPortfolioEth: 0.3,
-      toTeamEth: 0.15,
       toBuybackEth: 0.15,
       authorPaid: "direct",
     };
@@ -121,10 +120,9 @@ describe("formatGroupEvent settle:summary", () => {
     assert.ok(msg.text.includes("WIF"), `text should contain WIF: ${msg.text}`);
     assert.ok(msg.text.includes("800"), `text should contain 800 (percent): ${msg.text}`);
     assert.ok(msg.text.includes("@alice"), `text should contain @alice: ${msg.text}`);
-    // All four split legs present
+    // All three split legs present
     assert.ok(msg.text.includes("0.2"), `text should contain toAuthorEth: ${msg.text}`);
     assert.ok(msg.text.includes("0.3"), `text should contain toPortfolioEth: ${msg.text}`);
-    assert.ok(msg.text.includes("0.15"), `text should contain toTeamEth: ${msg.text}`);
     assert.ok(msg.text.toLowerCase().includes("buyback"), `text should mention buyback: ${msg.text}`);
     assert.equal(msg.gif, "close-split");
   });
@@ -138,7 +136,6 @@ describe("formatGroupEvent settle:summary", () => {
       totalProfitEth: 0.8,
       toAuthorEth: 0.2,
       toPortfolioEth: 0.3,
-      toTeamEth: 0.15,
       toBuybackEth: 0.15,
       authorPaid: "escrowed",
     };
@@ -160,7 +157,6 @@ describe("formatGroupEvent settle:summary", () => {
       totalProfitEth: 0.8,
       toAuthorEth: 0.2,
       toPortfolioEth: 0.3,
-      toTeamEth: 0.15,
       toBuybackEth: 0.15,
       authorPaid: "direct",
     };

@@ -17,7 +17,7 @@
 
 export interface ActivityItem {
   at: string; // ISO timestamp
-  kind: "buy" | "tp" | "sl" | "manual" | "aging" | "lottery" | "burn" | "skip";
+  kind: "buy" | "tp" | "sl" | "manual" | "aging" | "burn" | "skip";
   /** Short human-readable summary, pre-formatted by the caller (so the ticker
    *  can render it without per-item branching). e.g. "@author funded 0.02 Ξ"
    *  or "@author hit TP1 (+100%)". */

@@ -13,9 +13,9 @@
  * that have not yet succeeded. So a transient failure is recovered AND no leg is
  * ever paid twice.
  *
- * This test fails the first sends (author + team) on tick 1, then lets them
- * succeed on tick 2, and asserts: settled only after the retry, author paid
- * EXACTLY once, buyback run EXACTLY once (not re-run), one distribution.
+ * This test fails the author send on tick 1, then lets it succeed on tick 2,
+ * and asserts: settled only after the retry, author paid EXACTLY once, buyback
+ * run EXACTLY once (not re-run), one distribution.
  *
  * RED (pre-fix): no `settledAt` / `getUnsettledClosedPositions` / retry pass —
  * the position settles "successfully" on tick 1 with the author unpaid, and is
@@ -28,7 +28,6 @@ import assert from "node:assert/strict";
 import type { Position } from "@thesis/shared";
 import type { ChainAdapter, SwapResult } from "../src/adapters/chain/index.js";
 import { __setChainForTest } from "../src/adapters/chain/index.js";
-import { config } from "../src/config.js";
 import { getStore } from "../src/store/index.js";
 import { runMonitorTick } from "../src/monitor/index.js";
 
@@ -101,11 +100,6 @@ function primedToClose(id: string): Position {
 }
 
 test("a failed settlement is retried and settles exactly once (no double-pay)", async () => {
-  const lotteryWas = config.holderLottery.enabled;
-  // Disable the lottery so the team slice is one simple sendEth (the leg we fail
-  // on tick 1), not holder enumeration.
-  (config.holderLottery as { enabled: boolean }).enabled = false;
-
   const store = getStore();
   const id = "pos-settle-retry";
   // Author has a payout wallet on file → DIRECT payout via sendEth (the failing leg).
@@ -116,13 +110,13 @@ test("a failed settlement is retried and settles exactly once (no double-pay)", 
     linkedAt: new Date().toISOString(),
   });
 
-  // Fail the first two sends (author + team on tick 1); they succeed afterwards.
-  const chain = new FlakyChain(2);
+  // Fail the first send (the author leg on tick 1); it succeeds afterwards.
+  const chain = new FlakyChain(1);
   __setChainForTest(chain);
   try {
     await store.savePosition(primedToClose(id));
 
-    // --- Tick 1: closes, but author + team sends THROW → settlement incomplete.
+    // --- Tick 1: closes, but the author send THROWS → settlement incomplete.
     await runMonitorTick();
     let fresh = (await store.getAllPositions()).find((p) => p.id === id);
     assert.equal(fresh?.status, "closed", "position should be closed after tick 1");
@@ -173,6 +167,5 @@ test("a failed settlement is retried and settles exactly once (no double-pay)", 
     assert.equal(chain.buybackCalls, 1, "a settled position must never buy back again");
   } finally {
     __setChainForTest(null);
-    (config.holderLottery as { enabled: boolean }).enabled = lotteryWas;
   }
 });

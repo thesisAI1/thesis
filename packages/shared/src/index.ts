@@ -211,22 +211,21 @@ export interface Position {
   lastExitTxHash?: string;
   openedAt: string;
   closedAt?: string;
-  /** PR3 — settlement durability. Set when the 25/25/25/25 split has FULLY
+  /** PR3 — settlement durability. Set when the 25/50/25 split has FULLY
    *  completed (every applicable leg done). A position that is `closed` but has
    *  no `settledAt` is retried by the monitor on each tick until it settles, so
    *  a transient payout failure can never strand an author unpaid. */
   settledAt?: string;
   /** Per-leg settlement progress, so a retried settlement re-runs ONLY the legs
-   *  that have not yet succeeded — never double-paying the author, lottery, or
-   *  buyback. */
+   *  that have not yet succeeded — never double-paying the author or buyback. */
   settlement?: SettlementProgress;
 }
 
-/** Which legs of a position's 25/25/25/25 settlement have completed. Persisted
+/** Which legs of a position's 25/50/25 settlement have completed. Persisted
  *  on the Position so a settlement interrupted by a crash or a transient RPC
  *  failure resumes idempotently on the next monitor tick. */
 /**
- * Which legs of a position's 25/25/25/25 settlement have completed. Every field
+ * Which legs of a position's 25/50/25 settlement have completed. Every field
  * is REQUIRED (default false) so a half-shaped progress object can't be
  * represented; read sites normalise a partial/absent persisted value with
  * `{ ...defaults, ...stored }`.
@@ -236,25 +235,29 @@ export interface SettlementProgress {
    *  set when a direct payout returned `{kind:"failed"}` — that leaves it for
    *  retry rather than marking it done. */
   authorDone: boolean;
-  /** Team / holder-lottery leg ran to completion (or was not applicable). */
-  teamDone: boolean;
-  /** Buyback & burn ran to completion (or was not applicable). */
+  /** Buyback leg ran to completion (or was not applicable). */
   buybackDone: boolean;
   /** Distribution record persisted + endowment stream event published (once). */
   distributionDone: boolean;
 }
 
-/** The 25/25/25/25 split The Endowment performs on a profitable exit. */
+/** The 25/50/25 split The Endowment performs on a profitable exit:
+ *  25% author · 50% portfolio · 25% buyback. (The holder-lottery quarter was
+ *  retired — it now compounds into the portfolio.) */
 export interface Distribution {
   positionId: string;
   totalProfitEth: number;
   /** 25% — paid to the submitter. */
   toAuthorEth: number;
-  /** 25% — compounded into the trading wallet. */
+  /** 50% — compounded into the trading wallet (includes the retired
+   *  holder-lottery quarter). */
   toPortfolioEth: number;
-  /** 25% — team / maintenance wallet. */
-  toTeamEth: number;
-  /** 25% — buys $THESIS on the open market and burns it. */
+  /** Retired holder-lottery quarter. Null on new distributions (the slice now
+   *  compounds into `toPortfolioEth`); retained, optional, to preserve the
+   *  historical lottery payouts and leave the door open to re-enabling it. */
+  toTeamEth?: number | null;
+  /** 25% — buys $THESIS on the open market and burns it (Base); on Solana it
+   *  accrues in SOLANA_BUYBACK_WALLET for a manual bridge→buyback→burn. */
   toBuybackEth: number;
   /** Resolved payout wallet of the author, or null if not registered. */
   authorWallet: string | null;

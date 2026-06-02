@@ -149,7 +149,7 @@ describe("startGroupNotifier — event filter", () => {
     // Should send (5 total)
     publishOps({ type: "trade:buy",       at, positionId: "p1", handle: "@alice", amountEth: 0.1, contract: "0xabc", chain: "base" });
     publishOps({ type: "trade:sell",      at, positionId: "p2", tier: 1, proceedsEth: 0.2, profitEth: 0.1, chain: "base" });
-    publishOps({ type: "settle:summary",  at, positionId: "p3", handle: "@alice", totalProfitEth: 0.5, toAuthorEth: 0.1, toPortfolioEth: 0.1, toTeamEth: 0.1, toBuybackEth: 0.1, authorPaid: "direct" });
+    publishOps({ type: "settle:summary",  at, positionId: "p3", handle: "@alice", totalProfitEth: 0.5, toAuthorEth: 0.1, toPortfolioEth: 0.2, toBuybackEth: 0.1, authorPaid: "direct" });
     publishOps({ type: "position:close",  at, positionId: "p4", netPnlEth: -0.05, reason: "sl", chain: "base" });  // loss → sends
     publishOps({ type: "payout:sent",     at, path: "escrow", chain: "base", handle: "@alice", amountEth: 0.1, wallet: "0x1111", txHash: "0x2222" }); // escrow → sends
 

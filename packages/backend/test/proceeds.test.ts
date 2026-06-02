@@ -4,7 +4,7 @@
  *
  * The bug: RealChain.sell/buy returned `built.amountOut` (the router's QUOTE).
  * A quote overstates the real fill by slippage, so the settlement legs (author
- * 25%, buyback, lottery) were sized off ETH that never arrived → over-drawing
+ * 25%, buyback) were sized off ETH that never arrived → over-drawing
  * principal on every close.
  *
  * The fix is `measureEthProceeds`: it brackets the swap between two wallet-

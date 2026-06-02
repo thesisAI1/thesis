@@ -271,7 +271,7 @@ test("GET /api/events — wallet address in msg is redacted (security guard)", a
     level: "error",
     area: "payout",
     type: "payout:failed",
-    msg: `lottery send failed: ${fullAddr}`,
+    msg: `author send failed: ${fullAddr}`,
   });
 
   const { res, result } = captureRes();

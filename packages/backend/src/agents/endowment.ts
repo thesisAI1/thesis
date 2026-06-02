@@ -1,12 +1,13 @@
 /**
  * THE ENDOWMENT — the treasury.
  *
- * Settles a position's total realised profit by splitting it four ways
- * (25/25/25/25) and executing each leg on-chain:
+ * Settles a position's total realised profit by splitting it three ways
+ * (25/50/25) and executing each paying leg on-chain:
  *   - 25% Author    -> the author (see below)
- *   - 25% Portfolio -> stays in the trading wallet, compounding
- *   - 25% Team      -> the team / maintenance wallet
- *   - 25% Buyback   -> buys $THESIS and burns it
+ *   - 50% Portfolio -> stays in the trading wallet, compounding (this includes
+ *                      the retired holder-lottery quarter)
+ *   - 25% Buyback   -> buys $THESIS and burns it (Base); on Solana it accrues
+ *                      in SOLANA_BUYBACK_WALLET for a manual buyback→burn
  *
  * The author leg is paid entirely on X — there is no website registration:
  *   - if the author already has a payout wallet on file, the share is sent
@@ -24,7 +25,6 @@ import { recordActivity } from "../activity.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter } from "../adapters/x/index.js";
 import { config, useMock } from "../config.js";
-import { drawLottery } from "../holders/index.js";
 import { getStore } from "../store/index.js";
 import { log, logEvent } from "../util/log.js";
 import { payoutRequestText, payoutSentText } from "../util/replies.js";
@@ -37,29 +37,9 @@ export type AuthorPaymentInfo =
   | { kind: "escrowed"; amountEth: number; handle: string }
   | { kind: "failed"; reason: string; amountEth: number };
 
-/** Outcome of the holder lottery — who won, how much each, plus the size
- *  of the eligible pool at draw time. Folded into the close tweet so the
- *  announcement reads "5 random holders won X each from a pool of Y". */
-export interface LotteryPaymentInfo {
-  /** Individual winner payouts that actually went through on-chain. */
-  paid: Array<{ wallet: string; amountEth: number; txHash: string }>;
-  /** Winner picks that reverted on the send (RPC failure etc.). Carried
-   *  back so the close tweet can mention the affected count if any. */
-  failed: Array<{ wallet: string; amountEth: number; reason: string }>;
-  /** How many wallets were eligible at draw time — useful copy fodder. */
-  eligibleCount: number;
-  /** ETH that couldn't be distributed (lottery disabled, no eligibles,
-   *  or every send reverted). Added to the buyback budget so it never
-   *  sits idle. */
-  undistributedEth: number;
-}
-
 export interface EndowmentResult {
   distribution: Distribution;
   authorPayment: AuthorPaymentInfo;
-  /** Null when the lottery is disabled in config OR the trade fell back to
-   *  the classic team payout (e.g. no eligibles at all). */
-  lotteryPayment: LotteryPaymentInfo | null;
 }
 
 /**
@@ -77,18 +57,17 @@ export interface EndowmentResult {
  * true; the option is kept for backwards compat / future flexibility.
  */
 /**
- * Per-chain settlement policy for the team + buyback quarters.
+ * Per-chain settlement policy for the buyback quarter.
  *
- *   Base   — the $THESIS holder lottery (when enabled) + buyback-and-burn of
- *            $THESIS (the deflationary mechanic).
- *   Solana — NO holder lottery (it enumerates Base $THESIS holders) and NO
- *            $THESIS burn (there is no $THESIS on Solana). Both the team slice
- *            and the buyback-substitute slice are sent in SOL to
- *            SOLANA_BUYBACK_WALLET — the operator's designated Solana wallet.
+ *   Base   — buyback-and-burn of $THESIS (the deflationary mechanic).
+ *   Solana — NO $THESIS burn (there is no $THESIS on Solana); the
+ *            buyback-substitute slice is sent in SOL to SOLANA_BUYBACK_WALLET,
+ *            the operator's designated collection wallet, for a later manual
+ *            bridge→buyback→burn.
  */
-export function settlementPolicy(chain: Chain): { useLottery: boolean; useBurn: boolean } {
-  if (chain === "solana") return { useLottery: false, useBurn: false };
-  return { useLottery: config.holderLottery.enabled, useBurn: true };
+export function settlementPolicy(chain: Chain): { useBurn: boolean } {
+  if (chain === "solana") return { useBurn: false };
+  return { useBurn: true };
 }
 
 export async function runEndowment(
@@ -103,17 +82,15 @@ export async function runEndowment(
   // Settle on the position's own chain — SOL legs for a Solana win, ETH for Base.
   const chain = createChainAdapter(position.order.chain);
   const policy = settlementPolicy(position.order.chain);
-  const isSolana = position.order.chain === "solana";
   const entry = await store.getRegistryEntry(position.authorXId, position.order.chain);
 
   // PR3 — idempotent settlement. Each leg is gated on a persisted marker, and
   // progress is saved after each leg, so a settlement interrupted by a transient
   // send/RPC failure (or a crash) RESUMES on the next monitor tick and re-runs
-  // ONLY the legs that have not yet succeeded — the author, lottery winners, and
-  // buyback are each paid exactly once, never twice.
+  // ONLY the legs that have not yet succeeded — the author and buyback are each
+  // paid exactly once, never twice.
   const progress: SettlementProgress = {
     authorDone: false,
-    teamDone: false,
     buybackDone: false,
     distributionDone: false,
     ...(position.settlement ?? {}),
@@ -173,71 +150,13 @@ export async function runEndowment(
     }
   }
 
-  // 25% — holder lottery (or classic team payout, depending on config).
-  //
-  // With HOLDER_LOTTERY_ENABLED, the team slice splits across N=5 random
-  // eligible $THESIS holders, 5% each. Any ETH we can't distribute (lottery
-  // off, no eligibles, sends revert) is folded into the buyback budget for
-  // THIS close — never left sitting in the wallet. With the lottery off,
-  // behaviour falls back to the legacy single transfer to TEAM_WALLET.
-  let lotteryPayment: LotteryPaymentInfo | null = null;
-  let teamPaidEth = 0;
-  let buybackBudget = quarter; // base buyback slice; may be topped up below
-  if (!progress.teamDone) {
-    let teamOk = true;
-    if (policy.useLottery) {
-      // Base only — the lottery enumerates Base $THESIS holders.
-      // runHolderLottery only throws BEFORE any winner is paid (a drawLottery
-      // failure); that propagates, leaving teamDone false → safe to retry.
-      // Partial winner-send failures are caught inside and rolled into the
-      // buyback, so the leg still "completes" and is never re-run.
-      const result = await runHolderLottery(position, quarter, chain);
-      lotteryPayment = result;
-      teamPaidEth = result.paid.reduce((s, p) => s + p.amountEth, 0);
-      buybackBudget += result.undistributedEth;
-      if (result.paid.length > 0) {
-        // Feed the dashboard ticker — lottery payouts are a visible
-        // "community wins" signal that should surface in the live feed.
-        recordActivity({
-          kind: "lottery",
-          summary: `🎲 ${result.paid.length} $THESIS holders won ${result.paid[0].amountEth.toFixed(4)} Ξ each`,
-          positionId: position.id,
-          amountEth: teamPaidEth,
-        });
-      }
-    } else if (isSolana) {
-      // Solana team slice — no lottery; pay SOL to the operator's Solana wallet.
-      if (useMock() || config.solana.buybackWallet) {
-        teamOk = await runLeg("pay team (SOL)", () =>
-          chain.sendEth(config.solana.buybackWallet, quarter),
-          position.id,
-        );
-        teamPaidEth = teamOk ? quarter : 0;
-      } else {
-        // Live Solana win but SOLANA_BUYBACK_WALLET unset — the team slice has
-        // nowhere to go. Don't silently mark it done; warn and leave teamDone
-        // false so it retries once the operator configures the wallet.
-        teamOk = false;
-        log.warn(
-          `endowment: ${position.id} Solana team slice unpaid — SOLANA_BUYBACK_WALLET unset`,
-        );
-      }
-    } else if (useMock() || config.chain.teamWallet) {
-      teamOk = await runLeg("pay team", () =>
-        chain.sendEth(config.chain.teamWallet, quarter),
-        position.id,
-      );
-      teamPaidEth = teamOk ? quarter : 0;
-    }
-    if (teamOk) {
-      progress.teamDone = true;
-      await saveProgress();
-    }
-  }
+  // 50% — the trading portfolio: the profit already sits in the wallet, so
+  // there is no leg to run. (This includes the retired holder-lottery quarter,
+  // which now compounds here instead of paying out to random holders.)
+  const buybackBudget = quarter;
 
-  // 25% (+ any undistributed lottery ETH) — buy back $THESIS and burn it (Base),
-  // or send the buyback-substitute slice in SOL to the Solana wallet (Solana —
-  // no $THESIS exists there to burn).
+  // 25% — buy back $THESIS and burn it (Base), or send the buyback-substitute
+  // slice in SOL to the Solana wallet (Solana — no $THESIS exists there to burn).
   if (!progress.buybackDone) {
     // policy.useBurn is false exactly for Solana — there is no $THESIS to burn,
     // so the buyback-substitute slice is sent in SOL to SOLANA_BUYBACK_WALLET.
@@ -288,97 +207,17 @@ export async function runEndowment(
     }
   }
 
-  // 25% — the trading portfolio: the profit already sits in the wallet.
-
   return {
     distribution: {
       positionId: position.id,
       totalProfitEth: profitEth,
       toAuthorEth: quarter,
-      toPortfolioEth: quarter,
-      toTeamEth: teamPaidEth,
+      toPortfolioEth: quarter * 2,
       toBuybackEth: buybackBudget,
       authorWallet: entry ? entry.wallet : null,
     },
     authorPayment,
-    lotteryPayment,
   };
-}
-
-/**
- * Run the holder lottery for one settlement. Draws N random eligible $THESIS
- * holders (uniform, seeded by the close tx hash), splits the team slice
- * equally between them, and dispatches the on-chain sends sequentially so a
- * single revert doesn't abort the rest. Returns a tally the caller folds
- * into the close announcement tweet.
- */
-async function runHolderLottery(
-  position: Position,
-  slice: number,
-  chain: ReturnType<typeof createChainAdapter>,
-): Promise<LotteryPaymentInfo> {
-  const winnersWanted = Math.max(1, config.holderLottery.winnersPerTrade);
-  // Seed needs to be a 0x-hex string. The close tx hash is the natural
-  // choice — published in the tweet and on BaseScan, so anyone can verify.
-  const seed = position.lastExitTxHash;
-  if (!seed) {
-    log.warn(
-      `endowment: lottery skipped for ${position.id} — no lastExitTxHash to seed the random pick`,
-    );
-    return { paid: [], failed: [], eligibleCount: 0, undistributedEth: slice };
-  }
-  // Skip our own trading wallet in case it qualifies (we'd be paying
-  // ourselves). The address comes from the chain adapter at runtime.
-  let ourWallet = "";
-  try {
-    ourWallet = chain.getWalletAddress();
-  } catch {
-    /* mock or misconfigured — pass empty exclude */
-  }
-  const draw = await drawLottery(winnersWanted, seed, ourWallet);
-  if (draw.winners.length === 0) {
-    log.warn(
-      `endowment: lottery for ${position.id} — no eligible holders (pool 0). ` +
-        `Slice (${slice.toFixed(4)} ETH) goes to buyback.`,
-    );
-    return { paid: [], failed: [], eligibleCount: 0, undistributedEth: slice };
-  }
-  // Equal split across actual winners — if we asked for 5 but only got 3
-  // eligibles, each of the 3 gets a third of the slice (not a fifth).
-  const perWinner = slice / draw.winners.length;
-  const paid: LotteryPaymentInfo["paid"] = [];
-  const failed: LotteryPaymentInfo["failed"] = [];
-  for (const winner of draw.winners) {
-    try {
-      const txHash = await chain.sendEth(winner, perWinner);
-      paid.push({ wallet: winner, amountEth: perWinner, txHash });
-      log.info(
-        `endowment: lottery paid ${winner} ${perWinner.toFixed(4)} ETH — tx ${txHash}`,
-      );
-    } catch (err) {
-      const reason = String(err);
-      failed.push({ wallet: winner, amountEth: perWinner, reason });
-      logEvent({
-        level: "error",
-        area: "endowment",
-        type: "lottery-send:failed",
-        msg: `endowment: lottery send failed — ${reason}`,
-        ops: {
-          type: "settle:failed",
-          at: new Date().toISOString(),
-          positionId: position.id,
-          reason: `lottery send failed: ${reason}`,
-        },
-      });
-    }
-  }
-  const undistributedEth = failed.reduce((s, f) => s + f.amountEth, 0);
-  log.info(
-    `endowment: lottery for ${position.id} — paid ${paid.length}/${draw.winners.length} winners ` +
-      `(${perWinner.toFixed(4)} ETH each, pool ${draw.eligibleCount} eligibles)` +
-      (undistributedEth > 0 ? `, ${undistributedEth.toFixed(4)} ETH rolled to buyback` : ""),
-  );
-  return { paid, failed, eligibleCount: draw.eligibleCount, undistributedEth };
 }
 
 /** Pay an author whose payout wallet is already on file. Returns the

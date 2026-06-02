@@ -122,7 +122,6 @@ export class FileStore implements Store {
           p.settledAt = p.closedAt ?? new Date().toISOString();
           p.settlement = {
             authorDone: true,
-            teamDone: true,
             buybackDone: true,
             distributionDone: true,
           };

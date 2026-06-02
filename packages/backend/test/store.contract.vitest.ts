@@ -129,8 +129,7 @@ function makeDistribution(over: Partial<Distribution> = {}): Distribution {
     positionId: "pos-1",
     totalProfitEth: 1,
     toAuthorEth: 0.25,
-    toPortfolioEth: 0.25,
-    toTeamEth: 0.25,
+    toPortfolioEth: 0.5,
     toBuybackEth: 0.25,
     authorWallet: "0xWALLET",
     ...over,
@@ -338,6 +337,18 @@ describe.each(cases)("Store contract — $name", ({ name, make }) => {
     expect(last?.authorWallet).toBeNull();
   });
 
+  it("PARITY: retired toTeamEth round-trips when set (historical rows); absent reads back undefined", async () => {
+    // A pre-retirement row carries the holder-lottery quarter — keeping the column
+    // nullable means that historical value must survive read-back unchanged.
+    await store.saveDistribution(makeDistribution({ positionId: "historical", toTeamEth: 0.25 }));
+    // A post-retirement row omits it; both stores must return undefined (the DB
+    // column is null) — not 0, not null — so the optional-field parity is exact.
+    await store.saveDistribution(makeDistribution({ positionId: "current" }));
+    const dists = await store.getDistributions();
+    expect(dists.find((d) => d.positionId === "historical")?.toTeamEth).toBe(0.25);
+    expect(dists.find((d) => d.positionId === "current")?.toTeamEth).toBeUndefined();
+  });
+
   // ---- payout requests ----
   it("addPayoutRequest upserts by requestTweetId; getPayoutRequests = all; clearPayoutRequestsForUser drops that user's rows", async () => {
     await store.addPayoutRequest(makePayoutRequest({ requestTweetId: "r1", xUserId: "x-1" }));
@@ -472,7 +483,7 @@ describe.each(cases)("Store contract — $name", ({ name, make }) => {
         status: "closed",
         closedAt: "2026-02-01T00:00:00.000Z",
         settledAt: "2026-02-01T00:05:00.000Z",
-        settlement: { authorDone: true, teamDone: true, buybackDone: true, distributionDone: true },
+        settlement: { authorDone: true, buybackDone: true, distributionDone: true },
       }),
     );
     const unsettled = await store.getUnsettledClosedPositions();
@@ -482,7 +493,6 @@ describe.each(cases)("Store contract — $name", ({ name, make }) => {
   it("PARITY: settledAt + settlement round-trip exactly; never-set reads back undefined", async () => {
     const settlement = {
       authorDone: true,
-      teamDone: false,
       buybackDone: true,
       distributionDone: false,
     };

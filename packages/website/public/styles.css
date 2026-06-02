@@ -943,7 +943,6 @@ footer p { color: var(--dim); font-size: 12.5px; max-width: 640px; margin: 0 aut
 .tk-sl      { color: var(--red); }
 .tk-manual  { color: var(--text); }
 .tk-aging   { color: var(--muted); }
-.tk-lottery { color: #4F9DDE; }
 .tk-burn    { color: #E0653E; }
 .tk-skip    { color: var(--muted); }
 

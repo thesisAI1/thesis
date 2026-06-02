@@ -10,7 +10,7 @@
  * it is hit. So a token that hits a tier and then fades is sold near that
  * tier, locking in profit, and the position always closes.
  *
- * Profit accrues across the tiers; the 25/25/25/25 split runs ONCE, when the
+ * Profit accrues across the tiers; the 25/50/25 split runs ONCE, when the
  * position fully closes (TP4 reached, or stopped out) and only if it is in
  * net profit. Each exit is announced as a reply on the original X post.
  */
@@ -19,7 +19,7 @@ import type { Chain, Position, SettlementProgress } from "@thesis/shared";
 import { createBaseDataAdapter } from "../adapters/basedata/index.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter } from "../adapters/x/index.js";
-import type { AuthorPaymentInfo, LotteryPaymentInfo } from "../agents/endowment.js";
+import type { AuthorPaymentInfo } from "../agents/endowment.js";
 import { renderProfitCardSvg, type ProfitCardData } from "../cards/profit-card.js";
 import { fetchAvatarAsDataUri, rasterise } from "../cards/render.js";
 import { recordActivity } from "../activity.js";
@@ -247,8 +247,8 @@ async function takeTier(pos: Position): Promise<boolean> {
   publishOps({ type: "trade:sell", at: new Date().toISOString(), positionId: pos.id, tier: tierNum, proceedsEth: sale.proceeds, profitEth: sale.profit, chain: pos.order.chain });
 
   // Final tier closes the position. Mark + persist + settle BEFORE the reply
-  // so the author-payment + holder-lottery lines can be folded into the
-  // close-announcement tweet (single combined reply, not three separate ones).
+  // so the author-payment line can be folded into the close-announcement tweet
+  // (single combined reply, not two separate ones).
   let settled: SettleResult | null = null;
   if (final) {
     pos.status = "closed";
@@ -272,7 +272,6 @@ async function takeTier(pos: Position): Promise<boolean> {
       txHash: sale.txHash,
     },
     settled?.authorPayment ?? null,
-    settled?.lotteryPayment ?? null,
   );
   return true;
 }
@@ -363,8 +362,8 @@ async function closeOutWithKind(
   });
   publishOps({ type: "position:close", at: new Date().toISOString(), positionId: pos.id, netPnlEth: total, reason: kind, chain: pos.order.chain });
   // Settle first so we know how the author was paid (direct vs escrow vs
-  // failed) AND who won the holder lottery — this gets folded into the
-  // close-announcement tweet so the whole story lands as ONE reply.
+  // failed) — this gets folded into the close-announcement tweet so the whole
+  // story lands as ONE reply.
   const settled = await settle(pos);
   // Aging closes carry the age + threshold so the reply text can explain
   // exactly why the position was cut (not "stop-loss triggered" — that
@@ -379,7 +378,6 @@ async function closeOutWithKind(
       pos,
       { kind, netPnlEth: total, ageHours, thresholdPct, txHash: sale.txHash },
       settled?.authorPayment ?? null,
-      settled?.lotteryPayment ?? null,
     );
     return;
   }
@@ -387,7 +385,6 @@ async function closeOutWithKind(
     pos,
     { kind, netPnlEth: total, tiersHit: pos.tiersHit, txHash: sale.txHash },
     settled?.authorPayment ?? null,
-    settled?.lotteryPayment ?? null,
   );
 }
 
@@ -416,23 +413,22 @@ export async function closeByAuthor(pos: Position, currentPrice: number): Promis
   });
 }
 
-/** Settlement outcome bundled for the caller. Both legs live in the same
- *  envelope so the close-announcement tweet can fold both into one reply. */
+/** Settlement outcome bundled for the caller, so the close-announcement tweet
+ *  can fold the author-payment line into one reply. */
 interface SettleResult {
   authorPayment: AuthorPaymentInfo;
-  lotteryPayment: LotteryPaymentInfo | null;
 }
 
-/** Split the position's total realised profit 25/25/25/25. Idempotent and
+/** Split the position's total realised profit 25/50/25. Idempotent and
  *  durable (PR3): each paying leg is gated on a persisted marker, so a
  *  settlement interrupted by a transient failure is retried by the monitor's
  *  resume pass and completed without double-paying. The position is marked
  *  `settledAt` (terminal) ONLY once every applicable leg has actually succeeded;
  *  until then it stays closed-but-unsettled and is retried each tick.
  *
- *  Returns the author + lottery payment outcomes so the FIRST-close caller can
- *  fold both into the close-announcement tweet. Returns null when not in profit
- *  (no settlement runs) or when settlement could not be completed this tick. */
+ *  Returns the author payment outcome so the FIRST-close caller can fold it
+ *  into the close-announcement tweet. Returns null when not in profit (no
+ *  settlement runs) or when settlement could not be completed this tick. */
 async function settle(
   pos: Position,
   opts: { resume?: boolean } = {},
@@ -485,15 +481,14 @@ async function settle(
   // the ones already done, so no leg is ever paid twice.
   const p: SettlementProgress = {
     authorDone: false,
-    teamDone: false,
     buybackDone: false,
     distributionDone: false,
     ...(pos.settlement ?? {}),
   };
-  if (!(p.authorDone && p.teamDone && p.buybackDone)) {
+  if (!(p.authorDone && p.buybackDone)) {
     const incompleteMsg =
       `monitor: settlement INCOMPLETE for ${pos.id} ` +
-        `(author=${!!p.authorDone} team=${!!p.teamDone} buyback=${!!p.buybackDone}) — ` +
+        `(author=${!!p.authorDone} buyback=${!!p.buybackDone}) — ` +
         `will retry next tick`;
     log.error(incompleteMsg);
     if (!settleFailedEmitted.has(pos.id)) {
@@ -502,10 +497,10 @@ async function settle(
         type: "settle:failed",
         at: new Date().toISOString(),
         positionId: pos.id,
-        reason: `incomplete: author=${!!p.authorDone} team=${!!p.teamDone} buyback=${!!p.buybackDone}`,
+        reason: `incomplete: author=${!!p.authorDone} buyback=${!!p.buybackDone}`,
       });
     }
-    return { authorPayment: result.authorPayment, lotteryPayment: result.lotteryPayment };
+    return { authorPayment: result.authorPayment };
   }
 
   // All legs done — record the distribution + publish the event exactly once,
@@ -522,13 +517,13 @@ async function settle(
       authorWallet: result.distribution.authorWallet,
     });
     publishOps({ type: "settle:done", at: new Date().toISOString(), chain: pos.order.chain, positionId: result.distribution.positionId, toAuthorEth: result.distribution.toAuthorEth, totalProfitEth: result.distribution.totalProfitEth });
-    publishOps({ type: "settle:summary", at: new Date().toISOString(), positionId: result.distribution.positionId, handle: pos.authorHandle, totalProfitEth: result.distribution.totalProfitEth, toAuthorEth: result.distribution.toAuthorEth, toPortfolioEth: result.distribution.toPortfolioEth, toTeamEth: result.distribution.toTeamEth, toBuybackEth: result.distribution.toBuybackEth, authorPaid: result.distribution.authorWallet ? "direct" : "escrowed" });
+    publishOps({ type: "settle:summary", at: new Date().toISOString(), positionId: result.distribution.positionId, handle: pos.authorHandle, totalProfitEth: result.distribution.totalProfitEth, toAuthorEth: result.distribution.toAuthorEth, toPortfolioEth: result.distribution.toPortfolioEth, toBuybackEth: result.distribution.toBuybackEth, authorPaid: result.distribution.authorWallet ? "direct" : "escrowed" });
     p.distributionDone = true;
   }
   pos.settlement = p;
   pos.settledAt = new Date().toISOString();
   await getStore().savePosition(pos);
-  return { authorPayment: result.authorPayment, lotteryPayment: result.lotteryPayment };
+  return { authorPayment: result.authorPayment };
 }
 
 /**
@@ -591,10 +586,9 @@ async function reply(
     | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string }
     | { kind: "aging"; netPnlEth: number; ageHours: number; thresholdPct: number; txHash: string },
   authorPayment: AuthorPaymentInfo | null = null,
-  lotteryPayment: LotteryPaymentInfo | null = null,
 ): Promise<void> {
   const x = createXAdapter();
-  const text = buildClosingText(pos, o, authorPayment, lotteryPayment);
+  const text = buildClosingText(pos, o, authorPayment);
   // The card represents the FULL settlement story — author share, $THESIS
   // burn, the lot. Real settlement only runs at full close (TP4 final, or any
   // stop-out). Per-tier intermediate exits don't settle anything yet, so we
@@ -704,7 +698,6 @@ function buildClosingText(
     | { kind: "manual"; netPnlEth: number; tiersHit: number; txHash: string }
     | { kind: "aging"; netPnlEth: number; ageHours: number; thresholdPct: number; txHash: string },
   authorPayment: AuthorPaymentInfo | null,
-  lotteryPayment: LotteryPaymentInfo | null,
 ): string {
   const base = exitReplyText(o, pos.order.chain);
   const parts: string[] = [base];
@@ -734,36 +727,7 @@ function buildClosingText(
     }
   }
 
-  // Lottery winners line — surfaces the 5 random holders who just earned a
-  // share. We append it as a separate stanza so the tweet reads as three
-  // clean sections (close summary, author payment, holder lottery).
-  const lotteryLine = formatLotteryLine(lotteryPayment);
-  if (lotteryLine) {
-    parts.push("");
-    parts.push(lotteryLine);
-  }
-
   return parts.join("\n");
-}
-
-/** Format the lottery payment as a single multi-line block for the close
- *  tweet. Returns "" when no lottery info is present or nobody actually
- *  won (so the caller can decide whether to append at all).
- *
- *  IMPORTANT: this used to include the FULL 0x addresses of every winner
- *  for verifiability, but X (Twitter) blocks tweets containing wallet
- *  addresses for the first ~7 days after a new app authentication, with a
- *  403 "Crypto addresses are prohibited" error. That killed every close
- *  announcement until we noticed. We now describe the lottery in words
- *  only — the trading wallet's BaseScan address (already linked from the
- *  homepage) shows every winner's inbound transfer for self-verification. */
-function formatLotteryLine(info: LotteryPaymentInfo | null): string {
-  if (!info || info.paid.length === 0) return "";
-  const per = info.paid[0].amountEth; // equal split, all the same
-  return [
-    `🎲 Holder lottery: ${info.paid.length} random $THESIS holders won ${per.toFixed(4)} ETH each (pool of ${info.eligibleCount} eligibles).`,
-    `Winners visible on the trading wallet's recent BaseScan transfers.`,
-  ].join("\n");
 }
 
 /** Build the profit-close share card PNG for this exit. Pulls the position's

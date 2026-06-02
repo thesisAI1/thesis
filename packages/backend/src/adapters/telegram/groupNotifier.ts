@@ -91,7 +91,6 @@ export async function formatGroupEvent(
         `Split:\n` +
         `${authorLine}\n` +
         `Portfolio: ${trimEth(e.toPortfolioEth)} ${enr.unit}\n` +
-        `Holders/team: ${trimEth(e.toTeamEth)} ${enr.unit}\n` +
         `Buyback&burn: ${trimEth(e.toBuybackEth)} ${enr.unit}`,
       );
       return { text, gif: "close-split" };

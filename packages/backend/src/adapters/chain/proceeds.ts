@@ -4,8 +4,8 @@
  *
  * L5 (audit #5): RealChain.sell recorded `built.amountOut` (the KyberSwap
  * QUOTE) as the proceeds. A quote overstates the real fill by slippage, so the
- * settlement legs (author 25%, buyback, holder lottery) were sized off ETH that
- * never actually arrived in the wallet → over-drawing principal on every close.
+ * settlement legs (author 25%, buyback) were sized off ETH that never actually
+ * arrived in the wallet → over-drawing principal on every close.
  *
  * We measure the NET wallet delta (after − before). Net already accounts for
  * gas — including the Base L1 data fee that `gasUsed × gasPrice` silently omits

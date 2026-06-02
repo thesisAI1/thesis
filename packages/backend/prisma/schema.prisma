@@ -154,15 +154,18 @@ model Review {
   skippedReason   String?
 }
 
-/// A profit distribution (the 25/25/25/25 split). FileStore PUSHES these —
-/// positionId is non-unique; oldest-first ordering via the autoincrement id.
+/// A profit distribution (the 25/50/25 split: author / portfolio / buyback).
+/// FileStore PUSHES these — positionId is non-unique; oldest-first ordering
+/// via the autoincrement id.
 model Distribution {
   id              Int     @id @default(autoincrement())
   positionId      String
   totalProfitEth  Float
   toAuthorEth     Float
   toPortfolioEth  Float
-  toTeamEth       Float
+  /// Retired holder-lottery quarter. Kept nullable to preserve historical
+  /// payouts and allow re-enabling the lottery later; null on new rows.
+  toTeamEth       Float?
   toBuybackEth    Float
   authorWallet    String?
 }

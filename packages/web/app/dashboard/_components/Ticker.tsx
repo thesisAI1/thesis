@@ -2,8 +2,8 @@
 
 /**
  * The live ticker tape — a scrolling marquee of the freshest committee activity
- * (buys, take-profits, stops, lottery payouts, $THESIS buybacks). Mirrors the
- * legacy `#ticker-tape`.
+ * (buys, take-profits, stops, $THESIS buybacks). Mirrors the legacy
+ * `#ticker-tape`.
  *
  * Seeded by the SSR dashboard payload, then refreshed by a light 15s poll of
  * /api/dashboard for `recentActivity` ONLY. (The SSE `/api/stream` carries
@@ -27,7 +27,6 @@ const KIND_CLASS: Record<ActivityItem["kind"], string> = {
   sl: styles.tkSl,
   manual: styles.tkManual,
   aging: styles.tkAging,
-  lottery: styles.tkLottery,
   burn: styles.tkBurn,
   skip: styles.tkSkip,
 };
