@@ -76,4 +76,28 @@ describe("logEvent", () => {
     assert.equal(typeof log.error, "function");
     log.error("test error message");
   });
+
+  // RED: pin that logEvent threads ops?.type into the recorded EventLogEntry as opsType
+  it("logEvent with ops threads opsType into the recorded entry", () => {
+    const opsPayload = {
+      type: "trade:buy" as const,
+      at: new Date().toISOString(),
+      positionId: "p2",
+      handle: "@b",
+      amountEth: 0.05,
+      contract: "0xdef",
+    };
+
+    logEvent({ level: "info", area: "x", type: "t", msg: "m", ops: opsPayload });
+
+    const entry = getEventLog().recent(1)[0];
+    assert.equal(entry.opsType, "trade:buy");
+  });
+
+  it("logEvent without ops records opsType as undefined", () => {
+    logEvent({ level: "info", area: "x", type: "t", msg: "no-ops" });
+
+    const entry = getEventLog().recent(1)[0];
+    assert.equal(entry.opsType, undefined);
+  });
 });

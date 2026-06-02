@@ -16,6 +16,9 @@ export interface EventLogEntry {
   area: string;
   type: string;
   msg: string;
+  /** OpsEvent discriminator (e.g. "trade:buy") when this entry carried one;
+   *  undefined otherwise. Used by the Prisma durable sink to index by event type. */
+  opsType?: string;
 }
 
 /** Chains we recognise. The project trades on Base AND Solana; the other members

@@ -35,6 +35,12 @@ describe("config.observability", () => {
   it("heartbeatStaleSec defaults to 0", () => {
     assert.equal(config.observability.heartbeatStaleSec, 0);
   });
+
+  // Characterization test (GREEN-on-arrival): pins the default value so a
+  // future accidental change to the fallback is caught immediately.
+  it("eventLogCap defaults to 50000 (characterization)", () => {
+    assert.equal(config.observability.eventLogCap, 50_000);
+  });
 });
 
 // Verify the telegram block exists on the config object (property access test)

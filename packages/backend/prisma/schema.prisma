@@ -183,3 +183,20 @@ model Funnel {
   seen   Int @default(0)
   passed Int @default(0)
 }
+
+/// Durable operational event log (observability Phase B). Append-only mirror of the
+/// in-memory ring; survives restarts to power /api/events history + digests. `at` is
+/// ISO-8601 (sortable, same convention as BuyLog.isoAt). `opsType` is the OpsEvent
+/// discriminator (e.g. "trade:buy") when this entry carried one, else null.
+model Event {
+  id      Int     @id @default(autoincrement())
+  at      String
+  level   String
+  area    String
+  type    String
+  msg     String
+  opsType String?
+
+  @@index([at])
+  @@index([opsType, id])
+}

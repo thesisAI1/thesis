@@ -35,7 +35,7 @@ export function logEvent(input: LogEventInput): void {
     console.log(line);
   }
 
-  getEventLog().record({ at, level: input.level, area: input.area, type: input.type, msg: input.msg });
+  getEventLog().record({ at, level: input.level, area: input.area, type: input.type, msg: input.msg, opsType: input.ops?.type });
 
   if (input.ops !== undefined) {
     publishOps(input.ops);

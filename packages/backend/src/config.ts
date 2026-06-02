@@ -149,6 +149,9 @@ export const config = {
     heartbeatStaleSec: num("HEARTBEAT_STALE_SEC", 0),
     /** How many recent events to keep in memory. */
     recentBufferSize: num("OBS_RECENT_BUFFER_SIZE", 200),
+    /** Maximum rows retained in the durable Event table (Prisma sink). Oldest
+     *  rows are pruned when the cap is exceeded. 50 000 ≈ weeks of headroom. */
+    eventLogCap: num("OBS_EVENT_LOG_CAP", 50_000),
   },
 
   service: {

@@ -6,7 +6,8 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import { MemoryEventLog, getEventLog } from "../src/observability/eventLog.js";
+import type { PrismaClient } from "@prisma/client";
+import { MemoryEventLog, PrismaEventLog, buildEventLog, getEventLog } from "../src/observability/eventLog.js";
 
 const makeEntry = (msg: string) => ({
   at: new Date().toISOString(),
@@ -54,6 +55,20 @@ describe("MemoryEventLog", () => {
     assert.equal(all[0].msg, "entry-5");
     assert.equal(all[1].msg, "entry-4");
     assert.equal(all[2].msg, "entry-3");
+  });
+});
+
+describe("buildEventLog()", () => {
+  it("sqlite mode returns PrismaEventLog", () => {
+    const log = buildEventLog("sqlite", () => ({} as unknown as PrismaClient));
+    assert.ok(log instanceof PrismaEventLog, "sqlite mode must return a PrismaEventLog");
+  });
+
+  it("file mode returns MemoryEventLog (thunk must NOT be called)", () => {
+    const log = buildEventLog("file", () => {
+      throw new Error("getPrisma must not be called in file mode");
+    });
+    assert.ok(log instanceof MemoryEventLog, "file mode must return a MemoryEventLog");
   });
 });
 
