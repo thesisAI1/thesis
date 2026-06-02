@@ -1,17 +1,17 @@
 import type { Holder } from "@thesis/shared";
 import { seed } from "../../util/seed.js";
 import type { BaseDataAdapter, TokenOnChain } from "./index.js";
-import { detectSolanaLaunchpad } from "./solana-launchpad.js";
 
 /**
  * Fake Solana token data, seeded by the mint — the MockBaseData analogue.
  *
  * Mirrors MockBaseData's distributions (liquidity, mcap, holder concentration,
- * age) so the Auditor exercises the same gates on Solana. The launchpad is
- * pump.fun for any mint that carries the "pump" suffix (so the mock feed's
- * pump mints clear the gate); other mints get a seeded mix that includes
- * non-pump launchpads, so the gate's reject path is exercised too. Price is in
- * SOL (the `*Eth` field is native-per-chain).
+ * age) so the Auditor exercises the same gates on Solana. Trust mirrors the real
+ * adapter's graduated-only gate: a "pump"-suffixed mint stands in for a
+ * genuinely GRADUATED pump.fun token (launchpad "pumpfun", so the mock feed's
+ * pump mints clear the gate); every other mint is untrusted (null), exercising
+ * the Auditor's reject path. A graduated pump.fun SPL can't be a honeypot, so
+ * isHoneypot is always false. Price is in SOL (the `*Eth` field is native-per-chain).
  */
 export class MockSolanaData implements BaseDataAdapter {
   async getToken(mint: string): Promise<TokenOnChain> {
@@ -30,13 +30,9 @@ export class MockSolanaData implements BaseDataAdapter {
     const ageHours = seed(mint, "age") ** 2 * 96;
     const launchedAt = new Date(Date.now() - ageHours * 3_600_000).toISOString();
 
-    // A "pump"-suffixed mint is pump.fun; otherwise a seeded mix (so the
-    // Auditor's non-pumpfun reject path is exercised on some mints).
-    const seededMix = ["pumpfun", "pumpfun", "pumpfun", "raydium"];
-    const launchpad =
-      detectSolanaLaunchpad(mint) ??
-      seededMix[Math.floor(seed(mint, "lp") * seededMix.length)] ??
-      null;
+    // A "pump"-suffixed mint stands in for a GRADUATED pump.fun token (trusted);
+    // every other mint is untrusted (null), exercising the Auditor reject path.
+    const launchpad = mint.endsWith("pump") ? "pumpfun" : null;
 
     return {
       contractAddress: mint,
@@ -46,7 +42,8 @@ export class MockSolanaData implements BaseDataAdapter {
       marketCapUsd,
       launchedAt,
       launchpad,
-      isHoneypot: seed(mint, "honey") > 0.95,
+      // A graduated pump.fun SPL can't be a honeypot — honeypot factor removed.
+      isHoneypot: false,
       topHolders,
     };
   }

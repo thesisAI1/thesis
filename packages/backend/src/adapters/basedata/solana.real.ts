@@ -1,12 +1,21 @@
+import { Connection, PublicKey } from "@solana/web3.js";
 import type { Holder } from "@thesis/shared";
+import { config } from "../../config.js";
 import { log } from "../../util/log.js";
 import type { BaseDataAdapter, TokenOnChain } from "./index.js";
-import { detectSolanaLaunchpad } from "./solana-launchpad.js";
+import { getPumpFunStatus, type PumpFunStatus } from "./pumpfun-graduation.js";
 
 /**
  * Real Solana token data — DexScreener (price/liquidity/mcap, filtered to
- * Solana pairs) + GoPlus Solana token-security (honeypot / holders) + pump.fun
- * launchpad detection. The RealBaseData analogue; same BaseDataAdapter surface.
+ * Solana pairs) + GoPlus Solana holders (top-10 concentration) + an on-chain
+ * pump.fun graduation check (the trust signal). The RealBaseData analogue; same
+ * BaseDataAdapter surface.
+ *
+ * Trust is graduation-gated: `launchpad` is "pumpfun" ONLY when the mint's
+ * bonding curve has genuinely completed (LP migrated + locked); otherwise null,
+ * which the Auditor scores 0. A graduated pump.fun SPL is a standard,
+ * transferable token, so honeypot risk is subsumed — `isHoneypot` is always
+ * false (the redundant honeypot factor is removed for Solana).
  *
  * Price is `priceNative` from DexScreener, which for a Solana pair is SOL per
  * token — exactly the native unit the pipeline expects for a Solana position.
@@ -19,10 +28,13 @@ const DEXSCREENER = "https://api.dexscreener.com/latest/dex/tokens";
 const GOPLUS_SOL = "https://api.gopluslabs.io/api/v1/solana/token_security";
 
 export class RealSolanaData implements BaseDataAdapter {
+  private readonly connection = new Connection(config.solana.rpcUrl, "confirmed");
+
   async getToken(mint: string): Promise<TokenOnChain> {
-    const [market, security] = await Promise.all([
+    const [market, topHolders, pumpStatus] = await Promise.all([
       this.fetchMarket(mint),
-      this.fetchSecurity(mint),
+      this.fetchHolders(mint),
+      this.fetchPumpFunStatus(mint),
     ]);
     return {
       contractAddress: mint,
@@ -31,9 +43,13 @@ export class RealSolanaData implements BaseDataAdapter {
       liquidityUsd: market.liquidityUsd,
       marketCapUsd: market.marketCapUsd,
       launchedAt: market.launchedAt,
-      launchpad: detectSolanaLaunchpad(mint, market.dexIds),
-      isHoneypot: security.isHoneypot,
-      topHolders: security.topHolders,
+      // Trust ONLY a genuinely graduated pump.fun curve. on-curve mints and
+      // non-pump pools (incl. dev-seeded PumpSwap) → null → Auditor Gate 1 = 0.
+      launchpad: pumpStatus === "graduated" ? "pumpfun" : null,
+      // A graduated pump.fun SPL is a standard, transferable token — it cannot
+      // be a honeypot, so that factor is redundant on Solana. Always false.
+      isHoneypot: false,
+      topHolders,
     };
   }
 
@@ -93,7 +109,6 @@ export class RealSolanaData implements BaseDataAdapter {
     liquidityUsd: number;
     marketCapUsd: number;
     launchedAt: string;
-    dexIds: string[];
   }> {
     const res = await fetch(`${DEXSCREENER}/${mint}`);
     if (!res.ok) throw new Error(`DexScreener ${res.status}`);
@@ -101,9 +116,6 @@ export class RealSolanaData implements BaseDataAdapter {
     const solPairs = (json.pairs ?? []).filter((p) => p.chainId === "solana");
     const pool = solPairs.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
     if (!pool) throw new Error(`No Solana DEX pairs found for ${mint}`);
-    const dexIds = solPairs
-      .map((p) => p.dexId)
-      .filter((d): d is string => typeof d === "string" && d.length > 0);
     return {
       priceEth: Number(pool.priceNative ?? 0),
       liquidityUsd: pool.liquidity?.usd ?? 0,
@@ -111,47 +123,55 @@ export class RealSolanaData implements BaseDataAdapter {
       launchedAt: pool.pairCreatedAt
         ? new Date(pool.pairCreatedAt).toISOString()
         : new Date().toISOString(),
-      dexIds,
     };
   }
 
-  private async fetchSecurity(mint: string): Promise<{
-    isHoneypot: boolean;
-    topHolders: Holder[];
-  }> {
-    // NOTE: on a fetch FAILURE we fall back to empty security data, which the
-    // Auditor's top-10-concentration gate reads as 0% — i.e. a GoPlus outage
-    // weakens (does not strengthen) that gate. We log.warn loudly so the outage
-    // is never silent; the launchpad (pump.fun), age, and mcap gates still apply.
-    // A future hardening can thread an explicit "security unknown" signal into
-    // TokenOnChain so the concentration gate fails closed.
+  /** GoPlus Solana holders — feeds the Auditor's top-10 concentration gate. The
+   *  honeypot signal is intentionally NOT read here: a graduated pump.fun SPL is
+   *  a standard transferable token, so honeypot risk is subsumed by the
+   *  graduation gate (and forced false at the call site).
+   *
+   *  On a fetch FAILURE we fall back to empty holders, which the concentration
+   *  gate reads as 0% — a GoPlus outage weakens (does not strengthen) that gate.
+   *  We log.warn loudly so the outage is never silent; the launchpad
+   *  (graduation), age and mcap gates still apply. */
+  private async fetchHolders(mint: string): Promise<Holder[]> {
     try {
       const res = await fetch(`${GOPLUS_SOL}?contract_addresses=${mint}`);
       if (!res.ok) {
-        log.warn(`basedata(solana): GoPlus ${res.status} for ${mint} — security data unavailable this check`);
-        return { isHoneypot: false, topHolders: [] };
+        log.warn(`basedata(solana): GoPlus ${res.status} for ${mint} — holder data unavailable this check`);
+        return [];
       }
       const json = (await res.json()) as { result?: Record<string, GoPlusSolToken> };
       const token = json.result?.[mint];
       if (!token) {
         // Common for a just-launched mint GoPlus hasn't indexed yet — info, not warn.
-        log.info(`basedata(solana): GoPlus has no security record for ${mint} yet`);
-        return { isHoneypot: false, topHolders: [] };
+        log.info(`basedata(solana): GoPlus has no holder record for ${mint} yet`);
+        return [];
       }
-      const topHolders: Holder[] = (token.holders ?? []).slice(0, 20).map((h) => ({
+      return (token.holders ?? []).slice(0, 20).map((h) => ({
         address: h.account ?? h.address ?? "",
         share: Number(h.percent ?? 0),
         label: h.is_locked === 1 ? "lock" : undefined,
       }));
-      // Honeypot proxy: `non_transferable` means the SPL token cannot be
-      // transferred at all — i.e. holders can't sell — which is the Solana
-      // analogue of an EVM honeypot. (This is NOT the mint-authority field;
-      // a live mint authority is a separate dilution risk, not modelled here.)
-      const isHoneypot = token.non_transferable === "1";
-      return { isHoneypot, topHolders };
     } catch (err) {
-      log.warn(`basedata(solana): security fetch failed for ${mint} — ${String(err)}`);
-      return { isHoneypot: false, topHolders: [] };
+      log.warn(`basedata(solana): holder fetch failed for ${mint} — ${String(err)}`);
+      return [];
+    }
+  }
+
+  /** pump.fun graduation status, read on-chain. Fails CLOSED: if the curve
+   *  account can't be read (RPC outage, malformed mint) we cannot confirm
+   *  graduation, so we treat the token as untrusted rather than risk buying a
+   *  non-graduated (dev-pullable LP) token. */
+  private async fetchPumpFunStatus(mint: string): Promise<PumpFunStatus> {
+    try {
+      return await getPumpFunStatus(this.connection, new PublicKey(mint));
+    } catch (err) {
+      log.warn(
+        `basedata(solana): pump.fun status read failed for ${mint} — ${String(err)}; treating as not graduated`,
+      );
+      return "not_pumpfun";
     }
   }
 }
@@ -176,6 +196,5 @@ interface GoPlusSolHolder {
 }
 
 interface GoPlusSolToken {
-  non_transferable?: string;
   holders?: GoPlusSolHolder[];
 }
