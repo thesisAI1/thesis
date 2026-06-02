@@ -19,15 +19,19 @@
  * but it still has to clear every other Auditor gate on its own merits.
  */
 
+import type { Launchpad } from "@thesis/shared";
+
 /** The shape we need off a DexScreener pair — just the quote-token address. */
 export interface QuotePair {
   quoteToken?: { address?: string | null } | null;
 }
 
+// Return type is the literal `"virtuals"` (a member of Launchpad) so a typo here
+// is a compile error rather than a value that silently fails the trust check.
 export function detectVirtualsLaunchpad(
   pairs: QuotePair[],
   virtualAddress: string | null | undefined,
-): "virtuals" | null {
+): Extract<Launchpad, "virtuals"> | null {
   if (!virtualAddress) return null;
   const target = virtualAddress.toLowerCase();
   const pairedWithVirtual = pairs.some(

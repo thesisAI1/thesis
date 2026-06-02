@@ -1,5 +1,6 @@
 import type { Chain, Holder } from "@thesis/shared";
 import { config } from "../../config.js";
+import { log } from "../../util/log.js";
 import { detectVirtualsLaunchpad } from "./base-launchpad.js";
 import { toEthPrice } from "./price-units.js";
 import type { BaseDataAdapter, TokenOnChain } from "./index.js";
@@ -81,8 +82,11 @@ export class RealBaseData implements BaseDataAdapter {
         const px = Number(pool?.priceNative ?? 0);
         if (px > 0) rate = px;
       }
-    } catch {
-      /* leave rate null — a VIRTUAL-quoted price then reads as no-price, not ETH */
+    } catch (err) {
+      // A VIRTUAL-hop outage no-prices the WHOLE Virtuals cohort this tick (they
+      // read as no-price, not ETH — safe, but invisible). Surface it so a
+      // sustained outage doesn't look like "no Virtuals positions moving".
+      log.warn(`basedata: VIRTUAL/ETH rate fetch failed — Virtuals tokens unpriced this tick: ${String(err)}`);
     }
     this.virtualRateCache = { rate, at: now };
     return rate;

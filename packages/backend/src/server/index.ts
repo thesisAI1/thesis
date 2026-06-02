@@ -60,6 +60,7 @@ import { config, useMock } from "../config.js";
 import { subscribe, type StreamEvent } from "../events.js";
 import { closeByAuthor } from "../monitor/index.js";
 import { tokensRemaining } from "../domain/sizing.js";
+import { buildLaunchpadResolver } from "../domain/launchpad-view.js";
 import { getStore } from "../store/index.js";
 import { log } from "../util/log.js";
 import { payoutSentText } from "../util/replies.js";
@@ -1073,21 +1074,10 @@ async function buildDashboardPayload(): Promise<object> {
       .filter((r) => r.positionId && r.postUrl)
       .map((r) => [r.positionId as string, r.postUrl] as const),
   );
-  // Launchpad source per position (for the dashboard's source badge). Primary
-  // key is the position id from its review; the by-address map is a fallback for
-  // positions whose review predates the launchpad field (backfilled to null) or
-  // isn't linked by positionId.
-  const launchpadByPosition = new Map(
-    reviews
-      .filter((r) => r.positionId && r.launchpad)
-      .map((r) => [r.positionId as string, r.launchpad as string] as const),
-  );
-  const launchpadByAddress = new Map<string, string>();
-  for (const r of reviews) {
-    if (r.launchpad) launchpadByAddress.set(r.contractAddress.toLowerCase(), r.launchpad);
-  }
-  const launchpadFor = (positionId: string, address: string): string | null =>
-    launchpadByPosition.get(positionId) ?? launchpadByAddress.get(address.toLowerCase()) ?? null;
+  // Launchpad source per position (for the dashboard's source badge) — resolved
+  // from the review log (by-position, with a by-address fallback). See
+  // buildLaunchpadResolver for the resolution order; unit-tested in launchpad-view.test.
+  const launchpadFor = buildLaunchpadResolver(reviews);
 
   // Pre-warm the ticker cache for every position address (parallel; cached).
   // Same for DexScreener logos — paid socials-upgrade tokens carry an

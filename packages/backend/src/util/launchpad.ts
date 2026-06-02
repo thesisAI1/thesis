@@ -1,4 +1,4 @@
-import type { Chain } from "@thesis/shared";
+import type { Chain, Launchpad } from "@thesis/shared";
 
 /**
  * Per-chain trusted launchpads.
@@ -16,14 +16,14 @@ import type { Chain } from "@thesis/shared";
  * Canonical keys are lowercased, dot-free ("pumpfun"). Anything not in a
  * chain's set fails the gate (Auditor scores it 0 → the buy gate vetoes it).
  */
-const TRUSTED: Partial<Record<Chain, string[]>> = {
+const TRUSTED: Partial<Record<Chain, Launchpad[]>> = {
   base: ["clanker", "bankr", "virtuals"],
   "base-sepolia": ["clanker", "bankr", "virtuals"],
   solana: ["pumpfun"],
 };
 
 /** The trusted launchpad keys for a chain (empty for unsupported chains). */
-export function trustedLaunchpads(chain: Chain): string[] {
+export function trustedLaunchpads(chain: Chain): Launchpad[] {
   return TRUSTED[chain] ?? [];
 }
 
@@ -38,5 +38,9 @@ export function isLaunchpadTrusted(
   launchpad: string | null | undefined,
 ): boolean {
   if (!launchpad) return false;
-  return trustedLaunchpads(chain).includes(normalize(launchpad));
+  // `launchpad` is an OPEN-set value (any string a data source reported), tested
+  // against the closed Launchpad[] allowlist — so compare with `.some` rather
+  // than `.includes`, which would narrow the arg to `Launchpad`.
+  const key = normalize(launchpad);
+  return trustedLaunchpads(chain).some((lp) => lp === key);
 }

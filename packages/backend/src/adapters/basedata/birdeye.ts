@@ -16,9 +16,9 @@ import type { BaseDataAdapter, TokenOnChain } from "./index.js";
  *   1. The ETH/USD reference price comes from the SAME multi_price call as
  *      the token prices (WETH is folded into the address list), so the
  *      monitor's per-tick request count is exactly 1.
- *   2. Prices are cached for 12 seconds — fine-grained enough that a TP/SL
- *      hit doesn't lag, but coarse enough that overlapping monitor ticks
- *      reuse the result instead of re-hitting the API.
+ *   2. Prices are cached for 30 seconds (PRICE_CACHE_TTL_MS) — fine-grained
+ *      enough that a TP/SL hit doesn't lag, but coarse enough that overlapping
+ *      monitor ticks reuse the result instead of re-hitting the API.
  *   3. Tokens that multi_price omits (typically just-launched Clanker tokens
  *      Birdeye hasn't indexed yet) fall back to /defi/price single — costs
  *      one extra call only for the rare unindexed token.
@@ -368,7 +368,12 @@ export class BirdeyeBaseData implements BaseDataAdapter {
       const launchedAt = Number.isFinite(earliest) ? new Date(earliest).toISOString() : null;
       const virtualsLaunchpad = detectVirtualsLaunchpad(basePairs, config.chain.virtualToken);
       return { launchedAt, virtualsLaunchpad };
-    } catch {
+    } catch (err) {
+      // Fail-closed: a transient DexScreener error drops the launch date AND the
+      // Virtuals signal, so a graduated Virtuals token can be vetoed (launchpad
+      // null → Auditor scores 0) for this pass. Log it so that read-through isn't
+      // mistaken for "the token isn't a trusted launchpad".
+      log.warn(`birdeye: DexScreener pair-info failed for ${address} — launch date + Virtuals signal unavailable this pass: ${String(err)}`);
       return { launchedAt: null, virtualsLaunchpad: null };
     }
   }

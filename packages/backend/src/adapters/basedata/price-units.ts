@@ -10,6 +10,13 @@
  * monitor's take-profit / stop-loss gates, and the dashboard PnL all in the SAME
  * unit (ETH). Get it wrong and a "2× in VIRTUAL" would fire a tier that isn't a
  * 2× in ETH whenever VIRTUAL drifts against ETH during the hold.
+ *
+ * NOTE — conversion keys off the PRICED pool's quote token, independent of the
+ * launchpad detection: detection (base-launchpad) labels a token "virtuals" if
+ * ANY pool is VIRTUAL-quoted, but the caller passes the quote of the DEEPEST
+ * pool (the one whose priceNative it actually uses). So a token detected via a
+ * thin VIRTUAL pool but priced off a deeper WETH pool is correctly left as ETH
+ * (×1) — the two decisions are deliberately decoupled.
  */
 
 export interface QuoteContext {
@@ -35,13 +42,15 @@ export function toEthPrice(
 /**
  * Convert a VIRTUAL-denominated price to ETH.
  *
- * SAFETY POLICY (operator-tunable): when the VIRTUAL/ETH rate can't be resolved
- * (DexScreener hiccup, VIRTUAL momentarily unpriced), we return 0 — the existing
- * "no live price" sentinel. Downstream this means the monitor skips the position
- * and retries next tick, and the dashboard falls back to the entry price. We do
- * NOT pass the raw VIRTUAL price through, because labeling a VIRTUAL price as ETH
- * is exactly the corruption this module exists to prevent. Refusing to act on an
- * unknown price is safer than acting on a wrong one.
+ * SAFETY POLICY: when the VIRTUAL/ETH rate can't be resolved (DexScreener
+ * hiccup, VIRTUAL momentarily unpriced), we return 0 — the existing "no live
+ * price" sentinel. Downstream this means the monitor skips the position and
+ * retries next tick, and the dashboard falls back to the entry price. We do NOT
+ * pass the raw VIRTUAL price through, because labeling a VIRTUAL price as ETH is
+ * exactly the corruption this module exists to prevent. Refusing to act on an
+ * unknown price is safer than acting on a wrong one. (The policy is fixed here,
+ * not config-driven; change it in this one function if a different posture is
+ * ever wanted.)
  */
 function resolveVirtualPriceEth(priceNative: number, virtualEthRate: number | null): number {
   if (virtualEthRate === null || !(virtualEthRate > 0)) return 0;
