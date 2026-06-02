@@ -259,3 +259,36 @@ it("MemoryEventLog.history({ level }) filters by level", async () => {
   expect(rows.length).toBe(1);
   expect(rows[0].level).toBe("error");
 });
+
+// ── pin 10: #2 RED→GREEN: history() ordered by event time (at), not insert id ──
+
+it("#2 RED→GREEN: history() orders by at desc (event time), not id desc (insert order)", async () => {
+  // Seed: insert entry A with NEWER at first, then B with OLDER at.
+  // A gets the LOWER id (inserted first), B gets the HIGHER id.
+  // id desc → returns B first (wrong). at desc → returns A first (correct).
+  const log = new PrismaEventLog({ prisma });
+
+  const atA = "2026-06-02T10:00:00.000Z"; // newer timestamp
+  const atB = "2026-06-02T09:00:00.000Z"; // older timestamp
+
+  // Insert A first (lower id) with newer at
+  log.record(makeEntry({ at: atA, msg: "entry-A" }));
+  // Wait for A to persist before inserting B so B gets a higher id
+  await waitUntil(
+    () => log.history({ limit: 10 }),
+    (v) => v.some((r) => r.msg === "entry-A"),
+  );
+
+  // Insert B second (higher id) with older at
+  log.record(makeEntry({ at: atB, msg: "entry-B" }));
+  await waitUntil(
+    () => log.history({ limit: 10 }),
+    (v) => v.some((r) => r.msg === "entry-B"),
+  );
+
+  const rows = await log.history({ limit: 2 });
+  expect(rows.length).toBeGreaterThanOrEqual(2);
+  // Newest by event time (A) must come first
+  expect(rows[0].at).toBe(atA);
+  expect(rows[0].msg).toBe("entry-A");
+});

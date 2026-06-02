@@ -434,6 +434,58 @@ test("GET /api/events?history=1&opsType=trade:buy,settle:win — opsTypes forwar
   }
 });
 
+test("GET /api/events?history=1 — history() REJECTS → endpoint returns 500, no crash", async () => {
+  const log = getEventLog();
+  const originalHistory = log.history.bind(log);
+
+  log.history = async (_opts) => { throw new Error("db gone"); };
+
+  try {
+    const { res, result } = captureRes();
+    // The 500 comes from startServer()'s top-level handle().catch wrapper, NOT from
+    // apiEvents itself: apiEvents writes nothing before its `await history()`, so a
+    // rejection propagates cleanly to that wrapper. handle() is tested in isolation here,
+    // so we mirror the wrapper. COUPLING: if startServer's catch wrapper is ever removed,
+    // prod would hang on a history() reject while THIS test stays green — keep them in sync.
+    await handle(getReq("/api/events?history=1"), res).catch((err) => {
+      if (!res.headersSent) {
+        res.writeHead(500);
+        res.end(JSON.stringify({ error: String(err) }));
+      }
+    });
+
+    const { status } = result();
+    assert.equal(status, 500, `expected 500 when history() rejects, got ${status}`);
+  } finally {
+    log.history = originalHistory;
+  }
+});
+
+test("GET /api/events?history=1&opsType= (empty) — opsTypes forwarded as undefined, NOT [\"\"]", async () => {
+  const log = getEventLog();
+  const originalHistory = log.history.bind(log);
+
+  let capturedOpts: { limit: number; opsTypes?: string[] } | undefined;
+  log.history = async (opts) => {
+    capturedOpts = opts;
+    return [];
+  };
+
+  try {
+    const { res } = captureRes();
+    await handle(getReq("/api/events?history=1&opsType="), res);
+
+    assert.ok(capturedOpts !== undefined, "history() must have been called");
+    assert.equal(
+      capturedOpts!.opsTypes,
+      undefined,
+      `empty ?opsType= must produce opsTypes===undefined, got: ${JSON.stringify(capturedOpts!.opsTypes)}`,
+    );
+  } finally {
+    log.history = originalHistory;
+  }
+});
+
 test("GET /api/events?history=1&area=monitor&level=error — area+level forwarded to history() opts", async () => {
   const log = getEventLog();
   const originalHistory = log.history.bind(log);

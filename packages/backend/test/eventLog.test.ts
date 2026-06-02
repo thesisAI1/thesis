@@ -70,6 +70,13 @@ describe("buildEventLog()", () => {
     });
     assert.ok(log instanceof MemoryEventLog, "file mode must return a MemoryEventLog");
   });
+
+  it("#1 RED→GREEN: sqlite mode with throwing getPrisma returns MemoryEventLog, does NOT throw", () => {
+    // Under the old impl, buildEventLog("sqlite", ...) calls getPrisma() eagerly
+    // and lets the error propagate → RED (throws). After fix: catches → MemoryEventLog.
+    const log = buildEventLog("sqlite", () => { throw new Error("boom"); });
+    assert.ok(log instanceof MemoryEventLog, "throwing getPrisma must fall back to MemoryEventLog");
+  });
 });
 
 describe("getEventLog()", () => {

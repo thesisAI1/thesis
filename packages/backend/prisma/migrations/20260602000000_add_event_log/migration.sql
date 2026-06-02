@@ -13,4 +13,4 @@ CREATE TABLE "Event" (
 CREATE INDEX "Event_at_idx" ON "Event"("at");
 
 -- CreateIndex
-CREATE INDEX "Event_opsType_id_idx" ON "Event"("opsType", "id");
+CREATE INDEX "Event_opsType_at_idx" ON "Event"("opsType", "at");

@@ -198,5 +198,5 @@ model Event {
   opsType String?
 
   @@index([at])
-  @@index([opsType, id])
+  @@index([opsType, at])
 }

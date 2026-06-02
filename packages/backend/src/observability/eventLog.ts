@@ -7,10 +7,19 @@ export type { EventLogEntry };
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
+export interface EventLogQuery {
+  limit: number;
+  opsTypes?: string[];
+  area?: string;
+  level?: string;
+}
+
+export type StoreMode = "sqlite" | "file";
+
 export interface EventLog {
   record(entry: EventLogEntry): void;
   recent(n: number): EventLogEntry[];
-  history(opts: { limit: number; opsTypes?: string[]; area?: string; level?: string }): Promise<EventLogEntry[]>;
+  history(opts: EventLogQuery): Promise<EventLogEntry[]>;
 }
 
 // ── MemoryEventLog ──────────────────────────────────────────────────────────
@@ -36,7 +45,7 @@ export class MemoryEventLog implements EventLog {
     return this.buf.slice().reverse().slice(0, n);
   }
 
-  async history(opts: { limit: number; opsTypes?: string[]; area?: string; level?: string }): Promise<EventLogEntry[]> {
+  async history(opts: EventLogQuery): Promise<EventLogEntry[]> {
     let r = this.recent(opts.limit);
     // Guard: filter out entries where opsType is undefined when filtering by opsType.
     // Only include non-empty opsType values to prevent undefined from matching.
@@ -88,11 +97,15 @@ export class PrismaEventLog implements EventLog {
           type: entry.type, msg: entry.msg, opsType: entry.opsType ?? null,
         },
       });
-      if (++this.writes % this.pruneEvery === 0) await this.prune();
     } catch (e) {
       // Logging must never crash the trading loop — drop on failure.
       // DO NOT call logEvent/log here (would recurse through record→persist).
       console.error("[eventLog] persist failed:", e instanceof Error ? e.message : e);
+      return; // insert failed — skip prune
+    }
+    if (++this.writes % this.pruneEvery === 0) {
+      try { await this.prune(); }
+      catch (e) { console.error("[eventLog] prune failed:", e instanceof Error ? e.message : e); }
     }
   }
 
@@ -103,7 +116,7 @@ export class PrismaEventLog implements EventLog {
     if (cutoff) await this.prisma.event.deleteMany({ where: { id: { lt: cutoff.id } } });
   }
 
-  async history(opts: { limit: number; opsTypes?: string[]; area?: string; level?: string }): Promise<EventLogEntry[]> {
+  async history(opts: EventLogQuery): Promise<EventLogEntry[]> {
     const where: Record<string, unknown> = {};
     const validOpsTypes = opts.opsTypes?.filter((t) => t.length > 0);
     if (validOpsTypes?.length) where.opsType = { in: validOpsTypes };
@@ -111,7 +124,7 @@ export class PrismaEventLog implements EventLog {
     if (opts.level !== undefined) where.level = opts.level;
     const rows = await this.prisma.event.findMany({
       where: Object.keys(where).length > 0 ? where : undefined,
-      orderBy: { id: "desc" },   // PK = insertion order = newest-first (cheap, monotonic)
+      orderBy: [{ at: "desc" }, { id: "desc" }],  // event time newest-first; id as tiebreaker
       take: opts.limit,
     });
     return rows.map(r => ({
@@ -127,11 +140,17 @@ export class PrismaEventLog implements EventLog {
 
 /** Pure factory — sqlite ⇒ durable PrismaEventLog (sharing the store's client),
  *  else in-memory. `getPrisma` is invoked eagerly when storeMode is "sqlite";
- *  file/mock mode never reaches it, so no store/client is constructed. */
-export function buildEventLog(storeMode: string, getPrisma: () => PrismaClient): EventLog {
-  return storeMode === "sqlite"
-    ? new PrismaEventLog({ prisma: getPrisma() })
-    : new MemoryEventLog();
+ *  non-sqlite (file) mode never reaches it, so no store/client is constructed.
+ *  If `getPrisma()` throws (store init failure or wrong store type), logs a
+ *  breadcrumb and falls back to MemoryEventLog so logEvent() never throws. */
+export function buildEventLog(storeMode: StoreMode, getPrisma: () => PrismaClient): EventLog {
+  if (storeMode !== "sqlite") return new MemoryEventLog();
+  try {
+    return new PrismaEventLog({ prisma: getPrisma() });
+  } catch (e) {
+    console.error("[eventLog] durable init failed, falling back to in-memory:", e instanceof Error ? e.message : e);
+    return new MemoryEventLog();
+  }
 }
 
 let instance: EventLog | undefined;
@@ -139,7 +158,7 @@ let instance: EventLog | undefined;
 export function getEventLog(): EventLog {
   if (!instance) {
     // Same client as the store — one writer on thesis.db (no SQLITE_BUSY contention).
-    instance = buildEventLog(config.service.store, () => {
+    instance = buildEventLog(config.service.store as StoreMode, () => {
       const store = getStore();
       if (!(store instanceof PrismaStore)) {
         throw new Error("getEventLog: store mode is sqlite but store is not a PrismaStore");
