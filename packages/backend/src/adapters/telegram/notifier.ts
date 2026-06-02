@@ -69,7 +69,7 @@ export function startNotifier(deps?: {
     const t = formatOpsEvent(e);
     if (!t) return;
     for (const c of allowedChats) {
-      void adapter.sendMessage(c, t);
+      void adapter.sendMessage(c, t).catch(() => {});
     }
   });
 
