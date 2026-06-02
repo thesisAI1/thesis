@@ -18,7 +18,7 @@ import type {
 } from "@thesis/shared";
 import { config } from "../config.js";
 import { evaluateBuyGate } from "../domain/gate.js";
-import { log } from "../util/log.js";
+import { log, logEvent } from "../util/log.js";
 import { untrustedBlock, UNTRUSTED_INSTRUCTION } from "../util/untrusted.js";
 
 export async function runDean(
@@ -194,9 +194,9 @@ async function llmVerdict(
       }),
     });
     if (!res.ok) {
-      log.warn(
-        `dean: LLM call FAILED (HTTP ${res.status}) — OUTAGE, falling back to rule-based grade`,
-      );
+      const httpFailMsg = `dean: LLM call FAILED (HTTP ${res.status}) — OUTAGE, falling back to rule-based grade`;
+      log.warn(httpFailMsg);
+      logEvent({ level: "warn", area: "dean", type: "llm:failed", msg: httpFailMsg });
       return null;
     }
     const json = (await res.json()) as { content?: Array<{ text?: string }> };
@@ -219,9 +219,9 @@ async function llmVerdict(
       rationale: String(parsed.rationale ?? "LLM verdict."),
     };
   } catch (err) {
-    log.warn(
-      `dean: LLM call threw — OUTAGE (${String(err)}), falling back to rule-based grade`,
-    );
+    const throwMsg = `dean: LLM call threw — OUTAGE (${String(err)}), falling back to rule-based grade`;
+    log.warn(throwMsg);
+    logEvent({ level: "warn", area: "dean", type: "llm:failed", msg: throwMsg });
     return null;
   }
 }
