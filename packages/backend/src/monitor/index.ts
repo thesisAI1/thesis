@@ -522,6 +522,7 @@ async function settle(
       authorWallet: result.distribution.authorWallet,
     });
     publishOps({ type: "settle:done", at: new Date().toISOString(), positionId: result.distribution.positionId, toAuthorEth: result.distribution.toAuthorEth, totalProfitEth: result.distribution.totalProfitEth });
+    publishOps({ type: "settle:summary", at: new Date().toISOString(), positionId: result.distribution.positionId, handle: pos.authorHandle, totalProfitEth: result.distribution.totalProfitEth, toAuthorEth: result.distribution.toAuthorEth, toPortfolioEth: result.distribution.toPortfolioEth, toTeamEth: result.distribution.toTeamEth, toBuybackEth: result.distribution.toBuybackEth, authorPaid: result.distribution.authorWallet ? "direct" : "escrowed" });
     p.distributionDone = true;
   }
   pos.settlement = p;

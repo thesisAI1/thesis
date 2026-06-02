@@ -142,6 +142,12 @@ export const config = {
       .map((s) => s.trim())
       .filter((s) => s.length > 0),
     pollIntervalSec: num("TELEGRAM_POLL_INTERVAL_SEC", 30),
+    group: {
+      /** Separate public-group bot. Self-disables if token/chat absent (mock-safe). */
+      enabled: str("TELEGRAM_GROUP_ENABLED", "true") !== "false",
+      botToken: str("TELEGRAM_GROUP_BOT_TOKEN"),
+      chatId: str("TELEGRAM_GROUP_CHAT_ID"),
+    },
   },
 
   observability: {

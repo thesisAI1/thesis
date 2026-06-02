@@ -8,11 +8,26 @@ export interface TelegramUpdate {
   text: string;
 }
 
+export type TelegramMediaSource = { path: string } | { fileId: string } | { url: string };
+
+export interface TelegramSendResult {
+  ok: boolean;
+  fileId?: string;
+}
+
 export interface TelegramAdapter {
   sendMessage(chatId: string, text: string): Promise<boolean>;
   getUpdates(offset?: number): Promise<TelegramUpdate[]>;
+  sendAnimation(chatId: string, source: TelegramMediaSource, caption?: string): Promise<TelegramSendResult>;
+  sendVideo(chatId: string, source: TelegramMediaSource, caption?: string): Promise<TelegramSendResult>;
 }
 
-export function createTelegramAdapter(): TelegramAdapter {
-  return useMock() ? new MockTelegram() : new RealTelegram();
+export interface CreateTelegramAdapterOpts {
+  botToken?: string;
+  pollIntervalSec?: number;
+}
+
+export function createTelegramAdapter(opts?: CreateTelegramAdapterOpts): TelegramAdapter {
+  if (useMock()) return new MockTelegram();
+  return new RealTelegram(opts?.botToken, opts?.pollIntervalSec);
 }

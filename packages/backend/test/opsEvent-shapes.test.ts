@@ -18,9 +18,10 @@ const samples: OpsEvent[] = [
   { type: "trade:buy", at: "", positionId: "p", handle: "@a", amountEth: 0, contract: "0x" },
   { type: "trade:sell", at: "", positionId: "p", tier: 1, proceedsEth: 0, profitEth: 0 },
   { type: "position:close", at: "", positionId: "p", netPnlEth: 0, reason: "tp" },
-  { type: "payout:sent", at: "", handle: "@a", amountEth: 0, wallet: "0x", txHash: "0x" },
+  { type: "payout:sent", at: "", path: "direct", handle: "@a", amountEth: 0, wallet: "0x", txHash: "0x" },
   { type: "payout:failed", at: "", handle: "@a", amountEth: 0, reason: "x" },
   { type: "settle:done", at: "", positionId: "p", toAuthorEth: 0, totalProfitEth: 0 },
+  { type: "settle:summary", at: "", positionId: "p", handle: "@a", totalProfitEth: 0, toAuthorEth: 0, toPortfolioEth: 0, toTeamEth: 0, toBuybackEth: 0, authorPaid: "direct" },
   { type: "settle:failed", at: "", positionId: "p", reason: "x" },
   { type: "tweet:posted", at: "", kind: "buy", replyId: "1", postId: "2" },
   { type: "error", at: "", area: "svc", msg: "m" },
@@ -29,6 +30,6 @@ const samples: OpsEvent[] = [
 
 describe("OpsEvent union shapes (type-level guard)", () => {
   it("constructs one of every variant with its spec fields", () => {
-    assert.equal(samples.length, 10);
+    assert.equal(samples.length, 11);
   });
 });

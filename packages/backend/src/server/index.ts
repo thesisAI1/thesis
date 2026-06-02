@@ -443,7 +443,7 @@ async function adminSettleStuckPayout(req: IncomingMessage, res: ServerResponse)
   await store.clearEscrow(xUserId, chain);
   await store.clearPayoutRequestsForUser(xUserId, chain);
   log.info(`admin: settle-stuck-payout — cleared ${chain} escrow + open requests for ${handle}`);
-  publishOps({ type: "payout:sent", at: new Date().toISOString(), handle, amountEth, wallet, txHash });
+  publishOps({ type: "payout:sent", at: new Date().toISOString(), path: "escrow", handle, amountEth, wallet, txHash });
 
   // Confirm in the thesis thread if a postId was provided.
   let replyId: string | undefined;

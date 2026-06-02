@@ -22,6 +22,7 @@ import { log, logEvent } from "./util/log.js";
 import { publishOps } from "./observability/opsBus.js";
 import { markTick, checkLiveness } from "./observability/watchdog.js";
 import { startNotifier } from "./adapters/telegram/notifier.js";
+import { startGroupNotifier } from "./adapters/telegram/groupNotifier.js";
 import { startBot } from "./adapters/telegram/bot.js";
 import {
   buyReplyText,
@@ -308,6 +309,7 @@ export function startService(): () => void {
   loop("monitor", runMonitorTick, monitorMs);
 
   const stopNotifier = startNotifier();
+  const stopGroupNotifier = startGroupNotifier();
   const stopBot = startBot();
   const liveness = setInterval(() => checkLiveness(), 30_000);
 
@@ -319,6 +321,7 @@ export function startService(): () => void {
     stopped = true;
     clearInterval(liveness);
     stopNotifier();
+    stopGroupNotifier();
     stopBot();
   };
 }

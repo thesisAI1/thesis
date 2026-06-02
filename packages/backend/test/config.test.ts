@@ -54,3 +54,17 @@ describe("config.telegram block shape", () => {
     assert.ok(typeof config.telegram.pollIntervalSec === "number");
   });
 });
+
+describe("config.telegram.group defaults", () => {
+  it("group.botToken defaults to empty string", () => {
+    assert.equal(config.telegram.group.botToken, "");
+  });
+
+  it("group.chatId defaults to empty string", () => {
+    assert.equal(config.telegram.group.chatId, "");
+  });
+
+  it("group.enabled defaults to true", () => {
+    assert.equal(config.telegram.group.enabled, true);
+  });
+});
