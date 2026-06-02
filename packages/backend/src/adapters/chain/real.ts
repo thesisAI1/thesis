@@ -14,7 +14,7 @@ import { config } from "../../config.js";
 import { log } from "../../util/log.js";
 import { createBaseDataAdapter } from "../basedata/index.js";
 import type { ChainAdapter, SwapResult } from "./index.js";
-import { measureEthProceeds } from "./proceeds.js";
+import { measureEthProceeds, entryPriceEthFromFill } from "./proceeds.js";
 import {
   parseKyberRoute,
   parseKyberBuild,
@@ -134,7 +134,6 @@ export class RealChain implements ChainAdapter {
 
   async buy(address: string, amountInEth: number): Promise<SwapResult> {
     this.ensureArmed();
-    const price = await this.getTokenPriceEth(address);
     const amountIn = parseEther(amountInEth.toFixed(18));
 
     // Measure the ACTUAL delivered tokens (on-chain balance delta), not the
@@ -194,7 +193,11 @@ export class RealChain implements ChainAdapter {
         `chain: buy delta read returned 0 for ${address} — falling back to router quote ${routerAmountOut.toFixed(2)}`,
       );
       log.info(`chain: buy via KyberSwap — ${describeRoute(route)} — tx ${txHash}`);
-      return { txHash, amountOut: routerAmountOut, priceEth: price };
+      return {
+        txHash,
+        amountOut: routerAmountOut,
+        priceEth: entryPriceEthFromFill(amountInEth, routerAmountOut),
+      };
     }
 
     // Surface significant delivery shortfalls so we know which tokens have
@@ -209,7 +212,11 @@ export class RealChain implements ChainAdapter {
     }
 
     log.info(`chain: buy via KyberSwap — ${describeRoute(route)} — tx ${txHash}`);
-    return { txHash, amountOut: actualReceived, priceEth: price };
+    return {
+      txHash,
+      amountOut: actualReceived,
+      priceEth: entryPriceEthFromFill(amountInEth, actualReceived),
+    };
   }
 
   async sell(

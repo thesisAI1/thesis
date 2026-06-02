@@ -147,6 +147,22 @@ function agingThreshold(pos: Position): number | null {
 }
 
 async function processPosition(pos: Position, price: number): Promise<void> {
+  // Backstop: a position with no valid entry baseline (entryPriceEth <= 0) must
+  // NEVER be run through the tiers. Every threshold below is `entryPriceEth ×
+  // something`, so a 0 baseline turns the take-profit test `price >= entryPriceEth
+  // × tierX` into `price >= 0` — TRUE for every tier — and the whole ladder
+  // (TP1..TP4) fires on a token that never moved, force-closing + paying out on a
+  // phantom win (2026-06-02 $HESTIA). buy() now records the real execution price
+  // (ETH in / tokens out), so a fresh buy can't produce this; this guards any
+  // legacy/corrupt row. Skip + shout so an operator can repair it (entryPriceEth
+  // = amountInEth / entryTokens) rather than silently phantom-closing the bag.
+  if (pos.entryPriceEth <= 0) {
+    log.error(
+      `monitor: ${pos.id} has invalid entryPriceEth=${pos.entryPriceEth} — skipping TP/SL ` +
+        `this tick (cannot evaluate tiers against a zero/negative baseline; needs repair)`,
+    );
+    return;
+  }
   // Aging stop-loss takes priority over both standard SL and TP — but
   // is only ever a tightening, so a healthy position never trips it.
   const aging = agingThreshold(pos);

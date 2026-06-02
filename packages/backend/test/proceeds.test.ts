@@ -17,7 +17,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseEther } from "viem";
-import { netReceivedEthWei, measureEthProceeds } from "../src/adapters/chain/proceeds.js";
+import {
+  netReceivedEthWei,
+  measureEthProceeds,
+  entryPriceEthFromFill,
+} from "../src/adapters/chain/proceeds.js";
 
 test("netReceivedEthWei returns the positive wallet delta in wei", () => {
   assert.equal(netReceivedEthWei(100n, 150n), 50n);
@@ -113,4 +117,30 @@ test("measureEthProceeds stays silent when the credit lands (no false alarm)", a
     console.warn = realWarn;
   }
   assert.equal(warnings.length, 0, "a measured credit must not warn");
+});
+
+/**
+ * The entry price stamped on a position must be the price we ACTUALLY paid
+ * (ETH in / tokens received), not a pre-trade oracle read. The oracle returns 0
+ * for a token the feed hasn't indexed yet (a fresh Clanker/Bankr launch); a 0
+ * baseline makes the monitor's `price >= entryPriceEth × tierX` collapse to
+ * `price >= 0` and fire the whole TP ladder on a token that never moved
+ * (2026-06-02 $HESTIA). Derived from the fill, it's positive for any real buy.
+ */
+test("entryPriceEthFromFill is the price actually paid — ETH in / tokens received", () => {
+  // The $HESTIA buy: 0.0251 ETH for 98,535,939.79 tokens ⇒ ~2.547e-10 ETH/token.
+  const price = entryPriceEthFromFill(0.0251, 98_535_939.79);
+  assert.equal(price, 0.0251 / 98_535_939.79);
+  assert.ok(price > 0, "a real fill must yield a POSITIVE entry baseline");
+});
+
+test("entryPriceEthFromFill is positive whenever any tokens arrived (never the catastrophic 0)", () => {
+  assert.ok(entryPriceEthFromFill(0.02, 1) > 0);
+  assert.ok(entryPriceEthFromFill(0.0001, 1_000_000_000) > 0);
+});
+
+test("entryPriceEthFromFill clamps to 0 only when no tokens were received", () => {
+  // Degenerate fallback (router quote also 0); the monitor's own guard then
+  // skips such a position rather than evaluating tiers against a 0 baseline.
+  assert.equal(entryPriceEthFromFill(0.02, 0), 0);
 });

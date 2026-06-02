@@ -27,6 +27,30 @@ export function netReceivedEthWei(beforeWei: bigint, afterWei: bigint): bigint {
   return afterWei > beforeWei ? afterWei - beforeWei : 0n;
 }
 
+/**
+ * Entry price (ETH per token) IMPLIED BY A BUY FILL: ETH spent ÷ tokens
+ * actually received. This is what a position's `entryPriceEth` must be — the
+ * price we genuinely paid — NOT a pre-trade oracle read.
+ *
+ * The bug this closes: buy() recorded `getTokenPriceEth()` (a Birdeye/
+ * DexScreener read taken BEFORE the swap). A freshly-launched Clanker/Bankr
+ * token the feed hasn't indexed yet returns 0 from that read, so the position
+ * was stamped `entryPriceEth = 0`. The monitor's tier test
+ * `price >= entryPriceEth × tierX` then collapses to `price >= 0` — TRUE for
+ * EVERY tier — and the whole take-profit ladder (TP1..TP4) "fires" on a token
+ * that never moved, force-closing the position and paying out on a phantom win
+ * (2026-06-02 $HESTIA, twice on the same token).
+ *
+ * Derived from the fill, the price is positive whenever ANY tokens arrived, so
+ * the catastrophic 0 is structurally unreachable for a real buy. Returns 0 only
+ * in the degenerate case where no tokens were received at all (an already-
+ * logged, fallback-quote buy); the monitor's own guard skips such a position
+ * rather than evaluating tiers against it.
+ */
+export function entryPriceEthFromFill(amountInEth: number, tokensReceived: number): number {
+  return tokensReceived > 0 ? amountInEth / tokensReceived : 0;
+}
+
 export interface SwapProceeds {
   txHash: string;
   /** Actual ETH received (net of gas), in ether units. */
