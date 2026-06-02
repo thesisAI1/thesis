@@ -31,8 +31,9 @@ const RESULTS: Array<{ key: Result; label: string }> = [
   { key: "loss", label: "LOSS" },
 ];
 
-/** Rows per page. Tunable — matches the Open table for a consistent ledger. */
-const PAGE_SIZE = 10;
+/** Rows per page. Larger than the Open table on purpose — history carries far
+ *  more rows (server sends up to 200), so a bigger page = fewer Next-clicks. */
+const PAGE_SIZE = 25;
 
 export function HistoryTable({ positions, authorStats, now }: HistoryTableProps) {
   const [search, setSearch] = useState("");

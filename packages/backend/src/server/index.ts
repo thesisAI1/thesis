@@ -1337,7 +1337,7 @@ async function buildDashboardPayload(): Promise<object> {
       queued: queue.length,
     },
     openPositions,
-    closedPositions: closedPositions.slice(0, 25),
+    closedPositions: closedPositions.slice(0, 200),
     recentReviews: reviews.slice(-20).reverse(),
     /** Cumulative running totals — drive the hero counters card. Each value
      *  here is ETH "ever distributed to this leg" since launch. */
