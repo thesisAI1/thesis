@@ -163,6 +163,9 @@ model Distribution {
   totalProfitEth  Float
   toAuthorEth     Float
   toPortfolioEth  Float
+  /// Retired holder-lottery quarter. Kept nullable to preserve historical
+  /// payouts and allow re-enabling the lottery later; null on new rows.
+  toTeamEth       Float?
   toBuybackEth    Float
   authorWallet    String?
 }

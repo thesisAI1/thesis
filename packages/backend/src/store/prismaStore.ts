@@ -172,6 +172,7 @@ export class PrismaStore implements Store {
     totalProfitEth: number;
     toAuthorEth: number;
     toPortfolioEth: number;
+    toTeamEth: number | null;
     toBuybackEth: number;
     authorWallet: string | null;
   }): Distribution {
@@ -180,6 +181,9 @@ export class PrismaStore implements Store {
       totalProfitEth: row.totalProfitEth,
       toAuthorEth: row.toAuthorEth,
       toPortfolioEth: row.toPortfolioEth,
+      // Retired lottery quarter — surface the historical value when present,
+      // undefined on rows written after the lottery was retired.
+      toTeamEth: row.toTeamEth ?? undefined,
       toBuybackEth: row.toBuybackEth,
       // `authorWallet` is `string | null` (NOT optional) — preserve null.
       authorWallet: row.authorWallet,
@@ -478,6 +482,9 @@ export class PrismaStore implements Store {
         totalProfitEth: dist.totalProfitEth,
         toAuthorEth: dist.toAuthorEth,
         toPortfolioEth: dist.toPortfolioEth,
+        // New distributions have no team leg — persist null (the column is kept
+        // only to preserve historical lottery payouts).
+        toTeamEth: dist.toTeamEth ?? null,
         toBuybackEth: dist.toBuybackEth,
         authorWallet: dist.authorWallet,
       },

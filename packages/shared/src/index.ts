@@ -252,6 +252,10 @@ export interface Distribution {
   /** 50% — compounded into the trading wallet (includes the retired
    *  holder-lottery quarter). */
   toPortfolioEth: number;
+  /** Retired holder-lottery quarter. Null on new distributions (the slice now
+   *  compounds into `toPortfolioEth`); retained, optional, to preserve the
+   *  historical lottery payouts and leave the door open to re-enabling it. */
+  toTeamEth?: number | null;
   /** 25% — buys $THESIS on the open market and burns it (Base); on Solana it
    *  accrues in SOLANA_BUYBACK_WALLET for a manual bridge→buyback→burn. */
   toBuybackEth: number;
