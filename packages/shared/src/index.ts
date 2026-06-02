@@ -16,6 +16,15 @@ export type Chain =
   | "solana"
   | "unknown";
 
+/** The closed set of launchpads the committee TRUSTS / classifies — Clanker,
+ *  Bankr and Virtuals on Base, pump.fun on Solana. Use this for the trusted
+ *  allowlist and detector return types so a typo (e.g. "virtuls") is a COMPILE
+ *  error, not a silent gate-reject. NOTE: it is deliberately NOT used for the
+ *  open-set data fields (`TokenReport.launchpad`, `ReviewRecord.launchpad`),
+ *  which may hold ANY launchpad a data source reports (incl. untrusted ones like
+ *  "uniswap") or null — those stay `string | null`. */
+export type Launchpad = "clanker" | "bankr" | "virtuals" | "pumpfun";
+
 /** Native gas-token ticker for a chain: "SOL" on Solana, "ETH" on Base / every
  *  EVM chain. Lives here so the backend (X output, profit cards) and the web
  *  dashboard share ONE definition that can't drift. Accepts `undefined` (a row
@@ -269,6 +278,10 @@ export interface ReviewRecord {
   authorScore: number;
   /** The Auditor's token score, 0-100. */
   tokenScore: number;
+  /** The launchpad the Auditor attributed the token to ("clanker" | "bankr" |
+   *  "virtuals" on Base, "pumpfun" on Solana), or null if none/untrusted.
+   *  Surfaced as a per-token source badge in the dashboard. */
+  launchpad: string | null;
   grade: Grade;
   decision: Decision;
   confidence: number;

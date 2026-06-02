@@ -56,6 +56,11 @@ export const config = {
     liveTradingArmed: str("LIVE_TRADING_ARMED") === "true",
     /** Base WETH (mainnet). */
     weth: str("BASE_WETH", "0x4200000000000000000000000000000000000006"),
+    /** $VIRTUAL (Virtuals Protocol) on Base. A graduated Virtuals agent token's
+     *  locked LP is paired against this, so a VIRTUAL-quoted DexScreener pool
+     *  identifies the token as a Virtuals launch (see basedata/base-launchpad).
+     *  Also the intermediate hop the price reader converts through (VIRTUAL→ETH). */
+    virtualToken: str("BASE_VIRTUAL_TOKEN", "0x0b3e328455c4059EEb9e3f84b5543F74E24e7E1b"),
     /** Uniswap v3 SwapRouter02 on Base (mainnet). */
     swapRouter: str("BASE_SWAP_ROUTER", "0x2626664c2603336E57B271c5C0b26F421741e481"),
     /** Pool fee tier in hundredths of a bip (10000 = 1%). */

@@ -113,6 +113,7 @@ function OpenRow({
           contractAddress={pos.contractAddress}
           logoUrl={pos.tokenLogoUrl}
           chain={pos.chain}
+          launchpad={pos.launchpad}
         />
       </td>
       <td>

@@ -1,5 +1,8 @@
 import type { Chain, Holder } from "@thesis/shared";
 import { config } from "../../config.js";
+import { log } from "../../util/log.js";
+import { detectVirtualsLaunchpad } from "./base-launchpad.js";
+import { toEthPrice } from "./price-units.js";
 import type { BaseDataAdapter, TokenOnChain } from "./index.js";
 
 const DEXSCREENER = "https://api.dexscreener.com/latest/dex/tokens";
@@ -26,7 +29,7 @@ const CLANKER_FACTORIES = new Set([
  */
 export class RealBaseData implements BaseDataAdapter {
   async getToken(address: string): Promise<TokenOnChain> {
-    const [market, security, launchpad] = await Promise.all([
+    const [market, security, detected] = await Promise.all([
       this.fetchMarket(address),
       this.fetchSecurity(address),
       this.detectLaunchpad(address),
@@ -34,6 +37,10 @@ export class RealBaseData implements BaseDataAdapter {
     // Mark holders that aren't real circulating supply (LP pools, burns, locks)
     // so the Auditor can exclude them from its top-10 concentration gate.
     const topHolders = labelHolders(security.topHolders, new Set(market.pairAddresses));
+    // Bankr/Clanker win first (explicit API / deployer proof); a graduated
+    // Virtuals token isn't either, so it falls through to the VIRTUAL-paired
+    // signal derived from the pools we already fetched. No extra network call.
+    const launchpad = detected ?? market.launchpadFromPairs;
     return {
       contractAddress: address,
       chain: market.chain,
@@ -49,6 +56,40 @@ export class RealBaseData implements BaseDataAdapter {
 
   async getPriceEth(address: string): Promise<number> {
     return (await this.fetchMarket(address)).priceEth;
+  }
+
+  /** VIRTUAL price in ETH — its deepest WETH-quoted Base pool's `priceNative`.
+   *  Cached ~60s so a monitor tick that prices many Virtuals tokens makes one
+   *  fetch. Returns null on failure or when VIRTUAL isn't configured; callers
+   *  then treat a VIRTUAL-quoted price as "no price" rather than mislabel it. */
+  private virtualRateCache: { rate: number | null; at: number } | null = null;
+  private static readonly VIRTUAL_RATE_TTL_MS = 60_000;
+  private async getVirtualEthRate(): Promise<number | null> {
+    const virtual = config.chain.virtualToken;
+    if (!virtual) return null;
+    const now = Date.now();
+    const cache = this.virtualRateCache;
+    if (cache && now - cache.at < RealBaseData.VIRTUAL_RATE_TTL_MS) return cache.rate;
+    let rate: number | null = null;
+    try {
+      const res = await fetch(`${DEXSCREENER}/${virtual}`);
+      if (res.ok) {
+        const json = (await res.json()) as { pairs?: DexPair[] };
+        const weth = config.chain.weth.toLowerCase();
+        const pool = (json.pairs ?? [])
+          .filter((p) => p.chainId === "base" && p.quoteToken?.address?.toLowerCase() === weth)
+          .sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
+        const px = Number(pool?.priceNative ?? 0);
+        if (px > 0) rate = px;
+      }
+    } catch (err) {
+      // A VIRTUAL-hop outage no-prices the WHOLE Virtuals cohort this tick (they
+      // read as no-price, not ETH — safe, but invisible). Surface it so a
+      // sustained outage doesn't look like "no Virtuals positions moving".
+      log.warn(`basedata: VIRTUAL/ETH rate fetch failed — Virtuals tokens unpriced this tick: ${String(err)}`);
+    }
+    this.virtualRateCache = { rate, at: now };
+    return rate;
   }
 
   async getPricesEth(addresses: string[]): Promise<Map<string, number>> {
@@ -72,13 +113,21 @@ export class RealBaseData implements BaseDataAdapter {
             list.push(p);
             byToken.set(addr, list);
           }
+          const virtual = config.chain.virtualToken;
           for (const [addr, pairs] of byToken) {
             const base = pairs.filter((p) => p.chainId === "base");
             const pool = (base.length ? base : pairs).sort(
               (a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0),
             )[0];
             if (!pool) continue;
-            const price = Number(pool.priceNative ?? 0);
+            const native = Number(pool.priceNative ?? 0);
+            if (!(native > 0)) continue;
+            // Convert VIRTUAL-quoted prices to ETH (cached rate → ≤1 fetch/tick);
+            // WETH-quoted prices pass straight through.
+            const isVirtualQuoted =
+              !!virtual && pool.quoteToken?.address?.toLowerCase() === virtual.toLowerCase();
+            const virtualEthRate = isVirtualQuoted ? await this.getVirtualEthRate() : null;
+            const price = toEthPrice(native, pool.quoteToken?.address, { virtual, virtualEthRate });
             if (price > 0) out.set(addr, price);
           }
         } catch {
@@ -114,6 +163,9 @@ export class RealBaseData implements BaseDataAdapter {
     /** Every LP pool contract address for this token — used to exclude pools
      *  from the Auditor's top-10 holder concentration calc. */
     pairAddresses: string[];
+    /** "virtuals" when any Base pool is quoted in $VIRTUAL (a graduated
+     *  Virtuals agent token), else null. Layered under Bankr/Clanker detection. */
+    launchpadFromPairs: "virtuals" | null;
   }> {
     const res = await fetch(`${DEXSCREENER}/${address}`);
     if (!res.ok) throw new Error(`DexScreener ${res.status}`);
@@ -121,24 +173,37 @@ export class RealBaseData implements BaseDataAdapter {
     const pairs = json.pairs ?? [];
     // Prefer Base pairs, then the pool with the deepest liquidity.
     const base = pairs.filter((p) => p.chainId === "base");
-    const pool = (base.length ? base : pairs).sort(
+    const considered = base.length ? base : pairs;
+    const pool = [...considered].sort(
       (a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0),
     )[0];
     if (!pool) throw new Error(`No DEX pairs found for ${address}`);
     // All Base pair addresses for this token — typically one or two pools.
-    const pairAddresses = (base.length ? base : pairs)
+    const pairAddresses = considered
       .map((p) => p.pairAddress)
       .filter((p): p is string => typeof p === "string" && p.length > 0)
       .map((p) => p.toLowerCase());
+    // priceNative is in the pool's QUOTE token. WETH-quoted (Clanker/Bankr) is
+    // already ETH; a VIRTUAL-quoted (graduated Virtuals) pool needs × VIRTUAL/ETH.
+    // Only fetch the rate when the chosen pool is VIRTUAL-quoted — Clanker/Bankr
+    // pay zero extra calls.
+    const virtual = config.chain.virtualToken;
+    const isVirtualQuoted =
+      !!virtual && pool.quoteToken?.address?.toLowerCase() === virtual.toLowerCase();
+    const virtualEthRate = isVirtualQuoted ? await this.getVirtualEthRate() : null;
     return {
       chain: toChain(pool.chainId),
-      priceEth: Number(pool.priceNative ?? 0),
+      priceEth: toEthPrice(Number(pool.priceNative ?? 0), pool.quoteToken?.address, {
+        virtual,
+        virtualEthRate,
+      }),
       liquidityUsd: pool.liquidity?.usd ?? 0,
       marketCapUsd: pool.marketCap ?? pool.fdv ?? 0,
       launchedAt: pool.pairCreatedAt
         ? new Date(pool.pairCreatedAt).toISOString()
         : new Date().toISOString(),
       pairAddresses,
+      launchpadFromPairs: detectVirtualsLaunchpad(considered, config.chain.virtualToken),
     };
   }
 
@@ -208,6 +273,9 @@ interface DexPair {
   pairAddress?: string;
   /** The token being priced (vs WETH/USDC etc) — has the ticker we want. */
   baseToken?: { address?: string; symbol?: string; name?: string };
+  /** The pool's quote asset (WETH for Clanker/Bankr, $VIRTUAL for graduated
+   *  Virtuals tokens). Drives launchpad detection + price-unit conversion. */
+  quoteToken?: { address?: string; symbol?: string; name?: string };
   priceNative?: string;
   liquidity?: { usd?: number };
   marketCap?: number;

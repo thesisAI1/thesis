@@ -153,6 +153,7 @@ function makeReview(over: Partial<ReviewRecord> = {}): ReviewRecord {
     chain: "base",
     authorScore: 80,
     tokenScore: 70,
+    launchpad: "clanker",
     grade: "B",
     decision: "BUY",
     confidence: 0.6,

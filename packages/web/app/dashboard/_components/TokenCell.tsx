@@ -2,8 +2,8 @@
 
 /**
  * Token cell — the DexScreener logo (20px round) + the `$SYMBOL` / truncated-CA
- * label + a copy-CA button, used in the open & closed position tables. Mirrors
- * the legacy `tokenCell`.
+ * label + an optional launchpad source badge + a copy-CA button, used in the
+ * open & closed position tables. Mirrors the legacy `tokenCell`.
  *
  * The label links to the token's DexScreener chart (chain-aware), and the small
  * trailing button copies the full contract address with a brief ✓ confirmation.
@@ -36,21 +36,33 @@ function CheckGlyph() {
   );
 }
 
+/** Display label for a launchpad key. pump.fun keeps its dot; the rest just
+ *  uppercase. Returns null for an unknown/absent source (no badge rendered). */
+function launchpadLabel(launchpad: string | null | undefined): string | null {
+  const lp = launchpad?.toLowerCase();
+  if (!lp) return null;
+  return lp === "pumpfun" ? "PUMP.FUN" : lp.toUpperCase();
+}
+
 export function TokenCell({
   symbol,
   contractAddress,
   logoUrl,
   chain,
+  launchpad = null,
 }: {
   symbol: string;
   contractAddress: string;
   logoUrl: string | null;
   /** Decides the DexScreener path slug (base / solana / …). */
   chain: Chain;
+  /** Launchpad source — rendered as a small badge after the token label. */
+  launchpad?: string | null;
 }) {
   const [broken, setBroken] = useState(false);
   const [copied, setCopied] = useState(false);
   const label = tokenLabel(symbol, contractAddress);
+  const lpLabel = launchpadLabel(launchpad);
   // Fallback letter: first char of the symbol (sans $/@), else the first char of
   // the address after its 0x prefix. Strip prefixes precisely — a char-class like
   // [$@0x] would also eat a leading "X"/"0" inside a real symbol (e.g. $XROCKET).
@@ -99,6 +111,15 @@ export function TokenCell({
       >
         {label}
       </a>
+      {lpLabel && (
+        <span
+          className={styles.lpBadge}
+          data-lp={launchpad?.toLowerCase()}
+          title={`Launchpad: ${lpLabel}`}
+        >
+          {lpLabel}
+        </span>
+      )}
       <button
         type="button"
         className={`${styles.tokCopy} ${copied ? styles.tokCopied : ""}`}

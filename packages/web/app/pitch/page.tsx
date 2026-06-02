@@ -86,7 +86,7 @@ const POST_RULES: Rule[] = [
 /** Gate 2 — the token. Vetted by the Auditor (on-chain forensics). */
 const TOKEN_RULES: Rule[] = [
   {
-    key: "Launched on Clanker or Bankr",
+    key: "Launched on Clanker, Bankr or Virtuals",
     why: "Known launchpads with on-chain provenance and standard fee mechanics. Filters most rug templates by construction.",
   },
   {

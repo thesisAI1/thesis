@@ -19,8 +19,21 @@ test("base trusts clanker and bankr (unchanged)", () => {
   assert.equal(isLaunchpadTrusted("base", "bankr"), true);
 });
 
+test("base trusts virtuals (graduated Virtuals Protocol tokens)", () => {
+  assert.equal(isLaunchpadTrusted("base", "virtuals"), true);
+  assert.equal(isLaunchpadTrusted("base-sepolia", "virtuals"), true);
+});
+
+test("trustedLaunchpads(base) is exactly [clanker, bankr, virtuals]", () => {
+  assert.deepEqual(trustedLaunchpads("base"), ["clanker", "bankr", "virtuals"]);
+});
+
 test("base does NOT trust pumpfun", () => {
   assert.equal(isLaunchpadTrusted("base", "pumpfun"), false);
+});
+
+test("solana does NOT trust virtuals (Base-only launchpad)", () => {
+  assert.equal(isLaunchpadTrusted("solana", "virtuals"), false);
 });
 
 test("solana trusts pumpfun ONLY", () => {

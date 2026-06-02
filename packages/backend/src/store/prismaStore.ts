@@ -131,6 +131,7 @@ export class PrismaStore implements Store {
     chain: string;
     authorScore: number;
     tokenScore: number;
+    launchpad: string | null;
     grade: string;
     decision: string;
     confidence: number;
@@ -148,6 +149,7 @@ export class PrismaStore implements Store {
       chain: row.chain as ReviewRecord["chain"],
       authorScore: row.authorScore,
       tokenScore: row.tokenScore,
+      launchpad: row.launchpad,
       grade: row.grade as ReviewRecord["grade"],
       decision: row.decision as ReviewRecord["decision"],
       confidence: row.confidence,
@@ -445,6 +447,7 @@ export class PrismaStore implements Store {
         chain: record.chain,
         authorScore: record.authorScore,
         tokenScore: record.tokenScore,
+        launchpad: record.launchpad,
         grade: record.grade,
         decision: record.decision,
         confidence: record.confidence,

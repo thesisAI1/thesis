@@ -112,6 +112,7 @@ export function HistoryTable({ positions, authorStats, now }: HistoryTableProps)
                           contractAddress={p.contractAddress}
                           logoUrl={p.tokenLogoUrl}
                           chain={p.chain}
+                          launchpad={p.launchpad}
                         />
                       </td>
                       <td>
