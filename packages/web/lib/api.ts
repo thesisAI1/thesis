@@ -11,7 +11,7 @@
  * level. Server-side fetch must hit the absolute backend origin — Next's
  * /api/* rewrites only apply to browser requests.
  */
-import type { Chain, Decision, Grade, ReviewRecord } from "@thesis/shared";
+import type { Chain, Decision, EventLogEntry, Grade, ReviewRecord } from "@thesis/shared";
 
 /** Absolute backend origin. Mirrors next.config.ts; the rewrite that proxies
  *  /api/* is browser-only, so Server Components must call the origin directly. */
@@ -213,16 +213,7 @@ export interface DashboardData {
 
 // --- /api/events -----------------------------------------------------------
 
-/** One structured event log entry — mirrors EventLogEntry from
- *  packages/backend/src/observability/eventLog.ts. The `msg` field is
- *  pre-redacted by the server (wallet addresses and bot tokens stripped). */
-export interface EventLogEntry {
-  at: string;
-  level: "info" | "warn" | "error";
-  area: string;
-  type: string;
-  msg: string;
-}
+export type { EventLogEntry };
 
 /** Optional filter params for GET /api/events. */
 export interface EventsParams {

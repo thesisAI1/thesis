@@ -6,6 +6,18 @@
  * -> Verdict -> TradeOrder -> Position -> Distribution.
  */
 
+// ── Observability ────────────────────────────────────────────────────────────
+
+/** One structured entry in the operational event log.
+ *  `at` is an ISO-8601 timestamp string; `msg` is pre-redacted by the server. */
+export interface EventLogEntry {
+  at: string;
+  level: "info" | "warn" | "error";
+  area: string;
+  type: string;
+  msg: string;
+}
+
 /** Chains we recognise. The project trades on Base AND Solana; the other members
  *  are detected (so a submission can be classified) and skipped — never traded. */
 export type Chain =
