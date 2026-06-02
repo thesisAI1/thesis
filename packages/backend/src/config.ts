@@ -132,6 +132,34 @@ export const config = {
     enabled: str("CHATBOT_ENABLED", "true") !== "false",
   },
 
+  telegram: {
+    botToken: str("TELEGRAM_BOT_TOKEN"),
+    /** Set TELEGRAM_ENABLED=false to disable the bot entirely. */
+    enabled: str("TELEGRAM_ENABLED", "true") !== "false",
+    /** Comma-separated list of Telegram chat IDs allowed to interact. */
+    allowedChats: str("TELEGRAM_ALLOWED_CHATS")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
+    pollIntervalSec: num("TELEGRAM_POLL_INTERVAL_SEC", 30),
+    group: {
+      /** Separate public-group bot. Self-disables if token/chat absent (mock-safe). */
+      enabled: str("TELEGRAM_GROUP_ENABLED", "true") !== "false",
+      botToken: str("TELEGRAM_GROUP_BOT_TOKEN"),
+      chatId: str("TELEGRAM_GROUP_CHAT_ID"),
+    },
+  },
+
+  observability: {
+    /** Seconds before heartbeat is considered stale. 0 = auto-derive from poll interval. */
+    heartbeatStaleSec: num("HEARTBEAT_STALE_SEC", 0),
+    /** How many recent events to keep in memory. */
+    recentBufferSize: num("OBS_RECENT_BUFFER_SIZE", 200),
+    /** Maximum rows retained in the durable Event table (Prisma sink). Oldest
+     *  rows are pruned when the cap is exceeded. 50 000 ≈ weeks of headroom. */
+    eventLogCap: num("OBS_EVENT_LOG_CAP", 50_000),
+  },
+
   service: {
     /** How often to poll X for new mentions (seconds). */
     pollIntervalSec: num("POLL_INTERVAL_SEC", 300),

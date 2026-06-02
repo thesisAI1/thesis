@@ -11,7 +11,7 @@
  * level. Server-side fetch must hit the absolute backend origin — Next's
  * /api/* rewrites only apply to browser requests.
  */
-import type { Chain, Decision, Grade, ReviewRecord } from "@thesis/shared";
+import type { Chain, Decision, EventLogEntry, Grade, ReviewRecord } from "@thesis/shared";
 
 /** Absolute backend origin. Mirrors next.config.ts; the rewrite that proxies
  *  /api/* is browser-only, so Server Components must call the origin directly. */
@@ -211,6 +211,22 @@ export interface DashboardData {
   recentActivity: ActivityItem[];
 }
 
+// --- /api/events -----------------------------------------------------------
+
+export type { EventLogEntry };
+
+/** Optional filter params for GET /api/events. */
+export interface EventsParams {
+  area?: string;
+  level?: string;
+  n?: number;
+}
+
+/** GET /api/events — { events: EventLogEntry[] }. */
+export interface EventsData {
+  events: EventLogEntry[];
+}
+
 // --- /api/leaderboard ------------------------------------------------------
 
 /** One author row — apiLeaderboard() LeaderboardEntry. */
@@ -287,6 +303,17 @@ export function getDashboard(): Promise<DashboardData> {
 /** GET /api/leaderboard — author ranking by realised author share. */
 export function getLeaderboard(): Promise<LeaderboardData> {
   return getJson<LeaderboardData>("/api/leaderboard");
+}
+
+/** GET /api/events — structured event log (newest-first, msg redacted).
+ *  Optional params: area, level, n (max count). */
+export function getEvents(params?: EventsParams): Promise<EventsData> {
+  const qs = new URLSearchParams();
+  if (params?.area !== undefined) qs.set("area", params.area);
+  if (params?.level !== undefined) qs.set("level", params.level);
+  if (params?.n !== undefined) qs.set("n", String(params.n));
+  const query = qs.toString();
+  return getJson<EventsData>(`/api/events${query ? `?${query}` : ""}`);
 }
 
 /** Verdict/grade re-exports so consumers can pin tape/badge values to the

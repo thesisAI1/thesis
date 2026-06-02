@@ -15,6 +15,7 @@ import type {
 import { config } from "../config.js";
 import { FileStore } from "./fileStore.js";
 import { PrismaStore } from "./prismaStore.js";
+export { PrismaStore } from "./prismaStore.js";
 
 /** A profit share owed to an author who has not linked a wallet yet.
  *  Escrow is per (author, chain) — a Solana win owes SOL, a Base win owes ETH,

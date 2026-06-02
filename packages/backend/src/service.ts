@@ -18,7 +18,12 @@ import { recordActivity } from "./activity.js";
 import { getStore } from "./store/index.js";
 import { triageMentions } from "./triage/index.js";
 import { nativeSymbol } from "./util/chains.js";
-import { log } from "./util/log.js";
+import { log, logEvent } from "./util/log.js";
+import { publishOps } from "./observability/opsBus.js";
+import { markTick, checkLiveness } from "./observability/watchdog.js";
+import { startNotifier } from "./adapters/telegram/notifier.js";
+import { startGroupNotifier } from "./adapters/telegram/groupNotifier.js";
+import { startBot } from "./adapters/telegram/bot.js";
 import {
   buyReplyText,
   classifySkipReason,
@@ -37,6 +42,7 @@ export async function pollCycle(): Promise<void> {
     mentions = await createXAdapter().pollMentions(lastSeenId);
   } catch (err) {
     log.warn(`poll: X mention fetch failed: ${String(err)}`);
+    logEvent({ level: "warn", area: "service", type: "mention-fetch:failed", msg: `poll: X mention fetch failed: ${String(err)}` });
     return;
   }
   for (const post of mentions) lastSeenId = newerId(lastSeenId, post.postId);
@@ -87,6 +93,7 @@ async function replyToTriageRejects(
       triageReplyCooldown.set(post.authorXId, now);
     } catch (err) {
       log.warn(`x: triage reject reply failed for ${post.postId}: ${String(err)}`);
+      logEvent({ level: "warn", area: "service", type: "triage-reply:failed", msg: `x: triage reject reply failed for ${post.postId}: ${String(err)}` });
     }
   }
 }
@@ -157,6 +164,7 @@ async function processSubmission(submission: Submission): Promise<void> {
         positionId: result.position.id,
         amountEth: result.position.order.amountInEth,
       });
+      publishOps({ type: "trade:buy", at: new Date().toISOString(), positionId: result.position.id, handle: submission.authorHandle, amountEth: result.position.order.amountInEth, contract: result.position.order.contractAddress, chain: result.position.order.chain });
       await replyOnBuy(submission, result);
     } else if (result.skippedReason) {
       log.info(`bursar: no buy — ${result.skippedReason}`);
@@ -166,6 +174,7 @@ async function processSubmission(submission: Submission): Promise<void> {
     }
   } catch (err) {
     log.error(`review failed for ${submission.postId}: ${String(err)}`);
+    logEvent({ level: "error", area: "service", type: "review:failed", msg: `review failed for ${submission.postId}: ${String(err)}` });
   }
 }
 
@@ -183,8 +192,10 @@ async function replyOnBuy(submission: Submission, result: ReviewResult): Promise
   try {
     const replyId = await createXAdapter().replyToPost(submission.postId, text);
     log.info(`x: replied to ${submission.postId} announcing the buy (reply ${replyId})`);
+    publishOps({ type: "tweet:posted", at: new Date().toISOString(), kind: "buy", replyId, postId: submission.postId });
   } catch (err) {
     log.warn(`x: buy reply failed for ${submission.postId}: ${String(err)}`);
+    logEvent({ level: "warn", area: "service", type: "buy-reply:failed", msg: `x: buy reply failed for ${submission.postId}: ${String(err)}` });
   }
 }
 
@@ -208,8 +219,10 @@ async function replyOnSkip(submission: Submission, result: ReviewResult): Promis
   try {
     const replyId = await createXAdapter().replyToPost(submission.postId, text);
     log.info(`x: replied to ${submission.postId} explaining the skip (reply ${replyId})`);
+    publishOps({ type: "tweet:posted", at: new Date().toISOString(), kind: "skip", replyId, postId: submission.postId });
   } catch (err) {
     log.warn(`x: skip reply failed for ${submission.postId}: ${String(err)}`);
+    logEvent({ level: "warn", area: "service", type: "skip-reply:failed", msg: `x: skip reply failed for ${submission.postId}: ${String(err)}` });
   }
 }
 
@@ -238,7 +251,7 @@ export async function runOnce(): Promise<void> {
  * one loudly for manual recovery. We do NOT auto-clear: the alert should persist
  * across restarts until the operator reconciles against the on-chain balance.
  */
-async function reconcilePendingBuys(): Promise<void> {
+export async function reconcilePendingBuys(): Promise<void> {
   try {
     const orphans = await getStore().getPendingBuys();
     for (const b of orphans) {
@@ -248,9 +261,22 @@ async function reconcilePendingBuys(): Promise<void> {
           `is NOT monitoring those tokens. Check the wallet balance for that token, then recover via ` +
           `/admin/rebuy-position or open a position manually.`,
       );
+      publishOps({
+        type: "error",
+        at: new Date().toISOString(),
+        area: "service",
+        msg: `ORPHANED BUY ${b.contractAddress} (post ${b.postId}) — un-monitored, manual recovery needed`,
+      });
     }
   } catch (err) {
-    log.warn(`service: pending-buy reconcile failed — ${String(err)}`);
+    const msg = `service: pending-buy reconcile failed — ${String(err)}`;
+    logEvent({
+      level: "error",
+      area: "service",
+      type: "reconcile-failed",
+      msg,
+      ops: { type: "error", at: new Date().toISOString(), area: "reconcile", msg },
+    });
   }
 }
 
@@ -275,7 +301,11 @@ export function startService(): () => void {
         await fn();
       } catch (err) {
         log.error(`${label} loop: ${String(err)}`);
+        logEvent({ level: "error", area: "service", type: `${label}-loop:failed`, msg: `${label} loop: ${String(err)}` });
       }
+      // Heartbeat off the poll loop (the watchdog's stale threshold derives from
+      // the poll interval); stamped AFTER the tick so a hung poll stops ticking it.
+      if (label === "poll") markTick();
       if (!stopped) setTimeout(() => void tick(), intervalMs);
     };
     void tick();
@@ -285,12 +315,21 @@ export function startService(): () => void {
   loop("review", reviewTick, reviewMs);
   loop("monitor", runMonitorTick, monitorMs);
 
+  const stopNotifier = startNotifier();
+  const stopGroupNotifier = startGroupNotifier();
+  const stopBot = startBot();
+  const liveness = setInterval(() => checkLiveness(), 30_000);
+
   log.info(
     `service: poll ${Math.round(pollMs / 1000)}s · review ${config.service.reviewIntervalSec}s · ` +
       `monitor ${config.service.monitorIntervalSec}s`,
   );
   return () => {
     stopped = true;
+    clearInterval(liveness);
+    stopNotifier();
+    stopGroupNotifier();
+    stopBot();
   };
 }
 

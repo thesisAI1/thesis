@@ -19,7 +19,7 @@ import { createXAdapter } from "../adapters/x/index.js";
 import type { XPost } from "../adapters/x/index.js";
 import { config } from "../config.js";
 import { extractContract } from "../util/contracts.js";
-import { log } from "../util/log.js";
+import { log, logEvent } from "../util/log.js";
 import { untrustedBlock, UNTRUSTED_INSTRUCTION } from "../util/untrusted.js";
 import { getStore } from "../store/index.js";
 
@@ -151,7 +151,9 @@ async function askChatbot(post: XPost): Promise<ChatbotDecision> {
       text: reply,
     };
   } catch (err) {
-    log.warn(`chatbot: LLM call failed for ${post.postId}: ${String(err)}`);
+    const chatFailMsg = `chatbot: LLM call failed for ${post.postId}: ${String(err)}`;
+    log.warn(chatFailMsg);
+    logEvent({ level: "warn", area: "chatbot", type: "llm:failed", msg: chatFailMsg });
     return { shouldReply: false, text: "" };
   }
 }

@@ -63,9 +63,17 @@ export class PrismaStore implements Store {
   }
 
   /** Close the underlying client. Not part of the Store interface, but the
-   *  tests need a clean teardown between cases. */
+   *  tests need a clean teardown between cases.
+   *  WARNING (test-only): calling disconnect() invalidates any co-located
+   *  PrismaEventLog that shares this client — disconnect the store LAST. */
   async disconnect(): Promise<void> {
     await this.prisma.$disconnect();
+  }
+
+  /** The shared PrismaClient, so a co-located PrismaEventLog reuses the SAME connection
+   *  instead of opening a second client on the same SQLite file (write-lock contention). */
+  get client(): PrismaClient {
+    return this.prisma;
   }
 
   // ---- mappers -------------------------------------------------------------

@@ -26,7 +26,7 @@
 
 import { keccak256, toBytes } from "viem";
 import { config } from "../config.js";
-import { log } from "../util/log.js";
+import { log, logEvent } from "../util/log.js";
 
 /** A wallet that's eligible for the lottery, with its current raw token
  *  balance (as bigint to preserve precision across 18-decimal math). */
@@ -149,17 +149,23 @@ export async function getEligibleHolders(): Promise<EligibleHolder[]> {
       _snapshotFetchedAt = Date.now();
     }
   } catch (err) {
-    log.warn(
-      `holders: snapshot refresh failed (${String(err)}) — reusing previous (${_snapshotCache.length} eligibles)`,
-    );
+    const refreshMsg = `holders: snapshot refresh failed (${String(err)}) — reusing previous (${_snapshotCache.length} eligibles)`;
+    log.warn(refreshMsg);
+    logEvent({ level: "warn", area: "holders", type: "holder-snapshot:refresh-failed", msg: refreshMsg });
   }
   // Staleness ceiling: refuse to serve data that's too old. The Endowment
   // treats an empty return as "no eligibles" and rolls the lottery ETH into
   // the buyback instead of paying a potentially-stale holder set.
   if (!isSnapshotWithinStaleCeiling(_snapshotCache.length, _snapshotFetchedAt, Date.now(), ttlMs)) {
-    log.error(
-      `holders: cached snapshot is too stale (>${STALE_TTL_MULTIPLE}× TTL) — returning [] to avoid paying stale holders`,
-    );
+    const staleMsg = `holders: cached snapshot is too stale (>${STALE_TTL_MULTIPLE}× TTL) — returning [] to avoid paying stale holders`;
+    log.error(staleMsg);
+    logEvent({
+      level: "error",
+      area: "holders",
+      type: "holder-enum:failed",
+      msg: staleMsg,
+      ops: { type: "error", at: new Date().toISOString(), area: "holders", msg: `holder enumeration failed past retry ceiling — lottery slice folds to buyback` },
+    });
     return [];
   }
   return _snapshotCache;
@@ -209,7 +215,9 @@ async function getExcludeSet(): Promise<Set<string>> {
       log.info(`holders: auto-excluded $THESIS deployer ${deployer} (launchpad / creator)`);
     }
   } catch (err) {
-    log.warn(`holders: deployer lookup failed (${String(err)}) — launchpad address may still appear in pool`);
+    const deployerMsg = `holders: deployer lookup failed (${String(err)}) — launchpad address may still appear in pool`;
+    log.warn(deployerMsg);
+    logEvent({ level: "warn", area: "holders", type: "holder-deployer:lookup-failed", msg: deployerMsg });
   }
   // (4) Liquidity pools — auto-detected from DexScreener.
   try {
@@ -217,7 +225,9 @@ async function getExcludeSet(): Promise<Set<string>> {
     for (const p of pairs) set.add(p);
     log.info(`holders: LP exclude list — ${pairs.length} pair address(es) from DexScreener`);
   } catch (err) {
-    log.warn(`holders: DexScreener pair lookup failed (${String(err)}) — LP exclusion may be incomplete`);
+    const dexMsg = `holders: DexScreener pair lookup failed (${String(err)}) — LP exclusion may be incomplete`;
+    log.warn(dexMsg);
+    logEvent({ level: "warn", area: "holders", type: "holder-dex:lookup-failed", msg: dexMsg });
   }
   _excludesCache = set;
   _excludesFetchedAt = Date.now();
@@ -247,11 +257,15 @@ async function fetchTokenDeployer(address: string): Promise<string | null> {
  *  filter by min balance. Returns a fresh array sorted by balance DESC. */
 async function fetchHoldersSnapshot(): Promise<EligibleHolder[]> {
   if (!config.chain.thesisToken) {
-    log.warn("holders: THESIS_TOKEN_ADDRESS not set — lottery has no token to snapshot");
+    const noTokenMsg = "holders: THESIS_TOKEN_ADDRESS not set — lottery has no token to snapshot";
+    log.warn(noTokenMsg);
+    logEvent({ level: "warn", area: "holders", type: "holder-config:no-token", msg: noTokenMsg });
     return [];
   }
   if (!config.baseData.goldRushKey) {
-    log.warn("holders: GOLDRUSH_API_KEY not set — lottery cannot fetch holder list");
+    const noKeyMsg = "holders: GOLDRUSH_API_KEY not set — lottery cannot fetch holder list";
+    log.warn(noKeyMsg);
+    logEvent({ level: "warn", area: "holders", type: "holder-config:no-key", msg: noKeyMsg });
     return [];
   }
   const raw = await fetchGoldRushHolders(config.chain.thesisToken);

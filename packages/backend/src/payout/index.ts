@@ -23,8 +23,9 @@ import bs58 from "bs58";
 import type { Chain } from "@thesis/shared";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { createXAdapter, type XPost } from "../adapters/x/index.js";
+import { publishOps } from "../observability/opsBus.js";
 import { getStore, type PayoutRequest } from "../store/index.js";
-import { log } from "../util/log.js";
+import { log, logEvent } from "../util/log.js";
 import { nativeSymbol } from "../util/chains.js";
 import { payoutSentText } from "../util/replies.js";
 
@@ -150,6 +151,7 @@ async function handleWalletReply(post: XPost, req: PayoutRequest): Promise<void>
   } catch (err) {
     // Keep the escrow and the request so the payout can be retried next poll.
     log.error(`payout: send to ${req.handle} failed — ${String(err)}`);
+    logEvent({ level: "error", area: "payout", type: "payout:failed", msg: `payout: send to ${req.handle} failed — ${String(err)}`, ops: { type: "payout:failed", at: new Date().toISOString(), chain, handle: req.handle, amountEth: owed, reason: String(err) } });
     return;
   }
 
@@ -162,6 +164,7 @@ async function handleWalletReply(post: XPost, req: PayoutRequest): Promise<void>
   log.info(
     `payout: paid ${req.handle} ${owed.toFixed(4)} ${sym} to ${wallet} — tx ${txHash}`,
   );
+  publishOps({ type: "payout:sent", at: new Date().toISOString(), path: "escrow", chain, handle: req.handle, amountEth: owed, wallet, txHash });
 
   // Confirm on-chain delivery as a reply in the same thread.
   try {
@@ -170,7 +173,9 @@ async function handleWalletReply(post: XPost, req: PayoutRequest): Promise<void>
       payoutSentText({ handle: req.handle, amountEth: owed, wallet, txHash, chain }),
     );
     log.info(`x: replied to ${post.postId} confirming the payout (reply ${replyId})`);
+    publishOps({ type: "tweet:posted", at: new Date().toISOString(), kind: "payout-confirm", replyId, postId: post.postId });
   } catch (err) {
     log.warn(`x: payout confirmation reply failed for ${post.postId}: ${String(err)}`);
+    logEvent({ level: "warn", area: "payout", type: "confirm-reply:failed", msg: `x: payout confirmation reply failed for ${post.postId}: ${String(err)}` });
   }
 }

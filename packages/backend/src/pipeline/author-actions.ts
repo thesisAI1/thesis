@@ -28,7 +28,7 @@ import { createXAdapter, type XPost } from "../adapters/x/index.js";
 import { closeByAuthor } from "../monitor/index.js";
 import { tokensRemaining } from "../domain/sizing.js";
 import { getStore } from "../store/index.js";
-import { log } from "../util/log.js";
+import { log, logEvent } from "../util/log.js";
 import { manualCloseRejectText } from "../util/replies.js";
 
 /** Anti-spam: max one close-request per author per 60s. In-memory only —
@@ -201,9 +201,9 @@ async function handleCloseRequest(pos: Position, mention: XPost): Promise<void> 
   try {
     await closeByAuthor(pos, displayPrice);
   } catch (err) {
-    log.warn(
-      `author-close: close execution failed for ${pos.id}: ${String(err)}`,
-    );
+    const closeFailMsg = `author-close: close execution failed for ${pos.id}: ${String(err)}`;
+    log.warn(closeFailMsg);
+    logEvent({ level: "warn", area: "author-close", type: "close-exec:failed", msg: closeFailMsg });
     // Best-effort apology reply so the author isn't left wondering. The
     // chain adapter has already retried 3× through different DEX routes by
     // the time we get here (≈90s of work), so this is a genuine "the

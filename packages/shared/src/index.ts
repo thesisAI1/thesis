@@ -6,6 +6,23 @@
  * -> Verdict -> TradeOrder -> Position -> Distribution.
  */
 
+// ── Observability ────────────────────────────────────────────────────────────
+
+/** One structured entry in the operational event log.
+ *  `at` is an ISO-8601 timestamp string.
+ *  `msg` is stored RAW (may contain wallet addresses / tx hashes / error strings);
+ *  consumers MUST redact at egress (`redactText`) before any public surface. */
+export interface EventLogEntry {
+  at: string;
+  level: "info" | "warn" | "error";
+  area: string;
+  type: string;
+  msg: string;
+  /** OpsEvent discriminator (e.g. "trade:buy") when this entry carried one;
+   *  undefined otherwise. Used by the Prisma durable sink to index by event type. */
+  opsType?: string;
+}
+
 /** Chains we recognise. The project trades on Base AND Solana; the other members
  *  are detected (so a submission can be classified) and skipped — never traded. */
 export type Chain =

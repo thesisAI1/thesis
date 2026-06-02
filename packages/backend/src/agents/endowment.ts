@@ -26,7 +26,7 @@ import { createXAdapter } from "../adapters/x/index.js";
 import { config, useMock } from "../config.js";
 import { drawLottery } from "../holders/index.js";
 import { getStore } from "../store/index.js";
-import { log } from "../util/log.js";
+import { log, logEvent } from "../util/log.js";
 import { payoutRequestText, payoutSentText } from "../util/replies.js";
 
 /** Outcome of the author leg, returned to the caller so it can fold the
@@ -210,6 +210,7 @@ export async function runEndowment(
       if (useMock() || config.solana.buybackWallet) {
         teamOk = await runLeg("pay team (SOL)", () =>
           chain.sendEth(config.solana.buybackWallet, quarter),
+          position.id,
         );
         teamPaidEth = teamOk ? quarter : 0;
       } else {
@@ -224,6 +225,7 @@ export async function runEndowment(
     } else if (useMock() || config.chain.teamWallet) {
       teamOk = await runLeg("pay team", () =>
         chain.sendEth(config.chain.teamWallet, quarter),
+        position.id,
       );
       teamPaidEth = teamOk ? quarter : 0;
     }
@@ -243,6 +245,7 @@ export async function runEndowment(
       if (useMock() || config.solana.buybackWallet) {
         const ok = await runLeg("solana buyback → wallet (SOL)", () =>
           chain.sendEth(config.solana.buybackWallet, buybackBudget),
+          position.id,
         );
         if (ok) {
           progress.buybackDone = true;
@@ -264,6 +267,7 @@ export async function runEndowment(
     } else if (useMock() || config.chain.thesisToken) {
       const ok = await runLeg("buyback & burn $THESIS", () =>
         chain.buybackAndBurn(buybackBudget).then((r) => r.txHash),
+        position.id,
       );
       if (ok) {
         progress.buybackDone = true;
@@ -354,7 +358,18 @@ async function runHolderLottery(
     } catch (err) {
       const reason = String(err);
       failed.push({ wallet: winner, amountEth: perWinner, reason });
-      log.error(`endowment: lottery send to ${winner} failed — ${reason}`);
+      logEvent({
+        level: "error",
+        area: "endowment",
+        type: "lottery-send:failed",
+        msg: `endowment: lottery send failed — ${reason}`,
+        ops: {
+          type: "settle:failed",
+          at: new Date().toISOString(),
+          positionId: position.id,
+          reason: `lottery send failed: ${reason}`,
+        },
+      });
     }
   }
   const undistributedEth = failed.reduce((s, f) => s + f.amountEth, 0);
@@ -383,11 +398,29 @@ async function payAuthorDirect(
   } catch (err) {
     const reason = String(err);
     log.error(`endowment: author payout failed for ${entry.handle} — ${reason}`);
+    logEvent({
+      level: "error",
+      area: "endowment",
+      type: "author-payout:failed",
+      msg: `endowment: author payout failed for ${entry.handle} — ${reason}`,
+      ops: {
+        type: "payout:failed",
+        at: new Date().toISOString(),
+        chain: position.order.chain,
+        handle: entry.handle,
+        amountEth,
+        reason,
+      },
+    });
     return { kind: "failed", reason, amountEth };
   }
-  log.info(
-    `endowment: paid author ${entry.handle} ${amountEth.toFixed(4)} ETH — tx ${txHash}`,
-  );
+  logEvent({
+    level: "info",
+    area: "endowment",
+    type: "author-payout:sent",
+    msg: `endowment: paid author ${entry.handle} ${amountEth.toFixed(4)} ETH — tx ${txHash}`,
+    ops: { type: "payout:sent", at: new Date().toISOString(), path: "direct", chain: position.order.chain, handle: entry.handle, amountEth, wallet: entry.wallet, txHash },
+  });
   if (!silent) {
     try {
       const replyId = await createXAdapter().replyToPost(
@@ -397,6 +430,12 @@ async function payAuthorDirect(
       log.info(`x: replied to ${position.postId} confirming author payout (reply ${replyId})`);
     } catch (err) {
       log.warn(`x: payout-sent reply failed for ${position.postId}: ${String(err)}`);
+      logEvent({
+        level: "warn",
+        area: "endowment",
+        type: "payout-sent-reply:failed",
+        msg: `x: payout-sent reply failed for ${position.postId}: ${String(err)}`,
+      });
     }
   }
   return { kind: "direct", wallet: entry.wallet, txHash, amountEth };
@@ -436,22 +475,47 @@ async function requestAuthorPayout(position: Position): Promise<void> {
       `endowment: ${position.authorHandle} payout request posted — total escrow ${owed.toFixed(4)} ETH (tweet ${requestTweetId})`,
     );
   } catch (err) {
+    const handle = position.authorHandle;
     log.error(
-      `endowment: payout request post failed for ${position.authorHandle} — ${String(err)}`,
+      `endowment: payout request post failed for ${handle} — ${String(err)}`,
     );
+    logEvent({
+      level: "error",
+      area: "endowment",
+      type: "payout-request-post:failed",
+      msg: `endowment: payout request post failed for ${handle} — ${String(err)}`,
+      ops: {
+        type: "error",
+        at: new Date().toISOString(),
+        area: "endowment",
+        msg: `payout request post failed for ${handle}`,
+      },
+    });
   }
 }
 
 /** Run one on-chain leg; log the outcome without aborting settlement. Returns
  *  true if the leg succeeded, false if it threw — the caller uses this to mark
  *  the leg done (skip it on a retry) or leave it for retry. */
-async function runLeg(label: string, run: () => Promise<string>): Promise<boolean> {
+async function runLeg(label: string, run: () => Promise<string>, positionId: string): Promise<boolean> {
   try {
     const txHash = await run();
     log.info(`endowment: ${label} — tx ${txHash}`);
     return true;
   } catch (err) {
     log.error(`endowment: ${label} failed — ${String(err)}`);
+    logEvent({
+      level: "error",
+      area: "endowment",
+      type: "settle-leg:failed",
+      msg: `endowment: ${label} failed — ${String(err)}`,
+      ops: {
+        type: "settle:failed",
+        at: new Date().toISOString(),
+        positionId,
+        reason: `${label}: ${String(err)}`,
+      },
+    });
     return false;
   }
 }
