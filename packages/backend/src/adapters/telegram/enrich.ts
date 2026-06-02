@@ -38,16 +38,23 @@ export function clearSymbolCache(): void {
  * Resolves a token ticker with a module-level in-memory cache.
  * On cache miss, calls `deps.getSymbol` (or the real adapter).
  * On throw OR empty result, returns `""` and does NOT cache the failure.
+ *
+ * `cacheOnly`: never hit the network — return "" on a cache miss. Used by the
+ * public `/check` command so a stranger can't fan a single message out into
+ * dozens of external symbol lookups against the BaseData adapter that the live
+ * trading loop shares (only tokens already seen by the notifier/other commands
+ * resolve; everything else reads as unknown).
  */
 export async function resolveSymbol(
   contract: string,
   chain: Chain,
-  deps?: { getSymbol?: (c: string, chain: Chain) => Promise<string> },
+  deps?: { getSymbol?: (c: string, chain: Chain) => Promise<string>; cacheOnly?: boolean },
 ): Promise<string> {
   const key = contract.toLowerCase();
   if (symbolCache.has(key)) {
     return symbolCache.get(key)!;
   }
+  if (deps?.cacheOnly) return "";
 
   const fetcher =
     deps?.getSymbol ??

@@ -24,6 +24,7 @@ import { markTick, checkLiveness } from "./observability/watchdog.js";
 import { startNotifier } from "./adapters/telegram/notifier.js";
 import { startGroupNotifier } from "./adapters/telegram/groupNotifier.js";
 import { startBot } from "./adapters/telegram/bot.js";
+import { startGroupBot } from "./adapters/telegram/groupBot.js";
 import {
   buyReplyText,
   classifySkipReason,
@@ -318,6 +319,7 @@ export function startService(): () => void {
   const stopNotifier = startNotifier();
   const stopGroupNotifier = startGroupNotifier();
   const stopBot = startBot();
+  const stopGroupBot = startGroupBot();
   const liveness = setInterval(() => checkLiveness(), 30_000);
 
   log.info(
@@ -330,6 +332,7 @@ export function startService(): () => void {
     stopNotifier();
     stopGroupNotifier();
     stopBot();
+    stopGroupBot();
   };
 }
 
