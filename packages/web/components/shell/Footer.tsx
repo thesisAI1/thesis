@@ -1,13 +1,15 @@
 /**
  * Site footer (design `footer` / `.foot-in`). A fine-print line on the left and
- * a row of mono links on the right (Docs · GitHub · @thesisonbase · DexScreener
- * · BaseScan). Internal links route via next/link; the rest open in a new tab.
+ * a row of mono links on the right (Docs · GitHub · @thesisonbase · Telegram ·
+ * DexScreener · BaseScan). Internal links route via next/link; the rest open in
+ * a new tab.
  */
 import Link from "next/link";
 
 const THESIS_CA = "0x36e807119529E44d6F36aD5CE24AeB87a4529ba3";
 const GITHUB_URL = "https://github.com/thesisAI1/thesis";
 const X_URL = "https://x.com/thesisonbase";
+const TELEGRAM_URL = "https://t.me/thesistoken";
 const DEXSCREENER_URL = `https://dexscreener.com/base/${THESIS_CA}`;
 const BASESCAN_URL = `https://basescan.org/token/${THESIS_CA}`;
 
@@ -23,6 +25,7 @@ const LINKS: FooterLink[] = [
   { label: "Docs", href: "/docs" },
   { label: "GitHub", href: GITHUB_URL, external: true },
   { label: "@thesisonbase", href: X_URL, external: true },
+  { label: "Telegram", href: TELEGRAM_URL, external: true },
   { label: "DexScreener", href: DEXSCREENER_URL, external: true },
   { label: "BaseScan ↗", href: BASESCAN_URL, external: true },
 ];

@@ -17,10 +17,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
-import { GitHubIcon, XIcon } from "./icons";
+import { GitHubIcon, TelegramIcon, XIcon } from "./icons";
 
 const GITHUB_URL = "https://github.com/thesisAI1/thesis";
 const X_URL = "https://x.com/thesisonbase";
+const TELEGRAM_URL = "https://t.me/thesistoken";
 
 /** A nav entry. `match` is the route prefix that marks it active; hash-only
  *  jump links (e.g. $THESIS) omit it and never highlight. */
@@ -108,6 +109,16 @@ export function TopBar() {
           >
             <XIcon width={14} height={14} />
           </a>
+          <a
+            href={TELEGRAM_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Telegram"
+            aria-label="Telegram"
+            className="inline-flex items-center justify-center px-[9px] py-[7px] text-muted transition-colors hover:text-text"
+          >
+            <TelegramIcon width={16} height={16} />
+          </a>
 
           <Link
             href={CTA.href}
@@ -167,6 +178,9 @@ export function TopBar() {
             </a>
             <a href={X_URL} target="_blank" rel="noopener noreferrer" aria-label="X" className="inline-flex items-center gap-2 text-[13px] text-muted transition-colors hover:text-text">
               <XIcon width={14} height={14} /> @thesisonbase
+            </a>
+            <a href={TELEGRAM_URL} target="_blank" rel="noopener noreferrer" aria-label="Telegram" className="inline-flex items-center gap-2 text-[13px] text-muted transition-colors hover:text-text">
+              <TelegramIcon width={16} height={16} /> Telegram
             </a>
           </div>
         </nav>
