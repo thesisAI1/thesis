@@ -164,7 +164,7 @@ async function handleWalletReply(post: XPost, req: PayoutRequest): Promise<void>
   log.info(
     `payout: paid ${req.handle} ${owed.toFixed(4)} ${sym} to ${wallet} — tx ${txHash}`,
   );
-  publishOps({ type: "payout:sent", at: new Date().toISOString(), path: "escrow", handle: req.handle, amountEth: owed, wallet, txHash });
+  publishOps({ type: "payout:sent", at: new Date().toISOString(), path: "escrow", chain, handle: req.handle, amountEth: owed, wallet, txHash });
 
   // Confirm on-chain delivery as a reply in the same thread.
   try {

@@ -73,20 +73,25 @@ describe("formatGroupEvent trade:buy", () => {
 // ── trade:sell ────────────────────────────────────────────────────────────────
 
 describe("formatGroupEvent trade:sell", () => {
-  test("returns non-null, text contains WIF, profit amount, author handle, gif === tp", async () => {
+  test("realized % comes from event fields, not config tier value", async () => {
+    // cost basis = proceedsEth - profitEth = 0.5 - 0.4 = 0.1 → gain = 0.4/0.1 = +400%
+    // The configured tier-1 value is "+100%" — if the caption shows +400% it's event-driven.
     const e: OpsEvent = {
       type: "trade:sell",
       at: new Date().toISOString(),
       positionId: "p1",
       tier: 1,
-      proceedsEth: 0.15,
-      profitEth: 0.05,
+      proceedsEth: 0.5,
+      profitEth: 0.4,
     };
     const msg = await formatGroupEvent(e, deps);
     assert.ok(msg !== null, "expected non-null");
     assert.ok(msg.text.includes("WIF"), `text should contain WIF: ${msg.text}`);
-    assert.ok(msg.text.includes("0.05"), `text should contain profit amount: ${msg.text}`);
+    assert.ok(msg.text.includes("0.4"), `text should contain profit amount: ${msg.text}`);
     assert.ok(msg.text.includes("@alice"), `text should contain author handle: ${msg.text}`);
+    assert.ok(msg.text.includes("+400%"), `text should contain realized +400%: ${msg.text}`);
+    assert.ok(msg.text.includes("TP1"), `text should contain TP1 tier label: ${msg.text}`);
+    assert.ok(!msg.text.includes("+100%"), `text must NOT contain hardcoded config tier +100%: ${msg.text}`);
     assert.equal(msg.gif, "tp");
   });
 });
@@ -215,11 +220,12 @@ describe("formatGroupEvent position:close", () => {
 // ── payout:sent ───────────────────────────────────────────────────────────────
 
 describe("formatGroupEvent payout:sent", () => {
-  test("path escrow → non-null, contains @alice, gif author-claim", async () => {
+  test("path escrow, chain:base → non-null, contains @alice and ETH, gif author-claim", async () => {
     const e: OpsEvent = {
       type: "payout:sent",
       at: new Date().toISOString(),
       path: "escrow",
+      chain: "base",
       handle: "@alice",
       amountEth: 0.2,
       wallet: "0xA1Ace00000000000000000000000000000001A1A",
@@ -228,6 +234,25 @@ describe("formatGroupEvent payout:sent", () => {
     const msg = await formatGroupEvent(e, deps);
     assert.ok(msg !== null, "expected non-null for escrow path");
     assert.ok(msg.text.includes("@alice"), `text should contain @alice: ${msg.text}`);
+    assert.ok(msg.text.includes("ETH"), `chain:base caption must contain ETH: ${msg.text}`);
+    assert.equal(msg.gif, "author-claim");
+  });
+
+  test("path escrow, chain:solana → non-null, contains SOL (proves unit is chain-driven)", async () => {
+    const e: OpsEvent = {
+      type: "payout:sent",
+      at: new Date().toISOString(),
+      path: "escrow",
+      chain: "solana",
+      handle: "@alice",
+      amountEth: 0.2,
+      wallet: "SolWallet111111111111111111111111111",
+      txHash: "solTx1111111111111111111111111111111111111111111111111111111111111111",
+    };
+    const msg = await formatGroupEvent(e, deps);
+    assert.ok(msg !== null, "expected non-null for solana escrow path");
+    assert.ok(msg.text.includes("SOL"), `chain:solana caption must contain SOL: ${msg.text}`);
+    assert.ok(!msg.text.includes("ETH"), `chain:solana caption must NOT contain ETH: ${msg.text}`);
     assert.equal(msg.gif, "author-claim");
   });
 
@@ -236,6 +261,7 @@ describe("formatGroupEvent payout:sent", () => {
       type: "payout:sent",
       at: new Date().toISOString(),
       path: "direct",
+      chain: "base",
       handle: "@alice",
       amountEth: 0.2,
       wallet: "0xA1Ace00000000000000000000000000000001A1A",
@@ -297,6 +323,7 @@ describe("formatGroupEvent security no-leak", () => {
       type: "payout:sent",
       at: new Date().toISOString(),
       path: "escrow",
+      chain: "base",
       handle: "@alice",
       amountEth: 0.2,
       wallet,

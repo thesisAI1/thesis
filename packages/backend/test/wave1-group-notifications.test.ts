@@ -157,6 +157,7 @@ test("W1a: payAuthorDirect success emits payout:sent ops event", async () => {
         assert.ok(ev.amountEth > 0, `payout:sent amountEth must be > 0, got: ${ev.amountEth}`);
         assert.ok(ev.wallet.length > 0, `payout:sent wallet must be non-empty, got: "${ev.wallet}"`);
         assert.ok(ev.txHash.length > 0, `payout:sent txHash must be non-empty, got: "${ev.txHash}"`);
+        assert.equal(ev.chain, "base", `payout:sent chain must be "base" for a base position, got: "${ev.chain}"`);
       }
     } finally {
       __setChainForTest(null);

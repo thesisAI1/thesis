@@ -418,7 +418,7 @@ async function payAuthorDirect(
     area: "endowment",
     type: "author-payout:sent",
     msg: `endowment: paid author ${entry.handle} ${amountEth.toFixed(4)} ETH — tx ${txHash}`,
-    ops: { type: "payout:sent", at: new Date().toISOString(), path: "direct", handle: entry.handle, amountEth, wallet: entry.wallet, txHash },
+    ops: { type: "payout:sent", at: new Date().toISOString(), path: "direct", chain: position.order.chain, handle: entry.handle, amountEth, wallet: entry.wallet, txHash },
   });
   if (!silent) {
     try {

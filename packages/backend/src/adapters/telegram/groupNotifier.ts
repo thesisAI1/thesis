@@ -8,6 +8,7 @@
 import type { OpsEvent } from "../../observability/opsBus.js";
 import { subscribeOps } from "../../observability/opsBus.js";
 import { enrichPosition, pnlPct, type PositionEnrichment } from "./enrich.js";
+import { nativeSymbol } from "@thesis/shared";
 import type { GroupGifKind } from "./assets.js";
 import { resolveAsset as assetsResolveAsset, rememberFileId } from "./assets.js";
 import { redactText } from "./redact.js";
@@ -32,13 +33,6 @@ function trimEth(n: number): string {
 
 function symbolOrFallback(enr: PositionEnrichment & { found: true }): string {
   return enr.symbol || "a new token";
-}
-
-function tierLabel(tier: number): string {
-  const tiers = config.trading.takeProfitTiers;
-  const t = tiers[tier - 1];
-  if (!t) return `TP${tier}`;
-  return `+${t.gainPct}%`;
 }
 
 function reasonLabel(reason: string): string {
@@ -73,10 +67,10 @@ export async function formatGroupEvent(
       const enr = await enrich(e.positionId);
       if (!enr.found) return null;
       const sym = symbolOrFallback(enr);
-      const label = tierLabel(e.tier);
+      const gainPct = pnlPct(e.profitEth, e.proceedsEth - e.profitEth);
       const authorSuffix = enr.authorHandle ? ` · called by ${enr.authorHandle}` : "";
       const text = redactText(
-        `💰 TP hit (${label}): $${sym}\n` +
+        `💰 TP${e.tier} hit · +${gainPct}%: $${sym}\n` +
         `Locked ${trimEth(e.profitEth)} ${enr.unit} profit (still running)${authorSuffix}`,
       );
       return { text, gif: "tp" };
@@ -119,8 +113,9 @@ export async function formatGroupEvent(
 
     case "payout:sent": {
       if (e.path !== "escrow") return null;
+      const unit = nativeSymbol(e.chain);
       const text = redactText(
-        `✅ ${e.handle} claimed their ${trimEth(e.amountEth)} ETH author cut`,
+        `✅ ${e.handle} claimed their ${trimEth(e.amountEth)} ${unit} author cut`,
       );
       return { text, gif: "author-claim" };
     }
