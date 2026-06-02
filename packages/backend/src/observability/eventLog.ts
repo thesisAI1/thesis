@@ -1,14 +1,9 @@
 import { config } from "../config.js";
+import type { EventLogEntry } from "@thesis/shared";
+
+export type { EventLogEntry };
 
 // ── Types ───────────────────────────────────────────────────────────────────
-
-export interface EventLogEntry {
-  at: string;
-  level: "info" | "warn" | "error";
-  area: string;
-  type: string;
-  msg: string;
-}
 
 export interface EventLog {
   record(entry: EventLogEntry): void;
@@ -43,7 +38,7 @@ export class MemoryEventLog implements EventLog {
 
 let instance: MemoryEventLog | undefined;
 
-export function getEventLog(): MemoryEventLog {
+export function getEventLog(): EventLog {
   if (!instance) {
     instance = new MemoryEventLog();
   }

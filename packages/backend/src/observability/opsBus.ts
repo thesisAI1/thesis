@@ -2,6 +2,14 @@ import { EventEmitter } from "node:events";
 
 // ── Discriminated union of all ops events ──────────────────────────────────
 
+/**
+ * All variants share `at` — an ISO-8601 timestamp string (e.g. new Date().toISOString()).
+ *
+ * Numeric `*Eth` fields represent native-unit amounts (ETH on Base, SOL on Solana).
+ * They are expected to be finite. Where the field represents a payment or proceeds
+ * (amountEth, proceedsEth, toAuthorEth, totalProfitEth) it must also be non-negative.
+ * PnL fields (profitEth, netPnlEth) may be negative (loss).
+ */
 export type OpsEvent =
   | { type: "trade:buy"; at: string; positionId: string; handle: string; amountEth: number; contract: string }
   | { type: "trade:sell"; at: string; positionId: string; tier: number; proceedsEth: number; profitEth: number }
