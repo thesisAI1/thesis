@@ -210,3 +210,26 @@ test("GET /api/events?n=2 — returns at most 2 entries", async () => {
   assert.ok(Array.isArray(events), "body.events must be an array");
   assert.ok(events.length <= 2, `expected ≤2 entries with ?n=2, got ${events.length}`);
 });
+
+test("GET /api/events — wallet address in msg is redacted (security guard)", async () => {
+  const fullAddr = "0xabcdefabcdefabcdefabcdefabcdefabcdefabcd";
+  getEventLog().record({
+    at: new Date(6_000_000).toISOString(),
+    level: "error",
+    area: "payout",
+    type: "payout:failed",
+    msg: `lottery send failed: ${fullAddr}`,
+  });
+
+  const { res, result } = captureRes();
+  await handle(getReq("/api/events"), res);
+
+  const { status, body } = result();
+  assert.equal(status, 200, "expected 200");
+
+  const responseText = JSON.stringify(body);
+  assert.ok(
+    !responseText.includes(fullAddr),
+    `full 40-hex address must not appear in response — redaction failed`,
+  );
+});

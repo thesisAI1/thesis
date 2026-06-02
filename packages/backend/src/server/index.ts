@@ -65,6 +65,8 @@ import { getStore } from "../store/index.js";
 import { log, logEvent } from "../util/log.js";
 import { publishOps } from "../observability/opsBus.js";
 import { payoutSentText } from "../util/replies.js";
+import { getEventLog } from "../observability/eventLog.js";
+import { redactText } from "../adapters/telegram/redact.js";
 
 /** Lightweight ETH/USD rate cache. CoinGecko's free public endpoint is
  *  rate-limited at ~30 calls/min — we hit it at most once every 5 minutes so
@@ -256,6 +258,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
   if (path === "/api/status") return apiStatus(res);
   if (path === "/api/dashboard") return apiDashboard(res);
   if (path === "/api/leaderboard") return apiLeaderboard(res);
+  if (path === "/api/events") return apiEvents(req, res);
   if (path === "/api/stream") return apiStream(req, res);
   if (path === "/admin/test-swap" && req.method === "POST") return adminTestSwap(req, res);
   if (path === "/admin/settle-stuck-payout" && req.method === "POST") return adminSettleStuckPayout(req, res);
@@ -1538,6 +1541,36 @@ async function apiLeaderboard(res: ServerResponse): Promise<void> {
     totalAuthors: ranked.length,
     leaderboard: ranked,
   });
+}
+
+const EVENTS_DEFAULT_N = 100;
+const EVENTS_MAX_N = 500;
+
+/**
+ * GET /api/events — read-only structured event log.
+ *
+ * Query params:
+ *   ?area=<string>   filter to one area
+ *   ?level=<string>  filter to one level (info|warn|error)
+ *   ?n=<number>      cap result count (default 100, max 500)
+ *
+ * Response: { events: EventLogEntry[] } — newest-first, with msg redacted
+ * (wallet addresses and bot tokens stripped) so no sensitive data reaches
+ * the public website.
+ */
+function apiEvents(req: IncomingMessage, res: ServerResponse): void {
+  const url = new URL(req.url ?? "/", config.server.publicBaseUrl);
+  const area = url.searchParams.get("area") ?? undefined;
+  const level = url.searchParams.get("level") ?? undefined;
+  const rawN = Number(url.searchParams.get("n") ?? EVENTS_DEFAULT_N);
+  const n = Number.isFinite(rawN) && rawN > 0 ? Math.min(Math.floor(rawN), EVENTS_MAX_N) : EVENTS_DEFAULT_N;
+
+  let entries = getEventLog().recent(n);
+  if (area !== undefined) entries = entries.filter((e) => e.area === area);
+  if (level !== undefined) entries = entries.filter((e) => e.level === level);
+
+  const events = entries.map((e) => ({ ...e, msg: redactText(e.msg) }));
+  sendJson(res, 200, { events });
 }
 
 /** Cap concurrent SSE connections so an attacker can't exhaust file
