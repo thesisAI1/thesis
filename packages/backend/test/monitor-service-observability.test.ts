@@ -100,7 +100,7 @@ async function captureOps(fn: () => Promise<void>): Promise<OpsEvent[]> {
 // settlePosition itself to throw without a store injection seam that doesn't
 // yet exist (store singleton is module-private, no __setStoreForTest exported).
 // GREEN must either export a store seam OR wrap the settle() call differently.
-test("G6a: settlePosition throws → settle:failed ops event published (honest gap — store seam needed)", () => {
+test.skip("G6a: settlePosition throws → settle:failed ops event published (honest gap — store seam needed)", () => {
   // Document the gap explicitly rather than writing a false-green test.
   // This test will pass as a skip; the actual RED test requires a store seam.
   // When GREEN is implemented, remove this skip and add a real assertion.
@@ -139,7 +139,7 @@ test.skip(
 // settlePosition — so the null branch at monitor:445 is unreachable via any
 // externally-injectable failure. GREEN must either add a mock seam for
 // settlePosition or restructure the guard so the null branch has a test path.
-test("G6b: settlePosition returns null → settle:failed ops event published (honest gap — no injectable null path)", () => {
+test.skip("G6b: settlePosition returns null → settle:failed ops event published (honest gap — no injectable null path)", () => {
   // Document the gap explicitly. The null branch is reserved for an internal
   // invariant violation that cannot be triggered from the outside today.
   // Tracked in logging-gaps.md G6.

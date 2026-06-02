@@ -40,7 +40,7 @@ const priceFetchFailStreak = new Map<Chain, number>();
 /** Position ids for which an INCOMPLETE settle:failed ops event has already
  *  been emitted this process lifetime. Guards against flooding ops on every
  *  monitor tick while a payout leg is stuck. */
-const incompleteEmitted = new Set<string>();
+const settleFailedEmitted = new Set<string>();
 
 /** Check every open position once; act on take-profit tiers and the stop-loss.
  *  Serialized via withLock so two ticks (or a tick racing an author/admin
@@ -441,17 +441,25 @@ async function settle(
       silentAuthorTweet: !opts.resume,
     });
   } catch (err) {
-    log.error(
+    const threwMsg =
       `monitor: settlement THREW for ${pos.id} (realisedPnlEth=${pos.realisedPnlEth}) — ` +
-        `position is CLOSED but UNSETTLED; will retry next tick: ${String(err)}`,
-    );
+        `position is CLOSED but UNSETTLED; will retry next tick: ${String(err)}`;
+    log.error(threwMsg);
+    if (!settleFailedEmitted.has(pos.id)) {
+      settleFailedEmitted.add(pos.id);
+      logEvent({ level: "error", area: "monitor", type: "settle:threw", msg: threwMsg, ops: { type: "settle:failed", at: new Date().toISOString(), positionId: pos.id, reason: String(err) } });
+    }
     return null;
   }
   if (!result) {
-    log.error(
+    const nullMsg =
       `monitor: settlement returned null for ${pos.id} despite realisedPnlEth=` +
-        `${pos.realisedPnlEth} — CLOSED but UNSETTLED`,
-    );
+        `${pos.realisedPnlEth} — CLOSED but UNSETTLED`;
+    log.error(nullMsg);
+    if (!settleFailedEmitted.has(pos.id)) {
+      settleFailedEmitted.add(pos.id);
+      logEvent({ level: "error", area: "monitor", type: "settle:threw", msg: nullMsg, ops: { type: "settle:failed", at: new Date().toISOString(), positionId: pos.id, reason: "settlePosition returned null despite realisedPnlEth>0" } });
+    }
     return null;
   }
 
@@ -472,8 +480,8 @@ async function settle(
         `(author=${!!p.authorDone} team=${!!p.teamDone} buyback=${!!p.buybackDone}) — ` +
         `will retry next tick`;
     log.error(incompleteMsg);
-    if (!incompleteEmitted.has(pos.id)) {
-      incompleteEmitted.add(pos.id);
+    if (!settleFailedEmitted.has(pos.id)) {
+      settleFailedEmitted.add(pos.id);
       publishOps({
         type: "settle:failed",
         at: new Date().toISOString(),
@@ -637,9 +645,9 @@ async function reply(
         );
         log.info(`x: posted fallback payout request — reply ${requestTweetId}`);
       } catch (err) {
-        log.error(
-          `x: fallback payout request also failed for ${pos.id}: ${String(err)}`,
-        );
+        const fallbackMsg = `x: fallback payout request also failed for ${pos.id}: ${String(err)}`;
+        log.error(fallbackMsg);
+        logEvent({ level: "error", area: "monitor", type: "fallback-payout-request:failed", msg: fallbackMsg, ops: { type: "error", at: new Date().toISOString(), area: "monitor", msg: `fallback payout-request failed for ${pos.id}` } });
       }
     }
 
