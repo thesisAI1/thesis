@@ -404,6 +404,7 @@ async function closeOutWithKind(
   pos: Position,
   exitPrice: number,
   kind: "sl" | "manual" | "aging",
+  opts: { silent?: boolean } = {},
 ): Promise<void> {
   const cost = pos.order.amountInEth * pos.remainingFraction;
 
@@ -465,7 +466,12 @@ async function closeOutWithKind(
   // Settle first so we know how the author was paid (direct vs escrow vs
   // failed) — this gets folded into the close-announcement tweet so the whole
   // story lands as ONE reply.
-  const settled = await settle(pos);
+  // When silent:true (relaunch-flatten), suppress the author payout-request
+  // tweet — funds still flow via the same split pipeline, but no X post is made.
+  const settled = await settle(pos, { silentAuthorTweet: opts.silent });
+  // Silent mode skips the close-announcement X post entirely (no X spam on
+  // operator-driven bulk close). Funds were already distributed above.
+  if (opts.silent) return;
   // Aging closes carry the age + threshold so the reply text can explain
   // exactly why the position was cut (not "stop-loss triggered" — that
   // would misrepresent it. The trailing -30% didn't fire; the time-tightened
@@ -498,7 +504,11 @@ async function closeOutWithKind(
  *
  * On revert, throws — the caller will post a "try again" reply to the author.
  */
-export async function closeByAuthor(pos: Position, currentPrice: number): Promise<void> {
+export async function closeByAuthor(
+  pos: Position,
+  currentPrice: number,
+  opts: { silent?: boolean } = {},
+): Promise<void> {
   // Serialized via the same lock as the monitor tick, so a manual close and a
   // TP/SL tick can never both settle this position. The re-fetch + status
   // check inside the lock is the idempotency guard: whichever path wins the
@@ -510,7 +520,7 @@ export async function closeByAuthor(pos: Position, currentPrice: number): Promis
       log.info(`monitor: closeByAuthor skipped — ${pos.id} no longer open`);
       return;
     }
-    await closeOutWithKind(fresh, currentPrice, "manual");
+    await closeOutWithKind(fresh, currentPrice, "manual", opts);
   });
 }
 
@@ -532,7 +542,7 @@ interface SettleResult {
  *  settlement runs) or when settlement could not be completed this tick. */
 async function settle(
   pos: Position,
-  opts: { resume?: boolean } = {},
+  opts: { resume?: boolean; silentAuthorTweet?: boolean } = {},
 ): Promise<SettleResult | null> {
   // Terminal guard — never run the payout legs for an already-settled position.
   if (pos.settledAt) return null;
@@ -550,8 +560,10 @@ async function settle(
     // On a resume the close was already announced; let the escrow leg post its
     // own payout-request (silentAuthorTweet:false) so an author whose leg only
     // succeeds now still has a tweet to claim against.
+    // When silent:true (relaunch-flatten), always suppress the author payout
+    // tweet regardless of resume state — the caller handles communications.
     result = await settlePosition(pos, pos.realisedPnlEth, {
-      silentAuthorTweet: !opts.resume,
+      silentAuthorTweet: opts.silentAuthorTweet === true ? true : !opts.resume,
     });
   } catch (err) {
     const threwMsg =
