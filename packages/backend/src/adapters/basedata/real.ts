@@ -183,8 +183,8 @@ export class RealBaseData implements BaseDataAdapter {
               stillMissing.delete(addr);
             }
           }
-        } catch {
-          /* one chunk failing shouldn't poison the whole batch */
+        } catch (err) {
+          log.warn(`basedata: snapshot chunk (size ${chunkSize}) fetch/parse failed — those tokens unpriced this pass: ${String(err)}`);
         }
       }),
     );

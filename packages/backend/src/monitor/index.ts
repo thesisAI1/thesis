@@ -26,7 +26,7 @@ import { recordActivity } from "../activity.js";
 import { publish } from "../events.js";
 import { settlePosition } from "../pipeline/index.js";
 import { publishOps } from "../observability/opsBus.js";
-import { tokensForCost } from "../domain/sizing.js";
+import { tokensForCost, tokensRemaining } from "../domain/sizing.js";
 import { getStore } from "../store/index.js";
 import { withLock } from "../store/lock.js";
 import { log, logEvent } from "../util/log.js";
@@ -37,10 +37,21 @@ import { exitReplyText, payoutRequestText, payoutSentText } from "../util/replie
  *  (warn → error after a few in a row). Reset to 0 on a successful fetch. */
 const priceFetchFailStreak = new Map<Chain, number>();
 
+/** Consecutive ticks for which a specific position could not be priced by
+ *  either DexScreener OR the on-chain fallback. Used to escalate from warn
+ *  (single miss) → error (streak ≥ 3, real SL-starvation risk). Reset when
+ *  the position is successfully priced. Pruned when positions close. */
+const positionUnpricedStreak = new Map<string, number>();
+
 /** Position ids for which an INCOMPLETE settle:failed ops event has already
  *  been emitted this process lifetime. Guards against flooding ops on every
  *  monitor tick while a payout leg is stuck. */
 const settleFailedEmitted = new Set<string>();
+
+/** Position ids for which the price-blind:streak error-level ops event has
+ *  already been emitted. Guards against re-flooding on every tick after
+ *  streak≥3. Cleared when the position gets a price (recovered) or is pruned. */
+const priceBlindEmitted = new Set<string>();
 
 /** Check every open position once; act on take-profit tiers and the stop-loss.
  *  Serialized via withLock so two ticks (or a tick racing an author/admin
@@ -111,13 +122,103 @@ async function monitorTickInner(): Promise<void> {
     }),
   );
 
+  // ── On-chain fallback pre-pass ────────────────────────────────────────────
+  // For any position still unpriced after the DexScreener batch, attempt an
+  // independent on-chain EXIT quote via quoteSell (KyberSwap route on Base,
+  // Jupiter on Solana). This goes directly to live LP state with no DexScreener
+  // involvement, so it is genuinely independent — useful precisely during a
+  // DexScreener outage. The unit price (proceedsEth / remainingTokens) is the
+  // real sellable value for the REMAINING bag; it is conservative for SL
+  // evaluation because a full-remaining-amount quote includes price impact.
+  // Each call is isolated so one failure can't cancel the others.
+  // If any positions are rescued, emit ONE summary event (with per-position
+  // prices) so a fallback-driven SL close is fully traceable.
+  const unpricedAfterDex = open.filter(
+    (p) => (prices.get(p.order.contractAddress.toLowerCase()) ?? 0) <= 0,
+  );
+  if (unpricedAfterDex.length > 0) {
+    const rescued: Array<{ id: string; px: number }> = [];
+    await Promise.all(
+      unpricedAfterDex.map(async (pos) => {
+        try {
+          // Derive the remaining token amount the same way the sell path does:
+          // tokensRemaining = tokensForCost(pos, amountInEth * remainingFraction).
+          // entryTokens is nullable — tokensRemaining returns 0 in that case
+          // (guarded below). A zero result means we can't form a meaningful
+          // quote, so skip rather than asking for a 0-token sell.
+          const remainingTokens = tokensRemaining(pos);
+          if (remainingTokens <= 0) return;
+
+          const { proceedsEth } = await createChainAdapter(pos.order.chain).quoteSell(
+            pos.order.contractAddress,
+            remainingTokens,
+          );
+          const px = proceedsEth > 0 ? proceedsEth / remainingTokens : 0;
+          if (Number.isFinite(px) && px > 0) {
+            prices.set(pos.order.contractAddress.toLowerCase(), px);
+            rescued.push({ id: pos.id, px });
+          }
+        } catch (err) {
+          log.warn(
+            `monitor: on-chain fallback (quoteSell) failed for ${pos.id}: ${String(err)}`,
+          );
+        }
+      }),
+    );
+    if (rescued.length > 0) {
+      const detail = rescued.map(({ id, px }) => `${id}@${px.toExponential(4)}`).join(", ");
+      const msg = `monitor: ${rescued.length} position(s) priced via independent on-chain quoteSell fallback (DexScreener silent): [${detail}]`;
+      log.warn(msg);
+      logEvent({ level: "warn", area: "monitor", type: "price-fallback:used", msg });
+    }
+  }
+
+  // ── Per-position TP/SL loop ───────────────────────────────────────────────
   for (const pos of open) {
     const price = prices.get(pos.order.contractAddress.toLowerCase());
     if (price === undefined || price <= 0) {
-      log.warn(`monitor: no live price for ${pos.id} — will retry next tick`);
+      // Both DexScreener and on-chain quoteSell fallback returned nothing this tick.
+      const streak = (positionUnpricedStreak.get(pos.id) ?? 0) + 1;
+      positionUnpricedStreak.set(pos.id, streak);
+      const msg =
+        `monitor: no live price for ${pos.id} from DexScreener OR on-chain ` +
+        `(${streak} consecutive ticks) — TP/SL not evaluated; will retry next tick`;
+      if (streak >= 3) {
+        log.error(msg);
+        // Emit the error-level ops event only ONCE per outage window (first time
+        // streak≥3). Mirrors settleFailedEmitted flood-guard. Subsequent ticks
+        // still log.error to the console but do NOT re-publish to opsBus/Telegram.
+        // Cleared on recovery so a future outage re-alerts.
+        if (!priceBlindEmitted.has(pos.id)) {
+          priceBlindEmitted.add(pos.id);
+          logEvent({
+            level: "error",
+            area: "monitor",
+            type: "price-blind:streak",
+            msg,
+            ops: { type: "error", at: new Date().toISOString(), area: "monitor", msg },
+          });
+        }
+      } else {
+        log.warn(msg);
+        logEvent({ level: "warn", area: "monitor", type: "price-blind:tick", msg });
+      }
       continue;
     }
+    // Priced — reset streak and clear the dedup guard so a future outage re-alerts.
+    positionUnpricedStreak.set(pos.id, 0);
+    priceBlindEmitted.delete(pos.id);
     await processPosition(pos, price);
+  }
+
+  // Prune streak entries for positions that are no longer open (closed/settled)
+  // to prevent unbounded map/set growth over time.
+  const openIds = new Set(open.map((p) => p.id));
+  for (const id of positionUnpricedStreak.keys()) {
+    if (!openIds.has(id)) {
+      positionUnpricedStreak.delete(id);
+      priceBlindEmitted.delete(id);
+    }
   }
 }
 
