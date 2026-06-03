@@ -102,6 +102,20 @@ export interface ClosedPositionView {
   exitTxHash: string;
 }
 
+/** A single chain's native wallet balance + USD breakdown. Native is the
+ *  chain's own coin (ETH on Base, SOL on Solana) — never summed across chains. */
+export interface ChainBalance {
+  chain: "base" | "solana";
+  /** Native wallet balance — ETH on Base, SOL on Solana. */
+  native: number;
+  /** Wallet address on this chain. Empty when no wallet is configured. */
+  address: string;
+  /** Wallet-only USD value. 0 until the chain's USD rate is known. */
+  walletUsd: number;
+  /** Wallet + this chain's open positions, in USD. */
+  totalUsd: number;
+}
+
 /** The portfolio block — wallet + open-positions value, USD references, PnL. */
 export interface PortfolioSummary {
   walletAddress: string;
@@ -119,6 +133,10 @@ export interface PortfolioSummary {
   winCount: number;
   /** 0-1. */
   winRate: number;
+  /** Per-chain native wallet balances + USD (Base ETH, Solana SOL). */
+  chainBalances: ChainBalance[];
+  /** Wallet + open positions across both chains, in USD. */
+  combinedTotalUsd: number;
 }
 
 /** Review tallies. */

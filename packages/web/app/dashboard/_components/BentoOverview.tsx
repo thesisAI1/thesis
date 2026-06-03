@@ -19,6 +19,7 @@ import type {
   PortfolioSummary,
   ReviewsSummary,
 } from "@/lib/api";
+import { ChainBalancesCard } from "./ChainBalancesCard";
 import { EquityChart } from "./EquityChart";
 import {
   CheckIcon,
@@ -62,6 +63,11 @@ export function BentoOverview({
     <div className={styles.bento}>
       {/* big value chart (spans 2x2) */}
       <EquityChart portfolio={portfolio} closedPositions={closedPositions} />
+
+      {/* per-chain wallet balances (Base ETH / Solana SOL) + combined USD total.
+          Placed right after the chart so the span-2 card fills the top-right two
+          columns cleanly (no auto-flow gap). */}
+      <ChainBalancesCard portfolio={portfolio} />
 
       {/* hero — portfolio value */}
       <div className={`${styles.kpi} ${styles.kpiHero}`}>

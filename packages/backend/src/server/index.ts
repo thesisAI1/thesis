@@ -69,34 +69,39 @@ import { getEventLog } from "../observability/eventLog.js";
 import type { EventLogEntry } from "../observability/eventLog.js";
 import { redactText } from "../adapters/telegram/redact.js";
 
-/** Lightweight ETH/USD rate cache. CoinGecko's free public endpoint is
- *  rate-limited at ~30 calls/min — we hit it at most once every 5 minutes so
- *  even at sustained traffic we stay well inside the budget. Cache survives
- *  for the process lifetime; on fetch failure the previous value is reused so
- *  a transient outage doesn't make the dashboard regress to "no USD figure". */
-const ETH_USD_TTL_MS = 5 * 60 * 1000;
-let _ethUsdRate = 0;
-let _ethUsdFetchedAt = 0;
-async function getEthUsdRate(): Promise<number> {
-  if (_ethUsdRate > 0 && Date.now() - _ethUsdFetchedAt < ETH_USD_TTL_MS) {
-    return _ethUsdRate;
+/** Lightweight native-coin USD rate cache (ETH for Base, SOL for Solana).
+ *  CoinGecko's free public endpoint is rate-limited at ~30 calls/min — we hit
+ *  it at most once per coin every 5 minutes so even at sustained traffic we
+ *  stay well inside the budget. Cache survives for the process lifetime; on
+ *  fetch failure the previous value is reused so a transient outage doesn't
+ *  make the dashboard regress to "no USD figure". */
+const USD_RATE_TTL_MS = 5 * 60 * 1000;
+const _usdRates: Record<string, { rate: number; fetchedAt: number }> = {};
+/** USD spot for a CoinGecko coin id ("ethereum" | "solana"), 5-min cached per
+ *  id. Returns 0 until the first successful fetch; reuses the stale value on a
+ *  failed refresh. */
+async function getUsdRate(coingeckoId: string): Promise<number> {
+  const cached = _usdRates[coingeckoId];
+  if (cached && cached.rate > 0 && Date.now() - cached.fetchedAt < USD_RATE_TTL_MS) {
+    return cached.rate;
   }
   try {
     const res = await fetch(
-      "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd",
+      `https://api.coingecko.com/api/v3/simple/price?ids=${coingeckoId}&vs_currencies=usd`,
     );
     if (!res.ok) throw new Error(`CoinGecko ${res.status}`);
-    const json = (await res.json()) as { ethereum?: { usd?: number } };
-    const usd = Number(json?.ethereum?.usd ?? 0);
-    if (usd > 0) {
-      _ethUsdRate = usd;
-      _ethUsdFetchedAt = Date.now();
-    }
+    const json = (await res.json()) as Record<string, { usd?: number }>;
+    const usd = Number(json?.[coingeckoId]?.usd ?? 0);
+    if (usd > 0) _usdRates[coingeckoId] = { rate: usd, fetchedAt: Date.now() };
   } catch (err) {
-    log.warn(`server: ETH/USD fetch failed (${String(err)}) — using stale rate ${_ethUsdRate}`);
+    log.warn(
+      `server: ${coingeckoId}/USD fetch failed (${String(err)}) — using stale rate ${_usdRates[coingeckoId]?.rate ?? 0}`,
+    );
   }
-  return _ethUsdRate;
+  return _usdRates[coingeckoId]?.rate ?? 0;
 }
+const getEthUsdRate = (): Promise<number> => getUsdRate("ethereum");
+const getSolUsdRate = (): Promise<number> => getUsdRate("solana");
 
 /** Process-lifetime cache of token tickers. Symbols are immutable for a given
  *  contract, so once resolved the cache value stands. We deliberately do NOT
@@ -1189,12 +1194,29 @@ async function buildDashboardPayload(): Promise<object> {
     /* leave blank */
   }
 
+  // Solana wallet — independent native balance (SOL). A Base-only deployment
+  // may have no Solana key configured; treat any failure as "0 SOL, no addr"
+  // so the dashboard still renders (the Solana row just reads zero).
+  let solBalance = 0;
+  let solWalletAddress = "";
+  try {
+    const solChain = createChainAdapter("solana");
+    solBalance = await solChain.getWalletBalanceEth();
+    solWalletAddress = solChain.getWalletAddress();
+  } catch {
+    /* no Solana wallet on this deployment — leave 0 / blank */
+  }
+
   const openPositions: OpenPositionView[] = [];
   // Running total of the on-chain ETH value of every open position's remaining
   // tokens, valued at the live price. Combined with the wallet ETH balance
   // this is the real "portfolio under management" figure (vs the misleadingly
   // small "wallet only" number we used to show).
   let openPositionsValueEth = 0;
+  // Native open-position value split by chain — Base value is ETH-denominated,
+  // Solana value is SOL-denominated, so the two can't be summed natively (only
+  // converted to USD per chain). Drives the per-chain wallet+positions total.
+  const openValueByChain = new Map<Chain, number>();
   for (const p of open) {
     const cached = livePrices.get(p.order.contractAddress.toLowerCase());
     const currentPriceEth = cached && cached > 0 ? cached : p.entryPriceEth;
@@ -1206,6 +1228,10 @@ async function buildDashboardPayload(): Promise<object> {
     const liveValueEth = remainingTokens * currentPriceEth;
     const unrealizedPnlEth = liveValueEth - remainingCost;
     openPositionsValueEth += liveValueEth;
+    openValueByChain.set(
+      p.order.chain,
+      (openValueByChain.get(p.order.chain) ?? 0) + liveValueEth,
+    );
     // Current MC: prefer the LIVE MC read straight from the provider. Only when
     // it's unavailable do we fall back to entryMC × (current price / entry
     // price) — that ratio uses the slippage-inflated entry FILL price (entry MC
@@ -1322,8 +1348,20 @@ async function buildDashboardPayload(): Promise<object> {
   // from a 5-min cache (CoinGecko); on cache miss this kicks off a fetch
   // and may return 0 on the very first request, which the frontend treats
   // as "show only the ETH figure" and tries again on next refresh.
-  const ethUsdPrice = await getEthUsdRate();
+  const [ethUsdPrice, solUsdPrice] = await Promise.all([getEthUsdRate(), getSolUsdRate()]);
   const totalPortfolioValueEth = balanceEth + openPositionsValueEth;
+
+  // Per-chain wallet balances + USD breakdown (Base ETH, Solana SOL). Native
+  // amounts are in each chain's own coin and are never summed — the only
+  // cross-chain aggregate is `combinedTotalUsd`, computed as (wallet + open
+  // positions) per chain in USD, then added.
+  const baseOpenValueEth = openValueByChain.get("base") ?? 0;
+  const solOpenValueSol = openValueByChain.get("solana") ?? 0;
+  const baseWalletUsd = ethUsdPrice > 0 ? balanceEth * ethUsdPrice : 0;
+  const baseTotalUsd = ethUsdPrice > 0 ? (balanceEth + baseOpenValueEth) * ethUsdPrice : 0;
+  const solWalletUsd = solUsdPrice > 0 ? solBalance * solUsdPrice : 0;
+  const solTotalUsd = solUsdPrice > 0 ? (solBalance + solOpenValueSol) * solUsdPrice : 0;
+  const combinedTotalUsd = baseTotalUsd + solTotalUsd;
 
   // Opportunistic snapshot of total portfolio value — drives the hero
   // sparkline. Internal guard ensures we only persist at most one snapshot
@@ -1395,6 +1433,27 @@ async function buildDashboardPayload(): Promise<object> {
       closedCount: closed.length,
       winCount: wins,
       winRate: closed.length > 0 ? wins / closed.length : 0,
+      /** Per-chain native wallet balances + USD. Native amounts are in each
+       *  chain's coin (ETH on Base, SOL on Solana) and are never summed —
+       *  `combinedTotalUsd` is the only cross-chain aggregate. */
+      chainBalances: [
+        {
+          chain: "base" as const,
+          native: balanceEth,
+          address: walletAddress,
+          walletUsd: baseWalletUsd,
+          totalUsd: baseTotalUsd,
+        },
+        {
+          chain: "solana" as const,
+          native: solBalance,
+          address: solWalletAddress,
+          walletUsd: solWalletUsd,
+          totalUsd: solTotalUsd,
+        },
+      ],
+      /** Wallet + open positions across BOTH chains, in USD. */
+      combinedTotalUsd,
     },
     reviews: {
       total: reviews.length,
