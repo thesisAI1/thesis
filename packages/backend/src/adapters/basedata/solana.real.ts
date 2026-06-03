@@ -74,6 +74,42 @@ export class RealSolanaData implements BaseDataAdapter {
     return out;
   }
 
+  /** Live market cap (USD) straight from DexScreener's own `marketCap` (fdv
+   *  fallback), batched 30/call — the SAME number the public page shows. Mirrors
+   *  getPricesEth's pool pick (Solana pairs, deepest liquidity). */
+  async getLiveMarketCapsUsd(mints: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (mints.length === 0) return out;
+    const chunks: string[][] = [];
+    for (let i = 0; i < mints.length; i += 30) chunks.push(mints.slice(i, i + 30));
+    await Promise.all(
+      chunks.map(async (chunk) => {
+        try {
+          const res = await fetch(`${DEXSCREENER}/${chunk.join(",")}`);
+          if (!res.ok) return;
+          const json = (await res.json()) as { pairs?: DexPair[] };
+          const byMint = new Map<string, DexPair[]>();
+          for (const p of json.pairs ?? []) {
+            if (p.chainId !== "solana") continue;
+            const addr = p.baseToken?.address?.toLowerCase();
+            if (!addr) continue;
+            const list = byMint.get(addr) ?? [];
+            list.push(p);
+            byMint.set(addr, list);
+          }
+          for (const [addr, pairs] of byMint) {
+            const pool = pairs.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
+            const mc = pool?.marketCap ?? pool?.fdv ?? 0;
+            if (mc > 0) out.set(addr, mc);
+          }
+        } catch {
+          /* one chunk failing shouldn't poison the whole batch */
+        }
+      }),
+    );
+    return out;
+  }
+
   async getTokenSymbol(mint: string): Promise<string> {
     try {
       const res = await fetch(`${DEXSCREENER}/${mint}`);

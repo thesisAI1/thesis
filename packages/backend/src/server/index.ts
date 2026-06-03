@@ -1142,14 +1142,30 @@ async function buildDashboardPayload(): Promise<object> {
     addrsByChain.set(p.order.chain, list);
   }
   const livePrices = new Map<string, number>();
+  // Live market cap (USD) read DIRECTLY from the provider's own feed — the same
+  // `marketCap` DexScreener shows — so an open position's "live MC" matches the
+  // public page EXACTLY (no token-supply assumption, no entry-baseline scaling).
+  // Only the real DexScreener-backed adapters implement getLiveMarketCapsUsd;
+  // for the rest (mock/Birdeye) the map stays empty and we fall back to scaling.
+  const liveMcaps = new Map<string, number>();
   await Promise.all(
     [...addrsByChain.entries()].map(async ([c, addrs]) => {
+      const adapter = createBaseDataAdapter(c);
+      const uniq = Array.from(new Set(addrs));
       try {
-        const got = await createBaseDataAdapter(c).getPricesEth(Array.from(new Set(addrs)));
+        const got = await adapter.getPricesEth(uniq);
         for (const [addr, price] of got) livePrices.set(addr, price);
       } catch (err) {
         const msg = `dashboard: ${c} batch price fetch failed — entry-price fallback for its positions: ${String(err)}`;
         logEvent({ level: "warn", area: "server", type: "dashboard-price:failed", msg });
+      }
+      try {
+        const caps =
+          (await adapter.getLiveMarketCapsUsd?.(uniq)) ?? new Map<string, number>();
+        for (const [addr, mc] of caps) liveMcaps.set(addr, mc);
+      } catch (err) {
+        const msg = `dashboard: ${c} batch live-MC fetch failed — scaled-MC fallback for its positions: ${String(err)}`;
+        logEvent({ level: "warn", area: "server", type: "dashboard-mc:failed", msg });
       }
     }),
   );
@@ -1184,22 +1200,29 @@ async function buildDashboardPayload(): Promise<object> {
     const liveValueEth = remainingTokens * currentPriceEth;
     const unrealizedPnlEth = liveValueEth - remainingCost;
     openPositionsValueEth += liveValueEth;
-    // Current MC = entry MC × (current price / entry-MID price). Token supply is
-    // constant for Clanker/Bankr deploys, so the price ratio is a clean proxy —
-    // BUT the baseline must be the market-MID price from the same snapshot as the
-    // cap, NOT entryPriceEth (the real fill price, inflated by slippage/tax).
-    // Dividing the market-mid cap by the fill price understated live MC for every
-    // position bought into a thin/taxed pool. Fall back to entryPriceEth only for
-    // legacy rows opened before entryMarketPriceEth was recorded.
+    // Live MC: prefer the value DexScreener reports directly (liveMcaps) so the
+    // dashboard matches the public page EXACTLY — same number, no supply
+    // assumption, and it self-corrects legacy positions too. When the feed can't
+    // value a token (or the adapter doesn't supply live MC) fall back to scaling:
+    // entry MC × (current price / entry-MID price). Token supply is constant for
+    // Clanker/Bankr deploys, so the price ratio is a clean proxy — BUT the
+    // baseline must be the market-MID price from the same snapshot as the cap,
+    // NOT entryPriceEth (the real fill price, inflated by slippage/tax). Dividing
+    // the market-mid cap by the fill price understated live MC for every position
+    // bought into a thin/taxed pool. Fall back to entryPriceEth only for legacy
+    // rows opened before entryMarketPriceEth was recorded.
     const marketCapAtEntryUsd = p.marketCapAtEntryUsd ?? null;
     const entryPriceBaselineEth =
       p.entryMarketPriceEth && p.entryMarketPriceEth > 0
         ? p.entryMarketPriceEth
         : p.entryPriceEth;
+    const liveMcUsd = liveMcaps.get(p.order.contractAddress.toLowerCase());
     const marketCapNowUsd =
-      marketCapAtEntryUsd !== null && entryPriceBaselineEth > 0
-        ? marketCapAtEntryUsd * (currentPriceEth / entryPriceBaselineEth)
-        : null;
+      liveMcUsd && liveMcUsd > 0
+        ? liveMcUsd
+        : marketCapAtEntryUsd !== null && entryPriceBaselineEth > 0
+          ? marketCapAtEntryUsd * (currentPriceEth / entryPriceBaselineEth)
+          : null;
     openPositions.push({
       id: p.id,
       contractAddress: p.order.contractAddress,

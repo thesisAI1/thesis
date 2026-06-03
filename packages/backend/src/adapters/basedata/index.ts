@@ -53,6 +53,19 @@ export interface BaseDataAdapter {
   getPricesEth(addresses: string[]): Promise<Map<string, number>>;
   /** Token ticker (e.g. "DEGEN"). Returns empty string when unknown. */
   getTokenSymbol(address: string): Promise<string>;
+  /**
+   * Batched LIVE market cap (USD) per token, read straight from the provider's
+   * own feed — the SAME `marketCap` the public DexScreener page shows. The
+   * dashboard prefers this so an open position's "live MC" matches what an
+   * operator sees on DexScreener EXACTLY, with no token-supply assumption and no
+   * entry-baseline scaling. One provider call per 30-address chunk (keyed by
+   * lowercased address); tokens the feed can't value are simply absent, and the
+   * dashboard falls back to the scaled estimate for those.
+   *
+   * Optional capability: only the real DexScreener-backed adapters implement it.
+   * Mock/Birdeye omit it, and callers degrade to the scaled formula.
+   */
+  getLiveMarketCapsUsd?(addresses: string[]): Promise<Map<string, number>>;
 }
 
 let _adapterLogged = false;

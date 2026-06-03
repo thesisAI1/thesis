@@ -138,6 +138,46 @@ export class RealBaseData implements BaseDataAdapter {
     return out;
   }
 
+  /** Live market cap (USD) straight from DexScreener's own `marketCap` (fdv
+   *  fallback), batched 30/call — the SAME number the public page shows, so the
+   *  dashboard's live MC matches it exactly. Mirrors getPricesEth's pool pick
+   *  (Base-preferred, deepest liquidity) so price and cap come from one pool. */
+  async getLiveMarketCapsUsd(addresses: string[]): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    if (addresses.length === 0) return out;
+    const chunks: string[][] = [];
+    for (let i = 0; i < addresses.length; i += 30) chunks.push(addresses.slice(i, i + 30));
+    await Promise.all(
+      chunks.map(async (chunk) => {
+        try {
+          const res = await fetch(`${DEXSCREENER}/${chunk.join(",")}`);
+          if (!res.ok) return;
+          const json = (await res.json()) as { pairs?: DexPair[] };
+          const byToken = new Map<string, DexPair[]>();
+          for (const p of json.pairs ?? []) {
+            const addr = p.baseToken?.address?.toLowerCase();
+            if (!addr) continue;
+            const list = byToken.get(addr) ?? [];
+            list.push(p);
+            byToken.set(addr, list);
+          }
+          for (const [addr, pairs] of byToken) {
+            const base = pairs.filter((p) => p.chainId === "base");
+            const pool = (base.length ? base : pairs).sort(
+              (a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0),
+            )[0];
+            if (!pool) continue;
+            const mc = pool.marketCap ?? pool.fdv ?? 0;
+            if (mc > 0) out.set(addr, mc);
+          }
+        } catch {
+          /* one chunk failing shouldn't poison the whole batch */
+        }
+      }),
+    );
+    return out;
+  }
+
   async getTokenSymbol(address: string): Promise<string> {
     try {
       const res = await fetch(`${DEXSCREENER}/${address}`);
