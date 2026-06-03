@@ -2,7 +2,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import type { Holder } from "@thesis/shared";
 import { config } from "../../config.js";
 import { log } from "../../util/log.js";
-import type { BaseDataAdapter, TokenOnChain } from "./index.js";
+import type { BaseDataAdapter, PriceSnapshotEth, TokenOnChain } from "./index.js";
 import { getPumpFunStatus, type PumpFunStatus } from "./pumpfun-graduation.js";
 
 /**
@@ -81,6 +81,51 @@ export class RealSolanaData implements BaseDataAdapter {
             const pool = pairs.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
             const price = Number(pool?.priceNative ?? 0);
             if (price > 0) out.set(addr, price);
+          }
+        } catch {
+          /* one chunk failing shouldn't poison the whole batch */
+        }
+      }),
+    );
+    return out;
+  }
+
+  async getSnapshotsEth(mints: string[]): Promise<Map<string, PriceSnapshotEth>> {
+    const out = new Map<string, PriceSnapshotEth>();
+    if (mints.length === 0) return out;
+    const pending = Array.from(new Set(mints.map((m) => m.toLowerCase())));
+    const chunks: string[][] = [];
+    for (let i = 0; i < pending.length; i += 30) chunks.push(pending.slice(i, i + 30));
+    await Promise.all(
+      chunks.map(async (chunk) => {
+        try {
+          const res = await fetch(`${DEXSCREENER}/${chunk.join(",")}`);
+          if (!res.ok) return;
+          const json = (await res.json()) as { pairs?: DexPair[] };
+          const byMint = new Map<string, DexPair[]>();
+          for (const p of json.pairs ?? []) {
+            if (p.chainId !== "solana") continue;
+            const addr = p.baseToken?.address?.toLowerCase();
+            if (!addr) continue;
+            const list = byMint.get(addr) ?? [];
+            list.push(p);
+            byMint.set(addr, list);
+          }
+          for (const [addr, pairs] of byMint) {
+            const pool = pairs.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
+            const priceEth = Number(pool?.priceNative ?? 0);
+            if (!(priceEth > 0)) continue;
+            const rawMc = Number(pool.marketCap ?? pool.fdv ?? 0);
+            const marketCapUsd = Number.isNaN(rawMc) ? 0 : rawMc;
+            const symbol = pool.baseToken?.symbol ?? "";
+            let logoUrl: string | null = null;
+            for (const pr of pairs) {
+              if (pr.info?.imageUrl) {
+                logoUrl = pr.info.imageUrl;
+                break;
+              }
+            }
+            out.set(addr, { priceEth, marketCapUsd, symbol, logoUrl });
           }
         } catch {
           /* one chunk failing shouldn't poison the whole batch */
@@ -185,6 +230,7 @@ interface DexPair {
   liquidity?: { usd?: number };
   marketCap?: number;
   fdv?: number;
+  info?: { imageUrl?: string };
   pairCreatedAt?: number;
 }
 

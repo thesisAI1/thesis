@@ -1112,28 +1112,14 @@ async function buildDashboardPayload(): Promise<object> {
   // buildLaunchpadResolver for the resolution order; unit-tested in launchpad-view.test.
   const launchpadFor = buildLaunchpadResolver(reviews);
 
-  // Pre-warm the ticker cache for every position address (parallel; cached).
-  // Same for DexScreener logos — paid socials-upgrade tokens carry an
-  // imageUrl in their pair info which we surface next to the ticker in
-  // both the Open Positions and Closed Trades tables.
-  const uniqueAddresses = Array.from(
-    new Set(positions.map((p) => p.order.contractAddress.toLowerCase())),
-  );
-  await Promise.all([
-    ...uniqueAddresses.map((a) => getSymbolCached(a)),
-    ...uniqueAddresses.map((a) => getLogoCached(a)),
-  ]);
-
-  // Batched price fetch for all open positions in ONE Birdeye request,
-  // instead of one HTTP call per position serialised in the loop. With 60+
-  // open positions the per-loop pattern was hammering Birdeye and triggering
-  // /defi/multi_price 429s, which cascaded into the dashboard falling back
-  // to entry-time prices for every position that couldn't be priced. The
-  // batched call is the same one the monitor uses and cuts the dashboard
-  // build from ~10s to <1s with effectively zero Birdeye pressure.
-  // One batched price call PER CHAIN (Base + Solana data providers differ and
-  // can't share a multi-price call) — mirrors the monitor's grouping so the
-  // dashboard PnL is correct for Solana positions too.
+  // Batched per-chain snapshot for all OPEN positions — ONE request per chain
+  // (Base + Solana providers differ and can't share a call), mirroring the
+  // monitor's grouping. This single response carries price, live MC, ticker
+  // AND logo, so the dashboard no longer issues a separate symbol+logo call
+  // per address: at 100-200 positions that fan-out was up to ~400 parallel
+  // DexScreener calls on a cold cache — enough to trip its burst limit and
+  // leave the table half-empty until the caches warmed. A failure on one
+  // chain is isolated — its positions fall back to entry price for this build.
   const addrsByChain = new Map<Chain, string[]>();
   for (const p of open) {
     const list = addrsByChain.get(p.order.chain) ?? [];
@@ -1141,17 +1127,54 @@ async function buildDashboardPayload(): Promise<object> {
     addrsByChain.set(p.order.chain, list);
   }
   const livePrices = new Map<string, number>();
+  // Live MC per address, read DIRECTLY from the provider (not derived from the
+  // entry-fill price ratio, which is slippage-inflated and understates it).
+  const liveMarketCaps = new Map<string, number>();
   await Promise.all(
     [...addrsByChain.entries()].map(async ([c, addrs]) => {
       try {
-        const got = await createBaseDataAdapter(c).getPricesEth(Array.from(new Set(addrs)));
-        for (const [addr, price] of got) livePrices.set(addr, price);
+        const adapter = createBaseDataAdapter(c);
+        const unique = Array.from(new Set(addrs));
+        if (adapter.getSnapshotsEth) {
+          const snaps = await adapter.getSnapshotsEth(unique);
+          const now = Date.now();
+          for (const [addr, snap] of snaps) {
+            if (snap.priceEth > 0) livePrices.set(addr, snap.priceEth);
+            if (snap.marketCapUsd > 0) liveMarketCaps.set(addr, snap.marketCapUsd);
+            // Warm the ticker + logo caches straight from the snapshot so the
+            // prewarm below skips these addresses entirely (no per-token HTTP).
+            if (snap.symbol) symbolCache.set(addr, snap.symbol);
+            logoCache.set(addr, snap.logoUrl);
+            logoCacheExpiry.set(
+              addr,
+              now + (snap.logoUrl ? LOGO_TTL_POSITIVE_MS : LOGO_TTL_NEGATIVE_MS),
+            );
+          }
+        } else {
+          const got = await adapter.getPricesEth(unique);
+          for (const [addr, price] of got) livePrices.set(addr, price);
+        }
       } catch (err) {
         const msg = `dashboard: ${c} batch price fetch failed — entry-price fallback for its positions: ${String(err)}`;
         logEvent({ level: "warn", area: "server", type: "dashboard-price:failed", msg });
       }
     }),
   );
+
+  // Pre-warm ticker + logo for the addresses the snapshot DIDN'T cover —
+  // closed-position addresses (not in the open-position price batch) and any
+  // open token the batch couldn't price. Open positions are normally all
+  // served above, so this shrinks from "every address" to "just the misses".
+  const uniqueAddresses = Array.from(
+    new Set(positions.map((p) => p.order.contractAddress.toLowerCase())),
+  );
+  const nowMs = Date.now();
+  const needSymbol = uniqueAddresses.filter((a) => !symbolCache.get(a));
+  const needLogo = uniqueAddresses.filter((a) => (logoCacheExpiry.get(a) ?? 0) <= nowMs);
+  await Promise.all([
+    ...needSymbol.map((a) => getSymbolCached(a)),
+    ...needLogo.map((a) => getLogoCached(a)),
+  ]);
 
   let balanceEth = 0;
   let walletAddress = "";
@@ -1183,13 +1206,19 @@ async function buildDashboardPayload(): Promise<object> {
     const liveValueEth = remainingTokens * currentPriceEth;
     const unrealizedPnlEth = liveValueEth - remainingCost;
     openPositionsValueEth += liveValueEth;
-    // Current MC = entry MC × (current price / entry price). Token supply is
-    // constant for Clanker/Bankr deploys, so price ratio is a clean proxy.
+    // Current MC: prefer the LIVE MC read straight from the provider. Only when
+    // it's unavailable do we fall back to entryMC × (current price / entry
+    // price) — that ratio uses the slippage-inflated entry FILL price (entry MC
+    // was quoted at the pre-trade mid), so it systematically understates a thin
+    // token's live MC. Reading live MC directly sidesteps the mismatched bases.
     const marketCapAtEntryUsd = p.marketCapAtEntryUsd ?? null;
+    const liveMarketCapUsd = liveMarketCaps.get(p.order.contractAddress.toLowerCase()) ?? null;
     const marketCapNowUsd =
-      marketCapAtEntryUsd !== null && p.entryPriceEth > 0
-        ? marketCapAtEntryUsd * (currentPriceEth / p.entryPriceEth)
-        : null;
+      liveMarketCapUsd !== null && liveMarketCapUsd > 0
+        ? liveMarketCapUsd
+        : marketCapAtEntryUsd !== null && p.entryPriceEth > 0
+          ? marketCapAtEntryUsd * (currentPriceEth / p.entryPriceEth)
+          : null;
     openPositions.push({
       id: p.id,
       contractAddress: p.order.contractAddress,

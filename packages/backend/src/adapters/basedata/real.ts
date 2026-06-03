@@ -3,7 +3,7 @@ import { config } from "../../config.js";
 import { log } from "../../util/log.js";
 import { detectVirtualsLaunchpad } from "./base-launchpad.js";
 import { toEthPrice } from "./price-units.js";
-import type { BaseDataAdapter, TokenOnChain } from "./index.js";
+import type { BaseDataAdapter, PriceSnapshotEth, TokenOnChain } from "./index.js";
 
 const DEXSCREENER = "https://api.dexscreener.com/latest/dex/tokens";
 const GOPLUS = "https://api.gopluslabs.io/api/v1/token_security";
@@ -93,12 +93,46 @@ export class RealBaseData implements BaseDataAdapter {
   }
 
   async getPricesEth(addresses: string[]): Promise<Map<string, number>> {
+    const snapshots = await this.getSnapshotsEth(addresses);
     const out = new Map<string, number>();
-    if (addresses.length === 0) return out;
-    // DexScreener /tokens accepts a comma-separated list (up to 30 per call).
-    const chunks: string[][] = [];
-    for (let i = 0; i < addresses.length; i += 30) chunks.push(addresses.slice(i, i + 30));
+    for (const [addr, snap] of snapshots) out.set(addr, snap.priceEth);
+    return out;
+  }
 
+  async getSnapshotsEth(addresses: string[]): Promise<Map<string, PriceSnapshotEth>> {
+    const out = new Map<string, PriceSnapshotEth>();
+    let pending = Array.from(new Set(addresses.map((a) => a.toLowerCase())));
+    if (pending.length === 0) return out;
+    // DexScreener's /tokens endpoint caps each RESPONSE at 30 PAIRS total, NOT
+    // 30 tokens. Many Clanker/Bankr tokens have a WETH pool AND a USDC pool, so
+    // a 30-address batch can come back as 30 pairs covering only ~20 tokens -
+    // the rest are silently ABSENT from the response, read downstream as "no
+    // price", and so never get TP/SL evaluated (the monitor skips them) while
+    // the dashboard freezes them at entry price. So re-query whatever a round
+    // failed to cover, shrinking the chunk size each pass down to single-address
+    // calls, which a 30-pair cap can never truncate below one token's own pools.
+    for (const chunkSize of [30, 8, 2, 1]) {
+      if (pending.length === 0) break;
+      pending = await this.fetchSnapshotChunks(pending, chunkSize, out);
+    }
+    return out;
+  }
+
+  /** Snapshot `addresses` in chunks of `chunkSize`, writing each resolved
+   *  address (lowercased) → {priceEth, marketCapUsd, symbol, logoUrl} into
+   *  `out`. Returns the addresses NOT resolved this pass (absent from the
+   *  capped response, or unpriced) so the caller can re-query them at a
+   *  smaller chunk size. */
+  private async fetchSnapshotChunks(
+    addresses: string[],
+    chunkSize: number,
+    out: Map<string, PriceSnapshotEth>,
+  ): Promise<string[]> {
+    const chunks: string[][] = [];
+    for (let i = 0; i < addresses.length; i += chunkSize) {
+      chunks.push(addresses.slice(i, i + chunkSize));
+    }
+    const stillMissing = new Set(addresses);
     await Promise.all(
       chunks.map(async (chunk) => {
         try {
@@ -128,14 +162,33 @@ export class RealBaseData implements BaseDataAdapter {
               !!virtual && pool.quoteToken?.address?.toLowerCase() === virtual.toLowerCase();
             const virtualEthRate = isVirtualQuoted ? await this.getVirtualEthRate() : null;
             const price = toEthPrice(native, pool.quoteToken?.address, { virtual, virtualEthRate });
-            if (price > 0) out.set(addr, price);
+            if (price > 0) {
+              // Symbol + logo ride along from the SAME response — token-level
+              // info is identical across a token's pairs, so take the ticker
+              // off the priced pool and the first imageUrl found in any pair.
+              const symbol = pool.baseToken?.symbol ?? "";
+              let logoUrl: string | null = null;
+              for (const pr of pairs) {
+                if (pr.info?.imageUrl) {
+                  logoUrl = pr.info.imageUrl;
+                  break;
+                }
+              }
+              out.set(addr, {
+                priceEth: price,
+                marketCapUsd: pool.marketCap ?? pool.fdv ?? 0,
+                symbol,
+                logoUrl,
+              });
+              stillMissing.delete(addr);
+            }
           }
         } catch {
           /* one chunk failing shouldn't poison the whole batch */
         }
       }),
     );
-    return out;
+    return [...stillMissing];
   }
 
   async getTokenSymbol(address: string): Promise<string> {
@@ -280,6 +333,8 @@ interface DexPair {
   liquidity?: { usd?: number };
   marketCap?: number;
   fdv?: number;
+  /** Token-level "info" block — carries the creator-uploaded logo. */
+  info?: { imageUrl?: string };
   /** Unix ms timestamp the trading pair was created. */
   pairCreatedAt?: number;
 }
