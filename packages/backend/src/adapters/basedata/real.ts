@@ -119,9 +119,10 @@ export class RealBaseData implements BaseDataAdapter {
   }
 
   /** Snapshot `addresses` in chunks of `chunkSize`, writing each resolved
-   *  address (lowercased) → {priceEth, marketCapUsd} into `out`. Returns the
-   *  addresses NOT resolved this pass (absent from the capped response, or
-   *  unpriced) so the caller can re-query them at a smaller chunk size. */
+   *  address (lowercased) → {priceEth, marketCapUsd, symbol, logoUrl} into
+   *  `out`. Returns the addresses NOT resolved this pass (absent from the
+   *  capped response, or unpriced) so the caller can re-query them at a
+   *  smaller chunk size. */
   private async fetchSnapshotChunks(
     addresses: string[],
     chunkSize: number,

@@ -115,8 +115,8 @@ export class RealSolanaData implements BaseDataAdapter {
             const pool = pairs.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
             const priceEth = Number(pool?.priceNative ?? 0);
             if (!(priceEth > 0)) continue;
-            const marketCapUsd = pool.marketCap ?? pool.fdv ?? 0;
-            if (!(marketCapUsd > 0)) continue;
+            const rawMc = Number(pool.marketCap ?? pool.fdv ?? 0);
+            const marketCapUsd = Number.isNaN(rawMc) ? 0 : rawMc;
             const symbol = pool.baseToken?.symbol ?? "";
             let logoUrl: string | null = null;
             for (const pr of pairs) {
