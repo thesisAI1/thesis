@@ -32,6 +32,13 @@
  *                                     us and we want to push through from the
  *                                     admin side without waiting on the author
  *                                     (gated by ADMIN_SECRET header)
+ *   POST  /admin/relaunch-flatten     close EVERY open position so the operator
+ *                                     can reset to 0 open. Sells each position
+ *                                     silently (no X spam), runs the standard
+ *                                     split, and writes off any position whose
+ *                                     sell reverts (DB-only, no funds moved).
+ *                                     Default: DRY-RUN. Body { confirm:true }
+ *                                     to execute. (gated by ADMIN_SECRET header)
  *   POST  /admin/repost-close-announcement  re-post the X close announcement
  *                                     for a closed position. Used to recover
  *                                     escrowed authors after the original
@@ -272,6 +279,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
   if (path === "/admin/rebuy-position" && req.method === "POST") return adminRebuyPosition(req, res);
   if (path === "/admin/backfill-entry-mc" && req.method === "POST") return adminBackfillEntryMc(req, res);
   if (path === "/admin/force-close-position" && req.method === "POST") return adminForceClosePosition(req, res);
+  if (path === "/admin/relaunch-flatten" && req.method === "POST") return adminRelaunchFlatten(req, res);
   if (path === "/admin/repost-close-announcement" && req.method === "POST") return adminRepostCloseAnnouncement(req, res);
 
   // Clean URL for the documentation page.
@@ -827,6 +835,270 @@ async function adminForceClosePosition(
     basescanUrl: after?.lastExitTxHash
       ? `https://basescan.org/tx/${after.lastExitTxHash}`
       : undefined,
+  });
+}
+
+/**
+ * POST /admin/relaunch-flatten — close EVERY open position so the operator can
+ * reset to 0 open. Safety-critical: sells each position silently (no X post),
+ * runs the standard 25/50/25 split via the existing settle pipeline (funds move
+ * through settlePosition, not this function), and writes off any position whose
+ * sell reverts (DB state change ONLY — no funds moved, no sell call).
+ *
+ * Auth: header `x-admin-secret`.
+ *
+ * Body: { "confirm": true } to EXECUTE; anything else → DRY-RUN (safety default).
+ *
+ * Dry-run returns a plan:
+ *   { dryRun:true, totalOpen, plan:[{id, chain, symbol, remainingTokens, note}] }
+ *
+ * Execute returns a summary:
+ *   { dryRun:false, totalOpen, sold:[...], wroteOff:[...], skipped:[...],
+ *     stuckSettlement:[ids], errored:[...], totals:{...} }
+ *
+ * Re-runnable: iterates CURRENT open positions so a second call mops up any
+ * stragglers.
+ *
+ * MONEY-SAFETY:
+ *  - Write-off path: DB state only — MUST NOT call sendEth / sell / buy.
+ *  - Write-off ONLY when the SELL itself reverts (token genuinely unsellable).
+ *    A price-fetch miss → quoteSell fallback; if both fail → SKIP (leave open).
+ *  - Winners paid only via existing settlePosition pipeline (not reinvented here).
+ *  - Dry-run: no state writes, no sells, no funds.
+ */
+async function adminRelaunchFlatten(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const gate = checkAdmin(req);
+  if (!gate.ok) return sendJson(res, gate.status, { ok: false, error: gate.error });
+
+  let body: { confirm?: boolean };
+  try {
+    body = JSON.parse(await readBody(req)) as typeof body;
+  } catch {
+    return sendJson(res, 400, { ok: false, error: "invalid JSON body" });
+  }
+
+  const dryRun = body.confirm !== true;
+  const store = getStore();
+  const all = await store.getAllPositions();
+  const open = all.filter((p) => p.status === "open");
+  const totalOpen = open.length;
+
+  // ── DRY-RUN ────────────────────────────────────────────────────────────────
+  if (dryRun) {
+    const plan = open.map((p) => ({
+      id: p.id,
+      chain: p.order.chain,
+      symbol: p.order.contractAddress,
+      remainingTokens: tokensRemaining(p),
+      note: "would sell + settle silently",
+    }));
+    log.info(`admin: relaunch-flatten DRY-RUN — ${totalOpen} open positions`);
+    return sendJson(res, 200, { dryRun: true, totalOpen, plan });
+  }
+
+  // ── EXECUTE ─────────────────────────────────────────────────────────────────
+  log.info(`admin: relaunch-flatten EXECUTE — closing ${totalOpen} open positions`);
+
+  type SoldEntry = {
+    id: string;
+    realisedPnlEth: number;
+    /** toAuthorEth from the distribution record — 0 on a loss. Single source
+     *  of truth: never re-derived as realisedPnlEth×0.25. */
+    toAuthorEth: number;
+    authorPaid: "direct" | "escrowed" | "none";
+    settled: boolean;
+  };
+  type WroteOffEntry = { id: string; lossEth: number };
+  type SkippedEntry = { id: string; reason: string };
+  type ErroredEntry = { id: string; error: string };
+
+  const sold: SoldEntry[] = [];
+  const wroteOff: WroteOffEntry[] = [];
+  const skipped: SkippedEntry[] = [];
+  const stuckSettlement: string[] = [];
+  const errored: ErroredEntry[] = [];
+
+  for (const pos of open) {
+    // ── Per-position error isolation (fix 4) ─────────────────────────────────
+    try {
+      // ── Price resolution: getPriceEth → quoteSell fallback (fix 1) ─────────
+      // We NEVER write off for a price miss — we try harder first, and only
+      // skip (leave open) when we can't get any price at all.
+      let exitPrice = 0;
+      let priceSource = "";
+      try {
+        exitPrice = await createBaseDataAdapter(pos.order.chain).getPriceEth(
+          pos.order.contractAddress,
+        );
+        if (exitPrice > 0) priceSource = "dexscreener";
+      } catch (err) {
+        log.warn(
+          `admin: relaunch-flatten — getPriceEth failed for ${pos.id} (${String(err)}); trying quoteSell`,
+        );
+      }
+
+      // quoteSell fallback: derive price from the on-chain quote
+      if (exitPrice <= 0) {
+        try {
+          const tokens = tokensRemaining(pos);
+          if (tokens > 0) {
+            const quote = await createChainAdapter(pos.order.chain).quoteSell(
+              pos.order.contractAddress,
+              tokens,
+            );
+            exitPrice = quote.proceedsEth / tokens;
+            if (exitPrice > 0) priceSource = "quoteSell";
+          }
+        } catch (err) {
+          log.warn(
+            `admin: relaunch-flatten — quoteSell also failed for ${pos.id}: ${String(err)}`,
+          );
+        }
+      }
+
+      // No price from either source → SKIP (leave open, re-runnable)
+      if (exitPrice <= 0) {
+        log.warn(
+          `admin: relaunch-flatten — no price for ${pos.id} (both sources failed); skipping (leave open)`,
+        );
+        skipped.push({ id: pos.id, reason: "no price available from DexScreener or quoteSell" });
+        continue;
+      }
+
+      log.info(
+        `admin: relaunch-flatten — ${pos.id} exit price ${exitPrice.toFixed(10)} ETH/tok (source: ${priceSource})`,
+      );
+
+      // ── Attempt silent close (sell reverts → write-off; only if sell fails) ─
+      let sellReverted = false;
+      try {
+        await closeByAuthor(pos, exitPrice, { silent: true });
+      } catch (err) {
+        // closeByAuthor throws only when the on-chain sell reverts after all
+        // retries. The token is genuinely unsellable — write it off.
+        log.warn(
+          `admin: relaunch-flatten — sell REVERTED for ${pos.id}: ${String(err)} — writing off`,
+        );
+        sellReverted = true;
+      }
+
+      if (!sellReverted) {
+        // ── Sold successfully — build the sold entry (fixes 2 + 3) ────────────
+        const after = (await store.getAllPositions()).find((p) => p.id === pos.id);
+        if (after && after.status === "closed") {
+          // Distribution record is the single source of truth for author amounts.
+          // authorWallet=non-null → direct send; null → escrowed. No record = loss.
+          let authorPaid: "direct" | "escrowed" | "none" = "none";
+          let toAuthorEth = 0;
+          if (after.realisedPnlEth > 0) {
+            const dists = await store.getDistributions();
+            const dist = dists.find((d) => d.positionId === pos.id);
+            if (dist) {
+              toAuthorEth = dist.toAuthorEth;
+              authorPaid = dist.authorWallet ? "direct" : "escrowed";
+            } else {
+              // Distribution not yet written — settlement incomplete
+              authorPaid = "escrowed"; // funds will be in escrow
+            }
+          }
+          // Detect stuck settlement (fix 2): closed but settledAt not yet set
+          const isSettled = !!after.settledAt;
+          if (!isSettled && after.realisedPnlEth > 0) {
+            log.warn(
+              `admin: relaunch-flatten — ${pos.id} closed but settlement incomplete (settledAt unset)`,
+            );
+            stuckSettlement.push(pos.id);
+          }
+          sold.push({
+            id: pos.id,
+            realisedPnlEth: after.realisedPnlEth,
+            toAuthorEth,
+            authorPaid,
+            settled: isSettled,
+          });
+          log.info(
+            `admin: relaunch-flatten — sold ${pos.id} realisedPnlEth=${after.realisedPnlEth.toFixed(6)} settled=${isSettled}`,
+          );
+          continue;
+        }
+        // closeByAuthor succeeded but position status is unexpected —
+        // fall through to write-off guard below.
+        log.warn(`admin: relaunch-flatten — ${pos.id} closeByAuthor returned but status not closed; writing off`);
+      }
+
+      // ── WRITE-OFF: sell reverted — DB state change ONLY (fix 1) ─────────────
+      // Reserve write-off exclusively for an ACTUAL sell revert.
+      // MUST NOT call sendEth / sell / buy.
+      const costBasis = pos.order.amountInEth * pos.remainingFraction;
+      const fresh = (await store.getAllPositions()).find((p) => p.id === pos.id);
+      if (!fresh || fresh.status !== "open") {
+        log.info(
+          `admin: relaunch-flatten — ${pos.id} already closed concurrently, skipping write-off`,
+        );
+        continue;
+      }
+      const now = new Date().toISOString();
+      fresh.status = "closed";
+      fresh.closedAt = now;
+      fresh.remainingFraction = 0;
+      fresh.lastExitPriceEth = 0;
+      fresh.realisedPnlEth = fresh.realisedPnlEth - costBasis; // full loss
+      fresh.settledAt = now; // loss → no distribution; mark terminal immediately
+      await store.savePosition(fresh);
+      wroteOff.push({ id: pos.id, lossEth: costBasis });
+      log.info(
+        `admin: relaunch-flatten — wrote off ${pos.id} lossEth=${costBasis.toFixed(6)} (sell reverted)`,
+      );
+    } catch (posErr) {
+      // Per-position error: record and continue so one broken position can't
+      // abort the whole flatten and swallow the summary (fix 4).
+      const msg = String(posErr);
+      log.error(`admin: relaunch-flatten — unexpected error for ${pos.id}: ${msg}`);
+      errored.push({ id: pos.id, error: msg });
+    }
+  }
+
+  // ── TOTALS — single source of truth from distribution records (fix 3) ───────
+  const realizedPnlEth = sold.reduce((s, e) => s + e.realisedPnlEth, 0);
+  const authorPaidEth = sold
+    .filter((e) => e.authorPaid === "direct")
+    .reduce((s, e) => s + e.toAuthorEth, 0);
+  const authorEscrowedEth = sold
+    .filter((e) => e.authorPaid === "escrowed")
+    .reduce((s, e) => s + e.toAuthorEth, 0);
+
+  if (stuckSettlement.length > 0) {
+    log.warn(
+      `admin: relaunch-flatten — ${stuckSettlement.length} position(s) have INCOMPLETE settlement: ` +
+        stuckSettlement.join(", "),
+    );
+  }
+
+  log.info(
+    `admin: relaunch-flatten DONE — sold=${sold.length} wroteOff=${wroteOff.length} ` +
+      `skipped=${skipped.length} errored=${errored.length} stuck=${stuckSettlement.length} ` +
+      `pnl=${realizedPnlEth.toFixed(6)} ETH`,
+  );
+
+  return sendJson(res, 200, {
+    dryRun: false,
+    totalOpen,
+    sold,
+    wroteOff,
+    skipped,
+    stuckSettlement,
+    errored,
+    totals: {
+      realizedPnlEth,
+      authorPaidEth,
+      authorEscrowedEth,
+      wroteOffCount: wroteOff.length,
+      skippedCount: skipped.length,
+      erroredCount: errored.length,
+    },
   });
 }
 

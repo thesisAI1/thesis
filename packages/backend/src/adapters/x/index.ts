@@ -39,6 +39,18 @@ export interface XAdapter {
   replyToPostWithMedia(postId: string, text: string, media: Buffer): Promise<string>;
 }
 
+let _xTestOverride: XAdapter | null = null;
+
+/** TEST ONLY — inject a spy/stub XAdapter so tests can assert X posts are
+ *  (or aren't) made without touching the network. Pass null to clear. */
+export function __setXAdapterForTest(adapter: XAdapter | null): void {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("__setXAdapterForTest is not available in production");
+  }
+  _xTestOverride = adapter;
+}
+
 export function createXAdapter(): XAdapter {
+  if (_xTestOverride) return _xTestOverride;
   return useMock() ? new MockX() : new RealX();
 }
