@@ -1063,6 +1063,16 @@ let _dashboardCacheExpiresAt = 0;
  *  own duplicate build. They all await the same first-caller's promise. */
 let _dashboardInflight: Promise<string> | null = null;
 
+/** TEST ONLY — clear the 15s dashboard cache so the next /api/dashboard call
+ *  rebuilds the payload from scratch. Harmless in prod (at worst forces one
+ *  rebuild); tests call it between cases so each exercises a fresh build rather
+ *  than a sibling test's cached response. Mirrors __setChainForTest / resetEventLogForTest. */
+export function _resetDashboardCacheForTest(): void {
+  _dashboardCacheBody = null;
+  _dashboardCacheExpiresAt = 0;
+  _dashboardInflight = null;
+}
+
 /** Cached dashboard endpoint. Serves cached JSON when fresh; otherwise
  *  kicks off a build and shares its promise across concurrent callers. */
 async function apiDashboard(res: ServerResponse): Promise<void> {
