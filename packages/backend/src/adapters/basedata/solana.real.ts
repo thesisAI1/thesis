@@ -82,8 +82,8 @@ export class RealSolanaData implements BaseDataAdapter {
             const price = Number(pool?.priceNative ?? 0);
             if (price > 0) out.set(addr, price);
           }
-        } catch {
-          /* one chunk failing shouldn't poison the whole batch */
+        } catch (err) {
+          log.warn(`basedata: snapshot chunk (size 30) fetch/parse failed — those tokens unpriced this pass: ${String(err)}`);
         }
       }),
     );
@@ -127,8 +127,8 @@ export class RealSolanaData implements BaseDataAdapter {
             }
             out.set(addr, { priceEth, marketCapUsd, symbol, logoUrl });
           }
-        } catch {
-          /* one chunk failing shouldn't poison the whole batch */
+        } catch (err) {
+          log.warn(`basedata: snapshot chunk (size 30) fetch/parse failed — those tokens unpriced this pass: ${String(err)}`);
         }
       }),
     );

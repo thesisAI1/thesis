@@ -207,6 +207,12 @@ test("G6c: INCOMPLETE settlement emits settle:failed ops event", async () => {
 // consume. This guard pins that the stall surfaces on the bus EXACTLY ONCE
 // (only on the streak-3 escalation, not on the streak-1/2 warns) so a future
 // change to that escalation can't silently drop the alert.
+//
+// NOTE: the fallback pre-pass now uses quoteSell (an independent on-chain route
+// via KyberSwap/Jupiter, not DexScreener). A true outage that starves the chain
+// streak must wedge BOTH sources — otherwise the fallback rescues the position
+// on tick 1 and the chain-streak never reaches 3. We inject a chain adapter
+// whose quoteSell also returns {proceedsEth:0} for the duration of the test.
 test("C1: a wedged price feed surfaces on the opsBus once on the 3rd consecutive failure", async () => {
   const store = getStore();
   const id = "pos-price-stall";
@@ -219,6 +225,22 @@ test("C1: a wedged price feed surfaces on the opsBus once on the 3rd consecutive
   MockBaseData.prototype.getPricesEth = async () => {
     throw new Error("forced price-feed wedge");
   };
+
+  // Also wedge the fallback: inject a chain adapter whose quoteSell returns 0
+  // proceeds so the position stays unpriced. Without this, the quoteSell fallback
+  // would rescue the position on tick 1 and the chain streak never reaches 3.
+  const wedgedChain: ChainAdapter = {
+    getWalletAddress() { return "0xWALLET"; },
+    async getWalletBalanceEth() { return 1.0; },
+    async buy(_a: string, amt: number): Promise<SwapResult> { return { txHash: "0xBUY", amountOut: amt, priceEth: 1e-8 }; },
+    async sell(): Promise<SwapResult> { return { txHash: "0xSELL", amountOut: 0, priceEth: 0 }; },
+    async getTokenPriceEth() { throw new Error("wedged"); },
+    async quoteSell(_a: string, _tokens: number): Promise<{ proceedsEth: number }> { return { proceedsEth: 0 }; },
+    async sendEth() { return "0xSEND"; },
+    async buybackAndBurn() { return { txHash: "0xBURN", tokensBurned: 0 }; },
+  };
+  __setChainForTest(wedgedChain);
+
   try {
     const ops = await captureOps(async () => {
       await runMonitorTick(); // streak 1 — warn only, no ops
@@ -244,6 +266,7 @@ test("C1: a wedged price feed surfaces on the opsBus once on the 3rd consecutive
     );
   } finally {
     MockBaseData.prototype.getPricesEth = origGetPrices;
+    __setChainForTest(null);
   }
 });
 

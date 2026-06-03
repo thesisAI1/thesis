@@ -81,6 +81,18 @@ export interface BaseDataAdapter {
 }
 
 let _adapterLogged = false;
+let _testOverride: BaseDataAdapter | null = null;
+
+/** TEST ONLY — force a specific base-data adapter (e.g. one that simulates
+ *  DexScreener returning no prices) so price-fallback behaviour can be
+ *  exercised deterministically. Throws in production. Pass null to clear. */
+export function __setBaseDataForTest(adapter: BaseDataAdapter | null): void {
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("__setBaseDataForTest is not available in production");
+  }
+  _testOverride = adapter;
+}
+
 /**
  * Token-data adapter for `chain`. Defaults to "base" so every arg-less caller
  * is unchanged. Solana routes to the Solana data path (DexScreener Solana pairs
@@ -88,6 +100,7 @@ let _adapterLogged = false;
  * (Mock / Birdeye / DexScreener) exactly as before.
  */
 export function createBaseDataAdapter(chain: Chain = "base"): BaseDataAdapter {
+  if (_testOverride) return _testOverride;
   if (chain === "solana") {
     return useMock() ? new MockSolanaData() : new RealSolanaData();
   }
