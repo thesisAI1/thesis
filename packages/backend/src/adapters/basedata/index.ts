@@ -24,6 +24,20 @@ import { RealBaseData } from "./real.js";
 import { MockSolanaData } from "./solana.mock.js";
 import { RealSolanaData } from "./solana.real.js";
 
+/** A live snapshot of a token from one provider round: price (ETH), live
+ *  market cap (USD), ticker, and logo. Symbol + logo ride along for free
+ *  because the same provider response that carries price already includes
+ *  them — so display surfaces don't need a separate per-token call each. */
+export interface PriceSnapshotEth {
+  priceEth: number;
+  marketCapUsd: number;
+  /** Token ticker from the priced pool's baseToken; "" when unknown. */
+  symbol: string;
+  /** DexScreener token logo (info.imageUrl) when present, else null. null is a
+   *  RESOLVED "no logo" answer (the response was scanned), not "unknown". */
+  logoUrl: string | null;
+}
+
 /** On-chain snapshot of a token. */
 export interface TokenOnChain {
   contractAddress: string;
@@ -51,6 +65,17 @@ export interface BaseDataAdapter {
    * the map (caller treats as "skip this tick").
    */
   getPricesEth(addresses: string[]): Promise<Map<string, number>>;
+  /**
+   * Batch live snapshot — price in ETH AND live market cap in USD — keyed by
+   * lowercased address, from the SAME provider round as getPricesEth. Display
+   * surfaces (dashboard, profit card) read the live MC directly instead of
+   * estimating it as entryMC × (livePrice / entryFillPrice): the entry fill is
+   * slippage-inflated vs the mid-price entryMC was quoted at, so that ratio
+   * systematically understates a thin token's live MC (a real 160k showed as
+   * ~130k). Optional — callers fall back to getPricesEth + the ratio estimate
+   * when an adapter omits it or a token is absent from the map.
+   */
+  getSnapshotsEth?(addresses: string[]): Promise<Map<string, PriceSnapshotEth>>;
   /** Token ticker (e.g. "DEGEN"). Returns empty string when unknown. */
   getTokenSymbol(address: string): Promise<string>;
 }

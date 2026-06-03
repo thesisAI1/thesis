@@ -752,31 +752,42 @@ async function buildProfitCardPng(
   const adapter = createBaseDataAdapter(pos.order.chain);
   const symbol = await adapter.getTokenSymbol(pos.order.contractAddress).catch(() => "");
 
-  // We need an entry MC + an exit MC. The position stores entry MC at buy
-  // time; exit MC is derived from the entry MC × (exit price / entry price).
-  //
-  // For positions opened BEFORE marketCapAtEntryUsd existed, entry MC is
-  // null — we then fall back to querying the live token snapshot from
-  // Birdeye/DexScreener, which gives us the CURRENT MC. That current MC
-  // is the natural "exit" MC (the price right after we sold), and we then
-  // derive the entry MC by reversing the same price ratio.
+  // We need an entry MC + an exit MC. Entry MC is stored at buy time (the
+  // pre-trade quoted MC). Exit MC = the token's LIVE MC: this card is built
+  // synchronously at full-close, so "live right now" IS the exit MC, and read
+  // directly it's accurate. We do NOT derive it as entryMC × (exit / entry):
+  // the entry FILL price is slippage-inflated relative to the mid that entry MC
+  // was quoted at, so that ratio understates the exit MC (a real 160k close
+  // rendered ~130k). The ratio survives only as a fallback when the live fetch
+  // fails. For pre-redesign positions with no stored entry MC, back-derive it
+  // from the live exit MC and the price ratio.
   let entryMarketCapUsd = pos.marketCapAtEntryUsd ?? null;
   let exitMarketCapUsd: number | null = null;
 
-  if (entryMarketCapUsd !== null && pos.entryPriceEth > 0 && pos.lastExitPriceEth != null) {
-    exitMarketCapUsd = entryMarketCapUsd * (pos.lastExitPriceEth / pos.entryPriceEth);
-  } else if (pos.entryPriceEth > 0 && pos.lastExitPriceEth != null) {
-    // Fallback for pre-redesign positions — pull live MC, treat it as exit MC,
-    // back-derive entry MC from the price ratio.
-    try {
-      const live = await adapter.getToken(pos.order.contractAddress);
-      if (live.marketCapUsd > 0) {
-        exitMarketCapUsd = live.marketCapUsd;
+  try {
+    const live = await adapter.getToken(pos.order.contractAddress);
+    if (live.marketCapUsd > 0) {
+      exitMarketCapUsd = live.marketCapUsd;
+      if (
+        entryMarketCapUsd === null &&
+        pos.entryPriceEth > 0 &&
+        pos.lastExitPriceEth != null &&
+        pos.lastExitPriceEth > 0
+      ) {
         entryMarketCapUsd = live.marketCapUsd * (pos.entryPriceEth / pos.lastExitPriceEth);
       }
-    } catch (err) {
-      log.warn(`card: live MC fallback failed for ${pos.id}: ${String(err)}`);
     }
+  } catch (err) {
+    log.warn(`card: live MC fetch failed for ${pos.id}: ${String(err)}`);
+  }
+  // Fallback only when live MC was unavailable.
+  if (
+    exitMarketCapUsd === null &&
+    entryMarketCapUsd !== null &&
+    pos.entryPriceEth > 0 &&
+    pos.lastExitPriceEth != null
+  ) {
+    exitMarketCapUsd = entryMarketCapUsd * (pos.lastExitPriceEth / pos.entryPriceEth);
   }
 
   // Card always surfaces the FULL realised PnL across all tiers (not just
@@ -813,7 +824,7 @@ async function buildProfitCardPng(
     authorAvatarUrl: pos.authorAvatarUrl,
     totalProfitEth,
     pnlPct,
-    entryMarketCapUsd: pos.marketCapAtEntryUsd ?? null,
+    entryMarketCapUsd,
     exitMarketCapUsd,
     authorShareEth,
     buybackEth,
