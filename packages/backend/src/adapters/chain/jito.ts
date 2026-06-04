@@ -156,6 +156,13 @@ export function buildSenderSendTxBody(base64Tx: string): string {
  *                             `definitelyNotAccepted` (validation reject = never
  *                             entered the engine), so the caller re-quotes a new
  *                             route at the SAME tip instead of escalating.
+ *  - `tooLarge`              — the provider rejected the tx because it is too big
+ *                             to fit one Solana packet (Helius Sender returns a
+ *                             -32602 "base64 encoded too large"). Like a
+ *                             routeReject this is a pre-submission validation
+ *                             reject (definitelyNotAccepted) that no tip can fix —
+ *                             only a SIMPLER route can — so the caller shrinks the
+ *                             route and re-quotes at the SAME tip.
  */
 export type JitoSubmit =
   | { ok: true; bundleId: string }
@@ -166,6 +173,7 @@ export type JitoSubmit =
       definitelyNotAccepted?: boolean;
       retryAfterMs?: number;
       routeReject?: boolean;
+      tooLarge?: boolean;
     };
 
 /** Parse a Jito `sendBundle` JSON-RPC response. Pure → testable. */
@@ -186,6 +194,21 @@ export function parseRetryAfterMs(header: string | null, now: number = Date.now(
   const when = Date.parse(header);
   if (Number.isFinite(when)) return Math.max(0, when - now);
   return null;
+}
+
+/**
+ * Does a provider error/reason mean "this tx is too big to land in one 1232-byte
+ * Solana packet" — as opposed to a tip-too-low or rate-limit problem? The size
+ * limit bites in three places, each with its own wording, all meaning the same
+ * thing (a bigger tip can NEVER help; only a SIMPLER route can):
+ *   - local `tx.serialize()` overrun .... "encoding overruns Uint8Array"
+ *   - legacy Transaction build .......... "Transaction too large"
+ *   - Helius Sender reject .............. -32602 "... base64 encoded too large ..."
+ * The Sender form was UNRECOGNISED in prod (2026-06-04), so sender-mode buys burned
+ * the whole tip ladder on an unfixable size error and abandoned. Pure → testable.
+ */
+export function isTooLargeReason(reason: string): boolean {
+  return /\bencoding overruns\b|\btransaction too large\b|\bbase64 encoded too large\b/i.test(reason);
 }
 
 /** Read a failed response's body and collapse it to a short one-line snippet for
@@ -285,6 +308,20 @@ export async function submitJitoBundle(tx: VersionedTransaction): Promise<JitoSu
   if (!res.ok) {
     const detail = await readErrSnippet(res);
     const tail = detail ? ` — ${detail}` : "";
+    // Tx too big for one packet — a pre-submission validation reject (the bundle
+    // never entered the engine, so the signed tx cannot land). No tip can fix tx
+    // SIZE; only a simpler route can. retryable:false — resubmitting the SAME tx
+    // is futile (deterministic, not a transient blip); the caller must shrink the
+    // route (it keys off `tooLarge`, which it checks before any retryable branch).
+    if (isTooLargeReason(detail)) {
+      return {
+        ok: false,
+        reason: `jito_http_${res.status}${tail}`,
+        retryable: false,
+        definitelyNotAccepted: true,
+        tooLarge: true,
+      };
+    }
     if (res.status === 429) {
       // Rejected at the gateway — the bundle provably never entered the engine,
       // so the signed tx cannot land. Safe to rebuild + resubmit immediately.
@@ -352,6 +389,23 @@ export async function submitSenderTransaction(tx: VersionedTransaction): Promise
   if (!res.ok) {
     const detail = await readErrSnippet(res);
     const tail = detail ? ` — ${detail}` : "";
+    // Helius Sender wraps a too-big tx as HTTP 500 -32602 "base64 encoded too
+    // large". It is a pre-submission validation reject (the tx never went out, so
+    // it cannot land); no tip can fix size — only a simpler route can. Flag it so
+    // the caller shrinks the route instead of pointlessly escalating the tip
+    // (which abandoned every sender-mode buy in prod on 2026-06-04). Checked
+    // before the generic 5xx branch, which would otherwise mark it ambiguous.
+    // retryable:false — the same tx is deterministically too big, not a transient
+    // blip; the caller keys recovery off `tooLarge`, checked before any retry.
+    if (isTooLargeReason(detail)) {
+      return {
+        ok: false,
+        reason: `sender_http_${res.status}${tail}`,
+        retryable: false,
+        definitelyNotAccepted: true,
+        tooLarge: true,
+      };
+    }
     if (res.status === 429) {
       // Rejected at the gateway before submission — the tx provably never went
       // out, so it cannot land. Safe to rebuild + resubmit immediately.
