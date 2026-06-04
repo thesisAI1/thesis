@@ -60,3 +60,19 @@ test("config.solana exposes sensible defaults", () => {
   assert.equal(config.solana.slippagePct, 8);
   assert.ok(config.solana.rpcUrl.length > 0, "a default Solana RPC URL must be present");
 });
+
+// Incident 2026-06-04: prod (Helius RPC, jito mode) abandoned 24/24 Solana buys.
+// Root cause = the per-attempt blockhash window default of 16 slots (~6.5s) is too
+// short for a Jito bundle to reach a bundle-accepting validator before the
+// blockhash dies — a 3.29M-lamport tip (HIGHER than the 1.6M tip that historically
+// landed) still expired. Double-fill safety comes from confirmOrExpire's
+// sequential confirm-then-escalate, NOT from a short window, so the window must be
+// long enough to actually land. Guard: the default must give a realistic window.
+test("config.solana: default blockhash window is long enough to land a bundle", () => {
+  assert.ok(
+    config.solana.jitoBlockhashSlotsToExpiry >= 32,
+    `blockhash window ${config.solana.jitoBlockhashSlotsToExpiry} slots (~${(
+      config.solana.jitoBlockhashSlotsToExpiry * 0.4
+    ).toFixed(1)}s) is too short — 16 slots (~6.5s) expired even auction-winning bundles in prod`,
+  );
+});
