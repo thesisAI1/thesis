@@ -134,54 +134,65 @@ export function buildSenderSendTxBody(base64Tx: string): string {
 }
 
 /**
- * Outcome of a Jito bundle submission (acceptance, NOT on-chain landing).
+ * Outcome of a bundle / Sender submission (gateway ACCEPTANCE, NOT on-chain landing).
  *
- * On failure the extra flags tell the caller how to react safely:
- *  - `retryable`            — a transient failure (HTTP 429 / 5xx / network); the
- *                             same tip can be re-tried (escalating it won't help).
- *  - `definitelyNotAccepted`— the block engine provably never took the bundle
- *                             (HTTP 429 = rejected at the gateway). The signed tx
- *                             could not have landed, so it is SAFE to rebuild a
- *                             fresh tx and resubmit immediately. When this is
- *                             false the outcome is AMBIGUOUS (e.g. a network
- *                             timeout after the request left), so the caller must
- *                             first confirm-or-expire the tx it already sent
- *                             before building a new one — otherwise a resend
- *                             could double-fill.
- *  - `routeReject`           — the bundle was rejected because of WHAT the route
- *                             touches, not the tip (Jito refuses bundles that
- *                             lock a writable vote account, which some DEX hops
- *                             do). A bigger tip can never fix it; only a
- *                             different/simpler route can. Always paired with
- *                             `definitelyNotAccepted` (validation reject = never
- *                             entered the engine), so the caller re-quotes a new
- *                             route at the SAME tip instead of escalating.
- *  - `tooLarge`              — the provider rejected the tx because it is too big
- *                             to fit one Solana packet (Helius Sender returns a
- *                             -32602 "base64 encoded too large"). Like a
- *                             routeReject this is a pre-submission validation
- *                             reject (definitelyNotAccepted) that no tip can fix —
- *                             only a SIMPLER route can — so the caller shrinks the
- *                             route and re-quotes at the SAME tip.
+ * On failure the `kind` discriminant tells the caller how to react safely — and,
+ * crucially, makes illegal combinations UNREPRESENTABLE. The old bool-bag could
+ * express e.g. a route-reject that was ALSO "maybe accepted", which would let the
+ * caller rebuild over a possibly-live tx → double-fill; that guard now lives in the
+ * type. Each kind encodes BOTH the reaction AND its double-fill-safety:
+ *
+ *  - "route_reject" — rejected for WHAT the route touches, not the tip (Jito refuses
+ *                     bundles that lock a writable vote account, which some DEX hops
+ *                     do). A pre-submission validation reject → the bundle provably
+ *                     never entered the engine, so re-quoting a DIFFERENT (direct)
+ *                     route at the SAME tip WITHOUT a confirm is double-fill-safe. No
+ *                     tip can fix it.
+ *  - "too_large"    — the tx won't fit one 1232-byte Solana packet (Helius Sender's
+ *                     -32602 "base64 encoded too large"). Also a pre-submission
+ *                     validation reject (never went out) → re-quoting a SIMPLER route
+ *                     WITHOUT a confirm is safe. No tip can fix tx SIZE.
+ *  - "rate_limit"   — gateway HTTP 429: provably rejected at the gateway, so the
+ *                     signed tx cannot have landed. Safe to rebuild + resubmit the
+ *                     SAME tier immediately (after `retryAfterMs` if supplied).
+ *                     Escalating the tip would just burn budget on a rate limit.
+ *  - "transport"    — ambiguous 5xx / network error: the request MIGHT have reached
+ *                     the engine, so acceptance is UNKNOWN. The caller MUST confirm-
+ *                     or-expire the already-sent tx BEFORE rebuilding (else a resend
+ *                     could double-fill). A server error is not "tip too low" → do
+ *                     NOT escalate the tip.
+ *  - "abandon"      — a deterministic reject (4xx ≠ 429, or a malformed / unparseable
+ *                     response). Retrying or escalating changes nothing; the caller
+ *                     confirms-then-gives-up.
+ *
+ * There is deliberately NO kind for "accepted but did not land" — that is the
+ * confirmOrExpire "expired" path, the only case that escalates the tip.
  */
 export type JitoSubmit =
   | { ok: true; bundleId: string }
-  | {
-      ok: false;
-      reason: string;
-      retryable?: boolean;
-      definitelyNotAccepted?: boolean;
-      retryAfterMs?: number;
-      routeReject?: boolean;
-      tooLarge?: boolean;
-    };
+  | JitoSubmitFailure;
 
-/** Parse a Jito `sendBundle` JSON-RPC response. Pure → testable. */
+/**
+ * The failure arm of {@link JitoSubmit} as a discriminated union, so illegal flag
+ * combinations are unrepresentable (see the per-kind notes above). `retryAfterMs`
+ * exists ONLY on `rate_limit` — a gateway-supplied Retry-After is meaningless on any
+ * other kind, and the type now enforces that.
+ */
+export type JitoSubmitFailure =
+  | { ok: false; kind: "route_reject"; reason: string }
+  | { ok: false; kind: "too_large"; reason: string }
+  | { ok: false; kind: "rate_limit"; reason: string; retryAfterMs?: number }
+  | { ok: false; kind: "transport"; reason: string }
+  | { ok: false; kind: "abandon"; reason: string };
+
+/** Parse a Jito `sendBundle` JSON-RPC response. Pure → testable. A 2xx body that
+ *  doesn't carry a bundle id is a deterministic, uninterpretable result — there is
+ *  nothing to retry or re-route, so it classifies as "abandon". */
 export function parseSendBundleResponse(json: unknown): JitoSubmit {
-  if (!json || typeof json !== "object") return { ok: false, reason: "malformed_response" };
+  if (!json || typeof json !== "object") return { ok: false, kind: "abandon", reason: "malformed_response" };
   const r = json as { result?: unknown; error?: { message?: string } };
-  if (r.error) return { ok: false, reason: r.error.message ?? "jito_rpc_error" };
-  if (typeof r.result !== "string") return { ok: false, reason: "missing_bundle_id" };
+  if (r.error) return { ok: false, kind: "abandon", reason: r.error.message ?? "jito_rpc_error" };
+  if (typeof r.result !== "string") return { ok: false, kind: "abandon", reason: "missing_bundle_id" };
   return { ok: true, bundleId: r.result };
 }
 
@@ -301,58 +312,44 @@ export async function submitJitoBundle(tx: VersionedTransaction): Promise<JitoSu
       signal: AbortSignal.timeout(5_000),
     });
   } catch (err) {
-    // Network error / timeout — the request MAY have reached the block engine,
-    // so acceptance is ambiguous: retryable, but NOT definitely-not-accepted.
-    return { ok: false, reason: (err as Error).message, retryable: true, definitelyNotAccepted: false };
+    // Network error / timeout — the request MAY have reached the block engine, so
+    // acceptance is ambiguous → "transport" (the caller confirms before rebuilding).
+    return { ok: false, kind: "transport", reason: (err as Error).message };
   }
   if (!res.ok) {
     const detail = await readErrSnippet(res);
     const tail = detail ? ` — ${detail}` : "";
     // Tx too big for one packet — a pre-submission validation reject (the bundle
     // never entered the engine, so the signed tx cannot land). No tip can fix tx
-    // SIZE; only a simpler route can. retryable:false — resubmitting the SAME tx
-    // is futile (deterministic, not a transient blip); the caller must shrink the
-    // route (it keys off `tooLarge`, which it checks before any retryable branch).
+    // SIZE; only a simpler route can. "too_large" → the caller shrinks the route
+    // (checked before any other branch).
     if (isTooLargeReason(detail)) {
-      return {
-        ok: false,
-        reason: `jito_http_${res.status}${tail}`,
-        retryable: false,
-        definitelyNotAccepted: true,
-        tooLarge: true,
-      };
+      return { ok: false, kind: "too_large", reason: `jito_http_${res.status}${tail}` };
     }
     if (res.status === 429) {
-      // Rejected at the gateway — the bundle provably never entered the engine,
-      // so the signed tx cannot land. Safe to rebuild + resubmit immediately.
+      // Rejected at the gateway — the bundle provably never entered the engine, so
+      // the signed tx cannot land. Safe to rebuild + resubmit immediately.
       return {
         ok: false,
+        kind: "rate_limit",
         reason: `jito_http_429${tail}`,
-        retryable: true,
-        definitelyNotAccepted: true,
         retryAfterMs: parseRetryAfterMs(res.headers.get("retry-after")) ?? undefined,
       };
     }
     if (res.status >= 500) {
       // Server-side error — ambiguous acceptance (the tx might have been taken).
-      return { ok: false, reason: `jito_http_${res.status}${tail}`, retryable: true, definitelyNotAccepted: false };
+      return { ok: false, kind: "transport", reason: `jito_http_${res.status}${tail}` };
     }
-    // A "vote account lock" reject is route-fixable: THIS route happened to
-    // touch a writable vote account (a quirk of some DEX hops), which the block
-    // engine refuses. The bundle was provably rejected at validation — it never
-    // entered the engine, so the signed tx cannot land (definitelyNotAccepted).
-    // A bigger tip can't help; the caller must re-quote a different route.
+    // A "vote account lock" reject is route-fixable: THIS route happened to touch a
+    // writable vote account (a quirk of some DEX hops), which the block engine
+    // refuses. The bundle was provably rejected at validation — it never entered the
+    // engine, so the signed tx cannot land. A bigger tip can't help; the caller must
+    // re-quote a different route.
     if (/cannot lock any vote accounts/i.test(detail)) {
-      return {
-        ok: false,
-        reason: `jito_http_${res.status}${tail}`,
-        retryable: true,
-        definitelyNotAccepted: true,
-        routeReject: true,
-      };
+      return { ok: false, kind: "route_reject", reason: `jito_http_${res.status}${tail}` };
     }
     // Other 4xx — a deterministic reject; retrying the same thing won't help.
-    return { ok: false, reason: `jito_http_${res.status}${tail}`, retryable: false, definitelyNotAccepted: false };
+    return { ok: false, kind: "abandon", reason: `jito_http_${res.status}${tail}` };
   }
   return parseSendBundleResponse(await res.json().catch(() => null));
 }
@@ -383,46 +380,39 @@ export async function submitSenderTransaction(tx: VersionedTransaction): Promise
       signal: AbortSignal.timeout(5_000),
     });
   } catch (err) {
-    // Network error / timeout — request MAY have reached Sender; ambiguous.
-    return { ok: false, reason: (err as Error).message, retryable: true, definitelyNotAccepted: false };
+    // Network error / timeout — request MAY have reached Sender; ambiguous →
+    // "transport" (the caller confirms the already-sent tx before rebuilding).
+    return { ok: false, kind: "transport", reason: (err as Error).message };
   }
   if (!res.ok) {
     const detail = await readErrSnippet(res);
     const tail = detail ? ` — ${detail}` : "";
     // Helius Sender wraps a too-big tx as HTTP 500 -32602 "base64 encoded too
     // large". It is a pre-submission validation reject (the tx never went out, so
-    // it cannot land); no tip can fix size — only a simpler route can. Flag it so
-    // the caller shrinks the route instead of pointlessly escalating the tip
-    // (which abandoned every sender-mode buy in prod on 2026-06-04). Checked
-    // before the generic 5xx branch, which would otherwise mark it ambiguous.
-    // retryable:false — the same tx is deterministically too big, not a transient
-    // blip; the caller keys recovery off `tooLarge`, checked before any retry.
+    // it cannot land); no tip can fix size — only a simpler route can. "too_large"
+    // so the caller shrinks the route instead of pointlessly escalating the tip
+    // (which abandoned every sender-mode buy in prod on 2026-06-04). Checked before
+    // the generic 5xx branch, which would otherwise mark it ambiguous transport.
     if (isTooLargeReason(detail)) {
-      return {
-        ok: false,
-        reason: `sender_http_${res.status}${tail}`,
-        retryable: false,
-        definitelyNotAccepted: true,
-        tooLarge: true,
-      };
+      return { ok: false, kind: "too_large", reason: `sender_http_${res.status}${tail}` };
     }
     if (res.status === 429) {
-      // Rejected at the gateway before submission — the tx provably never went
-      // out, so it cannot land. Safe to rebuild + resubmit immediately.
+      // Rejected at the gateway before submission — the tx provably never went out,
+      // so it cannot land. Safe to rebuild + resubmit immediately.
       return {
         ok: false,
+        kind: "rate_limit",
         reason: `sender_http_429${tail}`,
-        retryable: true,
-        definitelyNotAccepted: true,
         retryAfterMs: parseRetryAfterMs(res.headers.get("retry-after")) ?? undefined,
       };
     }
     if (res.status >= 500) {
       // Helius Sender wraps client errors (e.g. -32602 InvalidParams, bad tip) in
-      // an HTTP 500, so the snippet is the only signal of WHY — surface it.
-      return { ok: false, reason: `sender_http_${res.status}${tail}`, retryable: true, definitelyNotAccepted: false };
+      // an HTTP 500, so the snippet is the only signal of WHY — surface it. Ambiguous
+      // acceptance → "transport".
+      return { ok: false, kind: "transport", reason: `sender_http_${res.status}${tail}` };
     }
-    return { ok: false, reason: `sender_http_${res.status}${tail}`, retryable: false, definitelyNotAccepted: false };
+    return { ok: false, kind: "abandon", reason: `sender_http_${res.status}${tail}` };
   }
   return parseSendBundleResponse(await res.json().catch(() => null));
 }

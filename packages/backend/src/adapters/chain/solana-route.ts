@@ -24,7 +24,15 @@
  *   - Route-ladder exhaustion (too-large / no-route) threw the underlying error
  *     raw instead of the clean MEV-abandon path. Fix: exhaustion abandons cleanly.
  */
-import { tipForAttempt, type JitoSubmit, type TipFloorLamports } from "./jito.js";
+import { tipForAttempt, type JitoSubmit, type JitoSubmitFailure, type TipFloorLamports } from "./jito.js";
+
+/** Compile-time exhaustiveness guard. A `default:` branch that calls this fails to
+ *  typecheck the moment a new {@link JitoSubmitFailure} kind is added without a
+ *  matching case — turning "forgot to handle a kind" from a runtime surprise into a
+ *  build error. (This file IS in `tsc -p packages/backend`; the test dir is not.) */
+function assertNever(x: never): never {
+  throw new Error(`unhandled JitoSubmit failure kind: ${JSON.stringify(x)}`);
+}
 
 /** A Jupiter route constraint. Empty = Jupiter's default (rich) routing. */
 export interface RouteSpec {
@@ -110,42 +118,46 @@ export function planRouteRecovery(
 }
 
 /**
- * How the swap loop should react to a FAILED submit.
+ * How the swap loop should react to a FAILED submit, mapped 1:1 from the submit's
+ * {@link JitoSubmitFailure} `kind`. The kind already encodes the double-fill-safety
+ * of each reaction (see jito.ts), so no runtime guard is needed here — the unsafe
+ * combinations the old bool-bag allowed (e.g. a route-reject that was "maybe
+ * accepted", which a no-confirm reroute would double-fill over) are now
+ * unrepresentable, and `assertNever` makes a newly-added kind a BUILD error.
  *
- *  - "reroute":    route-fixable reject — re-quote a SIMPLER route at the SAME tip
- *                  (a bigger tip can never fix WHAT the route touches or how big it
- *                  is). Two flavours, distinguished by the loop's recovery plan:
- *                  a Jito "cannot lock any vote accounts" reject [submit.routeReject]
- *                  jumps to a direct route; a provider size reject (Helius Sender's
- *                  "base64 encoded too large") [submit.tooLarge] steps one rung down.
- *  - "rate-limit": gateway 429 — the bundle provably never entered the engine, so
- *                  the signed tx cannot land. Double-fill-safe to rebuild +
- *                  resubmit the SAME tier immediately (after a backoff).
- *                  [retryable && definitelyNotAccepted]
- *  - "transport":  ambiguous 5xx / network error. The server errored — a higher
- *                  tip can't fix that — so do NOT escalate the tip ladder. The
- *                  already-sent tx MIGHT have landed (caller confirms first); if
- *                  not, retry the SAME tier as a transient transport blip (capped).
- *                  [retryable && !definitelyNotAccepted]
- *  - "abandon":    a deterministic reject (4xx ≠ 429, not a vote lock). Retrying
- *                  or escalating changes nothing — confirm-or-abandon. [!retryable]
+ *  - "reroute":    route_reject / too_large — both pre-submission validation rejects
+ *                  (the tx provably never entered the engine), so re-quoting a
+ *                  simpler/different route at the SAME tip WITHOUT a confirm is
+ *                  double-fill-safe. The loop tells the two apart by `kind` (vote
+ *                  lock → direct route; size → one rung down); a tip fixes neither.
+ *  - "rate-limit": rate_limit (gateway 429) — provably never entered the engine, so
+ *                  double-fill-safe to rebuild + resubmit the SAME tier (after a
+ *                  backoff). Escalating the tip would burn budget on a rate limit.
+ *  - "transport":  transport (ambiguous 5xx / network) — the already-sent tx MIGHT
+ *                  have landed, so the caller confirms FIRST; if not, it retries the
+ *                  SAME tier (a server error is not "tip too low" → no escalation).
+ *  - "abandon":    abandon (deterministic 4xx ≠ 429, or an unparseable response) —
+ *                  retrying / escalating changes nothing; confirm-then-give-up.
  *
- * A genuine "accepted but did not land" (tip too low) is NOT produced here — that
- * is the confirmOrExpire "expired" path, the only case that escalates the tip.
+ * A genuine "accepted but did not land" (tip too low) is NOT produced here — that is
+ * the confirmOrExpire "expired" path, the only case that escalates the tip.
  */
 export function classifySubmitFailure(
-  submit: Extract<JitoSubmit, { ok: false }>,
+  submit: JitoSubmitFailure,
 ): "reroute" | "rate-limit" | "transport" | "abandon" {
-  // A reroute rebuilds a fresh tx WITHOUT a confirm, which is only safe when the
-  // bundle provably never entered the engine. jito.ts always pairs routeReject /
-  // tooLarge with definitelyNotAccepted (both are pre-submission validation
-  // rejects); this guard makes the safety explicit so a (theoretical) one without
-  // it falls through to a confirm-first path below instead of silently rebuilding
-  // over a possibly-live tx.
-  if ((submit.routeReject || submit.tooLarge) && submit.definitelyNotAccepted) return "reroute";
-  if (submit.retryable && submit.definitelyNotAccepted) return "rate-limit";
-  if (submit.retryable) return "transport";
-  return "abandon";
+  switch (submit.kind) {
+    case "route_reject":
+    case "too_large":
+      return "reroute";
+    case "rate_limit":
+      return "rate-limit";
+    case "transport":
+      return "transport";
+    case "abandon":
+      return "abandon";
+    default:
+      return assertNever(submit);
+  }
 }
 
 /** Exponential backoff (ms) for the Nth (1-based) transient retry, capped at 5s. */
@@ -278,7 +290,7 @@ export async function executeProtectedSwap(
         // NOT change which DEX Jupiter picks, so it re-hits the lock); a too-large
         // tx just needs a SMALLER one, so step one rung down. Either way the tip is
         // unchanged — neither is fixable by bidding higher.
-        const failure: RouteFailure = submit.tooLarge ? "too_large" : "vote_lock";
+        const failure: RouteFailure = submit.kind === "too_large" ? "too_large" : "vote_lock";
         const next = planRouteRecovery(routeLadder.length, routeStep, failure);
         if (next) {
           routeStep = next.step;
@@ -300,7 +312,11 @@ export async function executeProtectedSwap(
           lastReason = `rate-limited (${submit.reason}) — gave up after ${maxTransientRetries} retries`;
           break;
         }
-        const backoff = submit.retryAfterMs ?? transientBackoffMs(rateLimitRetries);
+        // retryAfterMs lives ONLY on the rate_limit kind (the type enforces this);
+        // narrow by kind to read it, falling back to our own exponential backoff.
+        const backoff =
+          (submit.kind === "rate_limit" ? submit.retryAfterMs : undefined) ??
+          transientBackoffMs(rateLimitRetries);
         deps.log.warn(
           `solana/jito: ${submit.reason} (rate limit) — backing off ${backoff}ms, retry ${rateLimitRetries}/${maxTransientRetries} at tier ${tier + 1}`,
         );

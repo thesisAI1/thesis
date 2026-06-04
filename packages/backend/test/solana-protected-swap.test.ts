@@ -17,7 +17,7 @@ import {
   type RouteSpec,
   type SwapAttempt,
 } from "../src/adapters/chain/solana-route.js";
-import type { JitoSubmit } from "../src/adapters/chain/jito.js";
+import type { JitoSubmitFailure } from "../src/adapters/chain/jito.js";
 
 const FLOOR = { p50: 10_000, p75: 100_000, p95: 1_000_000 };
 
@@ -30,10 +30,10 @@ const okAttempt = (outAmount = "1000", sig = "sig1"): SwapAttempt => ({
   built: BUILT(sig),
 });
 
-/** An attempt whose submit FAILED with the given classification flags. */
-const failAttempt = (submit: Partial<Extract<JitoSubmit, { ok: false }>>, sig = "sig1"): SwapAttempt => ({
+/** An attempt whose submit FAILED with the given discriminated-union failure. */
+const failAttempt = (submit: Omit<JitoSubmitFailure, "ok">, sig = "sig1"): SwapAttempt => ({
   outAmount: "1000",
-  submit: { ok: false, reason: "x", ...submit },
+  submit: { ok: false, ...submit } as JitoSubmitFailure,
   built: BUILT(sig),
 });
 
@@ -86,7 +86,7 @@ test("vote-lock at the rich route jumps to direct routes and lands (entry saved)
   const deps = makeDeps(rec, {
     attempt: async (call) =>
       call === 0
-        ? failAttempt({ routeReject: true, retryable: true, definitelyNotAccepted: true, reason: "jito_http_400 vote" })
+        ? failAttempt({ kind: "route_reject", reason: "jito_http_400 vote" })
         : okAttempt("1234", "sigDirect"),
     confirmOrExpire: async () => "landed",
   });
@@ -112,7 +112,7 @@ test("vote-lock then no direct route abandons cleanly (no raw Jupiter 400 thrown
   const deps = makeDeps(rec, {
     attempt: async (call) => {
       if (call === 0) {
-        return failAttempt({ routeReject: true, retryable: true, definitelyNotAccepted: true, reason: "jito_http_400 vote" });
+        return failAttempt({ kind: "route_reject", reason: "jito_http_400 vote" });
       }
       // Direct-routes re-quote finds NO route — prod threw this raw and LOST the
       // entry. Now it must surface as a clean abandon result.
@@ -134,7 +134,7 @@ test("ambiguous 5xx submit errors retry the same tier (do NOT burn the tip ladde
   const deps = makeDeps(rec, {
     // Every submit is a server 500 (retryable, ambiguous), tx never lands.
     attempt: async () =>
-      failAttempt({ reason: "sender_http_500", retryable: true, definitelyNotAccepted: false }),
+      failAttempt({ kind: "transport", reason: "sender_http_500" }),
     confirmOrExpire: async () => "expired",
     maxTransientRetries: 3,
     maxAttempts: 8,
@@ -206,12 +206,7 @@ test("submit-side tooLarge (Helius Sender) steps one rung down (same tier) and l
   const deps = makeDeps(rec, {
     attempt: async (call) =>
       call === 0
-        ? failAttempt({
-            reason: "sender_http_500 base64 encoded too large",
-            tooLarge: true,
-            retryable: false,
-            definitelyNotAccepted: true,
-          })
+        ? failAttempt({ kind: "too_large", reason: "sender_http_500 base64 encoded too large" })
         : okAttempt("888", "sigSmaller"),
     confirmOrExpire: async () => "landed",
   });
@@ -224,7 +219,7 @@ test("submit-side tooLarge (Helius Sender) steps one rung down (same tier) and l
   assert.deepEqual(rec.routes[1], { maxAccounts: 48 });
   // Same tier — a size reject never escalates the tip.
   assert.equal(rec.tips[0], rec.tips[1]);
-  // No confirm before reroute: tooLarge is definitelyNotAccepted (tx never went out).
+  // No confirm before reroute: kind too_large is a pre-submission reject (tx never went out).
   assert.equal(rec.confirms, 1); // only the landed second attempt
 });
 
@@ -257,12 +252,7 @@ test("submit-side tooLarge at every rung (incl. the last direct route) abandons 
   const rec: Recorder = { routes: [], tips: [], confirms: 0 };
   const deps = makeDeps(rec, {
     attempt: async () =>
-      failAttempt({
-        reason: "sender_http_500 base64 encoded too large",
-        tooLarge: true,
-        retryable: false,
-        definitelyNotAccepted: true,
-      }),
+      failAttempt({ kind: "too_large", reason: "sender_http_500 base64 encoded too large" }),
   });
 
   const res = await executeProtectedSwap(deps); // must terminate, not loop forever
@@ -271,7 +261,7 @@ test("submit-side tooLarge at every rung (incl. the last direct route) abandons 
   // Walked the whole ladder ONCE: 64 → 48 → 32 → direct (4 quotes), then abandoned.
   assert.equal(rec.routes.length, 4);
   assert.deepEqual(rec.routes[3], { onlyDirectRoutes: true });
-  // No confirm before reroute — tooLarge is definitelyNotAccepted (tx never went out).
+  // No confirm before reroute — kind too_large is a pre-submission reject (tx never went out).
   assert.equal(rec.confirms, 0);
 });
 
@@ -297,7 +287,7 @@ test("429 retries the same tier WITHOUT a confirm (provably not accepted)", asyn
   const deps = makeDeps(rec, {
     attempt: async (call) =>
       call === 0
-        ? failAttempt({ reason: "jito_http_429", retryable: true, definitelyNotAccepted: true, retryAfterMs: 1 })
+        ? failAttempt({ kind: "rate_limit", reason: "jito_http_429", retryAfterMs: 1 })
         : okAttempt("1", "sigOk"),
     confirmOrExpire: async () => "landed",
   });
@@ -316,7 +306,7 @@ test("deterministic reject (non-retryable 4xx) confirms then abandons cleanly", 
   const deps = makeDeps(rec, {
     // A deterministic 4xx (e.g. malformed) — retrying/escalating can't help, but
     // the tx might have been sent, so confirm before giving up.
-    attempt: async () => failAttempt({ reason: "jito_http_400", retryable: false }),
+    attempt: async () => failAttempt({ kind: "abandon", reason: "jito_http_400" }),
     confirmOrExpire: async () => "expired",
   });
 
@@ -336,7 +326,7 @@ test("abandon path whose tx actually LANDED returns success (no double-fill on a
     // confirm-before-give-up must surface success, NOT abandon — abandoning would let
     // the caller treat a filled buy as failed and re-fire → DOUBLE-FILL over a live
     // position. Same guard the 5xx-landed test pins, on the deterministic-reject path.
-    attempt: async () => failAttempt({ reason: "jito_http_400", retryable: false }, "sigAbandonLanded"),
+    attempt: async () => failAttempt({ kind: "abandon", reason: "jito_http_400" }, "sigAbandonLanded"),
     confirmOrExpire: async () => "landed",
   });
 
@@ -371,7 +361,7 @@ test("a 5xx whose tx actually LANDED returns success (confirm-before-rebuild)", 
   const rec: Recorder = { routes: [], tips: [], confirms: 0 };
   const deps = makeDeps(rec, {
     // Ambiguous 500, but the bundle DID land — must be detected, not rebuilt over.
-    attempt: async () => failAttempt({ reason: "sender_http_500", retryable: true, definitelyNotAccepted: false }, "sigLanded"),
+    attempt: async () => failAttempt({ kind: "transport", reason: "sender_http_500" }, "sigLanded"),
     confirmOrExpire: async () => "landed",
   });
 

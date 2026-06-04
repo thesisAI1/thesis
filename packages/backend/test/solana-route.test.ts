@@ -21,7 +21,7 @@ import {
   transientBackoffMs,
   describeRoute,
 } from "../src/adapters/chain/solana-route.js";
-import type { JitoSubmit } from "../src/adapters/chain/jito.js";
+import type { JitoSubmitFailure } from "../src/adapters/chain/jito.js";
 
 // --- classifyRouteError -------------------------------------------------------
 
@@ -86,71 +86,62 @@ test("planRouteRecovery: too_large / no_route at the last step → abandon (null
 
 // --- classifySubmitFailure ----------------------------------------------------
 
-const fail = (o: Partial<Extract<JitoSubmit, { ok: false }>>): Extract<JitoSubmit, { ok: false }> => ({
-  ok: false,
-  reason: "x",
-  ...o,
+const fail = (o: Omit<JitoSubmitFailure, "ok">): JitoSubmitFailure => ({ ok: false, ...o } as JitoSubmitFailure);
+
+test("classifySubmitFailure: route_reject (vote-account lock) → reroute", () => {
+  assert.equal(classifySubmitFailure(fail({ kind: "route_reject", reason: "jito_http_400 vote" })), "reroute");
 });
 
-test("classifySubmitFailure: vote-account reject → reroute", () => {
-  assert.equal(
-    classifySubmitFailure(fail({ routeReject: true, retryable: true, definitelyNotAccepted: true })),
-    "reroute",
-  );
+test("classifySubmitFailure: too_large (Helius Sender size reject) → reroute", () => {
+  // jito.ts emits kind too_large for the sender_http_500 "base64 encoded too large":
+  // a pre-submission size reject the caller must shrink the route for — never retry
+  // or escalate the tip (untreated it retried the SAME oversized tx until it gave up).
+  assert.equal(classifySubmitFailure(fail({ kind: "too_large", reason: "sender_http_500 base64 too large" })), "reroute");
 });
 
-test("classifySubmitFailure: 429 (definitely not accepted) → rate-limit", () => {
+test("classifySubmitFailure: rate_limit (gateway 429) → rate-limit", () => {
+  assert.equal(classifySubmitFailure(fail({ kind: "rate_limit", reason: "jito_http_429" })), "rate-limit");
+  // retryAfterMs is carried on this kind (and the type permits it on no other):
   assert.equal(
-    classifySubmitFailure(fail({ reason: "jito_http_429", retryable: true, definitelyNotAccepted: true })),
+    classifySubmitFailure(fail({ kind: "rate_limit", reason: "jito_http_429", retryAfterMs: 250 })),
     "rate-limit",
   );
 });
 
-test("classifySubmitFailure: ambiguous 5xx / network → transport (NOT a tip problem)", () => {
-  // THE FIX for the 19 sender_http_500s that burned the whole tip ladder. A
-  // server 500 is retryable but NOT definitely-not-accepted → transport.
-  assert.equal(
-    classifySubmitFailure(fail({ reason: "sender_http_500", retryable: true, definitelyNotAccepted: false })),
-    "transport",
-  );
-  assert.equal(
-    classifySubmitFailure(fail({ reason: "fetch failed", retryable: true, definitelyNotAccepted: false })),
-    "transport",
-  );
+test("classifySubmitFailure: transport (ambiguous 5xx / network) → transport (NOT a tip problem)", () => {
+  // THE FIX for the 19 sender_http_500s that burned the whole tip ladder. A server
+  // 500 / network blip is ambiguous (the tx MIGHT have landed) → confirm-first, do
+  // NOT escalate the tip.
+  assert.equal(classifySubmitFailure(fail({ kind: "transport", reason: "sender_http_500" })), "transport");
+  assert.equal(classifySubmitFailure(fail({ kind: "transport", reason: "fetch failed" })), "transport");
 });
 
-test("classifySubmitFailure: deterministic 4xx (not retryable) → abandon", () => {
-  assert.equal(classifySubmitFailure(fail({ reason: "jito_http_400", retryable: false })), "abandon");
+test("classifySubmitFailure: abandon (deterministic 4xx / unparseable) → abandon", () => {
+  assert.equal(classifySubmitFailure(fail({ kind: "abandon", reason: "jito_http_400" })), "abandon");
 });
 
-test("classifySubmitFailure: routeReject WITHOUT definitelyNotAccepted does NOT fast-path reroute", () => {
-  // Defensive: a reroute rebuilds without a confirm, only safe when the bundle
-  // provably never entered the engine. Absent that flag, it must fall through to
-  // a confirm-first path (transport here), never the no-confirm reroute.
-  assert.equal(
-    classifySubmitFailure(fail({ routeReject: true, retryable: true, definitelyNotAccepted: false })),
-    "transport",
-  );
-});
-
-test("classifySubmitFailure: tooLarge (Helius Sender size reject) → reroute", () => {
-  // THE FIX for the sender_http_500 "base64 encoded too large" that, untreated,
-  // was classified "transport" → retried the SAME oversized tx until it gave up.
-  // jito.ts flags it tooLarge + definitelyNotAccepted (the tx never went out), so
-  // it must reroute to a SMALLER route, not retry or escalate the tip.
-  assert.equal(
-    classifySubmitFailure(fail({ reason: "sender_http_500 base64 too large", tooLarge: true, definitelyNotAccepted: true })),
-    "reroute",
-  );
-});
-
-test("classifySubmitFailure: tooLarge WITHOUT definitelyNotAccepted does NOT fast-path reroute", () => {
-  // Same defensive guard as routeReject: no no-confirm rebuild unless the tx
-  // provably never entered the engine.
-  assert.equal(
-    classifySubmitFailure(fail({ tooLarge: true, retryable: true, definitelyNotAccepted: false })),
-    "transport",
-  );
+test("classifySubmitFailure: every failure kind maps to exactly one action (exhaustive)", () => {
+  // Replaces the old 'routeReject/tooLarge WITHOUT definitelyNotAccepted → transport'
+  // defensive tests. Those pinned a RUNTIME guard against an illegal bool-bag combo
+  // (a no-confirm reroute over a possibly-live tx → double-fill). With the kind-union
+  // that combo is UNREPRESENTABLE — route_reject/too_large are provably-not-accepted
+  // by construction — and the compile-time assertNever in classifySubmitFailure
+  // enforces totality. Since the test dir isn't typechecked, this table ALSO pins the
+  // full kind→action mapping at runtime (and breaks loudly if a kind is added).
+  const table: Record<JitoSubmitFailure["kind"], "reroute" | "rate-limit" | "transport" | "abandon"> = {
+    route_reject: "reroute",
+    too_large: "reroute",
+    rate_limit: "rate-limit",
+    transport: "transport",
+    abandon: "abandon",
+  };
+  for (const [kind, action] of Object.entries(table)) {
+    assert.equal(
+      classifySubmitFailure(fail({ kind: kind as JitoSubmitFailure["kind"], reason: "x" })),
+      action,
+      `kind ${kind} should map to ${action}`,
+    );
+  }
 });
 
 // --- buildRouteLadder / describeRoute / transientBackoffMs --------------------

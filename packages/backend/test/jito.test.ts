@@ -133,14 +133,16 @@ test("parseSendBundleResponse: result → ok with bundleId", () => {
   });
 });
 
-test("parseSendBundleResponse: error → not-ok with the rpc message", () => {
+test("parseSendBundleResponse: error → not-ok (abandon) with the rpc message", () => {
+  // An in-body JSON-RPC error from a 2xx response is deterministic — nothing to
+  // retry or re-route — so it classifies as kind "abandon".
   const r = parseSendBundleResponse({ error: { message: "rate limited" } });
-  assert.deepEqual(r, { ok: false, reason: "rate limited" });
+  assert.deepEqual(r, { ok: false, kind: "abandon", reason: "rate limited" });
 });
 
-test("parseSendBundleResponse: missing result / malformed → not-ok", () => {
-  assert.deepEqual(parseSendBundleResponse({}), { ok: false, reason: "missing_bundle_id" });
-  assert.deepEqual(parseSendBundleResponse(null), { ok: false, reason: "malformed_response" });
+test("parseSendBundleResponse: missing result / malformed → not-ok (abandon)", () => {
+  assert.deepEqual(parseSendBundleResponse({}), { ok: false, kind: "abandon", reason: "missing_bundle_id" });
+  assert.deepEqual(parseSendBundleResponse(null), { ok: false, kind: "abandon", reason: "malformed_response" });
 });
 
 // --- isTooLargeReason: "tx too big to land" classifier -------------------------
