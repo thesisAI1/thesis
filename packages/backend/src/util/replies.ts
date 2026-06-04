@@ -3,10 +3,6 @@
 import type { Chain } from "@thesis/shared";
 import { nativeSymbol, explorerTxUrl } from "./chains.js";
 
-function bscTx(hash: string): string {
-  return `https://basescan.org/tx/${hash}`;
-}
-
 /** Format a USD market cap compactly: 120000 -> "$120K". */
 function marketCap(usd: number): string {
   if (usd >= 1_000_000) return `$${(usd / 1_000_000).toFixed(usd >= 10_000_000 ? 0 : 1)}M`;
@@ -22,13 +18,15 @@ export function buyReplyText(o: {
   takeProfits: ReadonlyArray<{ gainPct: number }>;
   stopLossPct: number;
   txHash: string;
+  /** Trade chain — native unit (SOL/ETH) and explorer link are per chain. */
+  chain: Chain;
 }): string {
   const ladder = o.takeProfits.map((t) => `+${t.gainPct}%`).join(" / ");
   return [
     `Reviewed & funded by the committee — Grade ${o.grade}.`,
-    `Bought ${o.amountEth.toFixed(3)} ETH at ~${marketCap(o.marketCapUsd)} market cap.`,
+    `Bought ${o.amountEth.toFixed(3)} ${nativeSymbol(o.chain)} at ~${marketCap(o.marketCapUsd)} market cap.`,
     `Laddered take-profit at ${ladder}; stop-loss -${o.stopLossPct}%.`,
-    bscTx(o.txHash),
+    explorerTxUrl(o.chain, o.txHash),
   ].join("\n");
 }
 

@@ -289,6 +289,7 @@ async function replyOnBuy(submission: Submission, result: ReviewResult): Promise
     takeProfits: config.trading.takeProfitTiers,
     stopLossPct: config.trading.stopLossPct,
     txHash: result.position.entryTxHash,
+    chain: result.position.order.chain,
   });
   try {
     const replyId = await createXAdapter().replyToPost(submission.postId, text);
