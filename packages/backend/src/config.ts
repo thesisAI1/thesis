@@ -171,6 +171,21 @@ export const config = {
      *  fires only AFTER this blockhash is provably dead). 0 = Jupiter default
      *  (~150 slots / ~60s — safe but slow to escalate). */
     jitoBlockhashSlotsToExpiry: num("SOLANA_JITO_BLOCKHASH_SLOTS_TO_EXPIRY", 16),
+    /** Minimum spacing between Jito sendBundle calls, in ms. The free public
+     *  block engine rate-limits per IP (~1 req/s); firing bundles in a burst
+     *  (the escalation ladder, or a buy + a monitor sell at once) trips HTTP 429
+     *  and the swap gets abandoned. We serialise submissions at least this far
+     *  apart to stay under the limit. ~1s matches the free tier; lower it if you
+     *  move to a Jito API key / dedicated endpoint with a higher quota. */
+    jitoMinSubmitIntervalMs: num("SOLANA_JITO_MIN_SUBMIT_INTERVAL_MS", 1_000),
+    /** How many times to ride out a TRANSIENT Jito submit failure (HTTP 429 /
+     *  5xx / network) at the SAME tip before giving up. A 429 means "slow down",
+     *  NOT "tip too low" — escalating the tip can't fix a rate limit, so instead
+     *  we back off and resubmit the same tier. Resubmitting an identical signed
+     *  tx is idempotent (a signature lands at most once) so this never
+     *  double-buys. ~15 retries × (throttle + backoff) ≈ up to ~1min of riding
+     *  out a rate-limit spike rather than losing the entry. */
+    jitoMaxTransientRetries: num("SOLANA_JITO_MAX_TRANSIENT_RETRIES", 15),
   },
 
   llm: {
@@ -379,6 +394,8 @@ export function validateConfig(): void {
   range("SOLANA_JITO_MAX_TIP_LAMPORTS", config.solana.jitoMaxTipLamports, 1_000, BIG);
   range("SOLANA_JITO_MAX_ATTEMPTS", config.solana.jitoMaxAttempts, 1, 20);
   range("SOLANA_JITO_BLOCKHASH_SLOTS_TO_EXPIRY", config.solana.jitoBlockhashSlotsToExpiry, 0, 150);
+  range("SOLANA_JITO_MIN_SUBMIT_INTERVAL_MS", config.solana.jitoMinSubmitIntervalMs, 0, 60_000);
+  range("SOLANA_JITO_MAX_TRANSIENT_RETRIES", config.solana.jitoMaxTransientRetries, 0, 100);
 
   // service loop intervals — 0 would hot-loop the self-rescheduling loops.
   range("POLL_INTERVAL_SEC", config.service.pollIntervalSec, 1, DAY_SEC);

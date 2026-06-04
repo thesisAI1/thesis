@@ -284,19 +284,66 @@ export class RealSolanaChain implements ChainAdapter {
     }
 
     const floor = await fetchTipFloor();
-    const maxAttempts = config.solana.jitoMaxAttempts;
+    const escalationSteps = config.solana.jitoMaxAttempts;
     const maxTip = config.solana.jitoMaxTipLamports;
+    const maxTransient = config.solana.jitoMaxTransientRetries;
     let lastReason = "no attempts made";
+    let transientRetries = 0;
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      const tip = tipForAttempt(floor, attempt, { maxLamports: maxTip });
+    // `tier` is the tip-escalation level; it advances ONLY on a genuine
+    // "accepted but did not land" (tip too low) or a deterministic reject — never
+    // on a rate-limit, which a higher tip can't fix.
+    let tier = 0;
+    while (tier < escalationSteps) {
+      const tip = tipForAttempt(floor, tier, { maxLamports: maxTip });
       const quote = await this.getQuote(inputMint, outputMint, amount);
       const built = await this.buildSwapTx(quote, tip);
 
       const submit = await submitJitoBundle(built.tx);
       if (!submit.ok) {
-        lastReason = `jito submit rejected (${submit.reason}) at tip ${tip}`;
-        log.warn(`solana/jito: attempt ${attempt + 1}/${maxAttempts} — ${lastReason}`);
+        // HTTP 429 — the block engine provably never took the bundle, so the
+        // signed tx cannot land. Back off and resubmit the SAME tier (a fresh
+        // tx/blockhash is built next loop). Double-fill-safe: the rejected tx is
+        // dead-on-arrival. Escalating the tip here would just burn the budget.
+        if (submit.retryable && submit.definitelyNotAccepted) {
+          transientRetries++;
+          if (transientRetries > maxTransient) {
+            lastReason = `jito rate-limited (${submit.reason}) — gave up after ${maxTransient} retries`;
+            break;
+          }
+          const backoff =
+            submit.retryAfterMs ?? Math.min(5_000, 400 * 2 ** Math.min(transientRetries - 1, 4));
+          log.warn(
+            `solana/jito: ${submit.reason} (rate limit) — backing off ${backoff}ms, ` +
+              `retry ${transientRetries}/${maxTransient} at tier ${tier + 1}`,
+          );
+          await new Promise((r) => setTimeout(r, backoff));
+          continue; // same tier, same tip
+        }
+
+        // Ambiguous (5xx / network) or a deterministic reject. The tx we just
+        // sent MIGHT have landed (the request may have reached the engine), so
+        // confirm-or-expire it BEFORE building a new one — never blind-rebuild
+        // over a possibly-live tx, that could double-fill.
+        const maybeLanded = await this.confirmOrExpire(
+          built.signature,
+          built.blockhash,
+          built.lastValidBlockHeight,
+        );
+        if (maybeLanded === "landed") {
+          log.info(
+            `solana/jito: swap landed despite submit error (${submit.reason}) ` +
+              `at tier ${tier + 1} (tip ${tip}) — tx ${built.signature}`,
+          );
+          return { txHash: built.signature, outAmount: quote.outAmount };
+        }
+        lastReason = `jito submit failed (${submit.reason}) at tip ${tip}`;
+        log.warn(`solana/jito: tier ${tier + 1}/${escalationSteps} — ${lastReason}, escalating`);
+        tier++;
+        if (tip >= maxTip) {
+          lastReason = `tip cap ${maxTip} lamports reached, still not landing`;
+          break;
+        }
         continue;
       }
 
@@ -307,15 +354,17 @@ export class RealSolanaChain implements ChainAdapter {
       );
       if (outcome === "landed") {
         log.info(
-          `solana/jito: swap landed on attempt ${attempt + 1}/${maxAttempts} ` +
+          `solana/jito: swap landed on tier ${tier + 1}/${escalationSteps} ` +
             `(tip ${tip} lamports) — tx ${built.signature}`,
         );
         return { txHash: built.signature, outAmount: quote.outAmount };
       }
 
+      // Accepted but expired without landing = tip too low → escalate.
       lastReason = `bundle expired without landing at tip ${tip}`;
-      log.warn(`solana/jito: attempt ${attempt + 1}/${maxAttempts} — ${lastReason}, escalating`);
-      // Tip already pinned at the cap → a further retry would bid the same and
+      log.warn(`solana/jito: tier ${tier + 1}/${escalationSteps} — ${lastReason}, escalating`);
+      tier++;
+      // Tip already pinned at the cap → a further tier would bid the same and
       // fail the same way. Stop and abandon rather than burn attempts.
       if (tip >= maxTip) {
         lastReason = `tip cap ${maxTip} lamports reached, still not landing`;
@@ -334,7 +383,7 @@ export class RealSolanaChain implements ChainAdapter {
         `NOT broadcast on public RPC (MEV-protected mode).`,
     });
     throw new Error(
-      `solana/jito: swap abandoned after ${maxAttempts} attempts — ${lastReason}. ` +
+      `solana/jito: swap abandoned after ${escalationSteps} tiers — ${lastReason}. ` +
         `Raise SOLANA_JITO_MAX_TIP_LAMPORTS / SOLANA_JITO_MAX_ATTEMPTS if this recurs.`,
     );
   }

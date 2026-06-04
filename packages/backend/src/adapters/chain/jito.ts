@@ -117,10 +117,31 @@ export function buildSendBundleBody(base58Tx: string): string {
   });
 }
 
-/** Outcome of a Jito bundle submission (acceptance, NOT on-chain landing). */
+/**
+ * Outcome of a Jito bundle submission (acceptance, NOT on-chain landing).
+ *
+ * On failure the extra flags tell the caller how to react safely:
+ *  - `retryable`            — a transient failure (HTTP 429 / 5xx / network); the
+ *                             same tip can be re-tried (escalating it won't help).
+ *  - `definitelyNotAccepted`— the block engine provably never took the bundle
+ *                             (HTTP 429 = rejected at the gateway). The signed tx
+ *                             could not have landed, so it is SAFE to rebuild a
+ *                             fresh tx and resubmit immediately. When this is
+ *                             false the outcome is AMBIGUOUS (e.g. a network
+ *                             timeout after the request left), so the caller must
+ *                             first confirm-or-expire the tx it already sent
+ *                             before building a new one — otherwise a resend
+ *                             could double-fill.
+ */
 export type JitoSubmit =
   | { ok: true; bundleId: string }
-  | { ok: false; reason: string };
+  | {
+      ok: false;
+      reason: string;
+      retryable?: boolean;
+      definitelyNotAccepted?: boolean;
+      retryAfterMs?: number;
+    };
 
 /** Parse a Jito `sendBundle` JSON-RPC response. Pure → testable. */
 export function parseSendBundleResponse(json: unknown): JitoSubmit {
@@ -129,6 +150,17 @@ export function parseSendBundleResponse(json: unknown): JitoSubmit {
   if (r.error) return { ok: false, reason: r.error.message ?? "jito_rpc_error" };
   if (typeof r.result !== "string") return { ok: false, reason: "missing_bundle_id" };
   return { ok: true, bundleId: r.result };
+}
+
+/** Parse an HTTP `Retry-After` header (delta-seconds or an HTTP date) into ms.
+ *  Returns null when absent/unparseable. Pure → testable. */
+export function parseRetryAfterMs(header: string | null, now: number = Date.now()): number | null {
+  if (!header) return null;
+  const secs = Number(header);
+  if (Number.isFinite(secs)) return Math.max(0, Math.round(secs * 1000));
+  const when = Date.parse(header);
+  if (Number.isFinite(when)) return Math.max(0, when - now);
+  return null;
 }
 
 // --- IO wrappers (thin) --------------------------------------------------------
@@ -168,6 +200,25 @@ export async function fetchTipFloor(now: number = Date.now()): Promise<TipFloorL
 }
 
 /**
+ * Client-side submit throttle. The free Jito block engine rate-limits sendBundle
+ * per IP (~1 req/s); a burst (escalation ladder, or a buy racing a monitor sell)
+ * trips HTTP 429. We reserve a time slot for each submission so concurrent
+ * callers are spaced at least `jitoMinSubmitIntervalMs` apart. `nextSlotAtMs` is
+ * read+written synchronously (before any await), so two overlapping callers can't
+ * grab the same slot.
+ */
+let nextSlotAtMs = 0;
+async function throttleSubmit(): Promise<void> {
+  const interval = config.solana.jitoMinSubmitIntervalMs;
+  if (interval <= 0) return;
+  const now = Date.now();
+  const slot = Math.max(now, nextSlotAtMs);
+  nextSlotAtMs = slot + interval; // reserve atomically (no await between read/write)
+  const wait = slot - now;
+  if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+}
+
+/**
  * Submit an already-signed transaction as a single-tx Jito bundle.
  *
  * ⚠ The caller MUST have embedded the tip transfer before signing — Jupiter does
@@ -175,10 +226,13 @@ export async function fetchTipFloor(now: number = Date.now()): Promise<TipFloorL
  * cannot) inspect the tx; a bundle with no tip will be dropped.
  *
  * Returns acceptance by the block engine only. On-chain landing is confirmed
- * separately by polling the transaction signature.
+ * separately by polling the transaction signature. Failures are classified
+ * (see {@link JitoSubmit}) so the caller can ride out a rate limit without
+ * escalating the tip or risking a double-fill.
  */
 export async function submitJitoBundle(tx: VersionedTransaction): Promise<JitoSubmit> {
   const base58Tx = bs58.encode(tx.serialize());
+  await throttleSubmit();
   let res: Response;
   try {
     res = await fetch(config.solana.jitoBundleUrl, {
@@ -188,8 +242,28 @@ export async function submitJitoBundle(tx: VersionedTransaction): Promise<JitoSu
       signal: AbortSignal.timeout(5_000),
     });
   } catch (err) {
-    return { ok: false, reason: (err as Error).message };
+    // Network error / timeout — the request MAY have reached the block engine,
+    // so acceptance is ambiguous: retryable, but NOT definitely-not-accepted.
+    return { ok: false, reason: (err as Error).message, retryable: true, definitelyNotAccepted: false };
   }
-  if (!res.ok) return { ok: false, reason: `jito_http_${res.status}` };
+  if (!res.ok) {
+    if (res.status === 429) {
+      // Rejected at the gateway — the bundle provably never entered the engine,
+      // so the signed tx cannot land. Safe to rebuild + resubmit immediately.
+      return {
+        ok: false,
+        reason: "jito_http_429",
+        retryable: true,
+        definitelyNotAccepted: true,
+        retryAfterMs: parseRetryAfterMs(res.headers.get("retry-after")) ?? undefined,
+      };
+    }
+    if (res.status >= 500) {
+      // Server-side error — ambiguous acceptance (the tx might have been taken).
+      return { ok: false, reason: `jito_http_${res.status}`, retryable: true, definitelyNotAccepted: false };
+    }
+    // Other 4xx — a deterministic reject; retrying the same thing won't help.
+    return { ok: false, reason: `jito_http_${res.status}`, retryable: false, definitelyNotAccepted: false };
+  }
   return parseSendBundleResponse(await res.json().catch(() => null));
 }
