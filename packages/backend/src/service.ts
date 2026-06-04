@@ -36,21 +36,28 @@ import {
 } from "./util/replies.js";
 import { TokenNotTradeableError } from "./adapters/basedata/index.js";
 
-let lastSeenId: string | undefined;
-
 /** One poll cycle: fetch mentions, triage them, enqueue the survivors. */
 export async function pollCycle(): Promise<void> {
   const store = getStore();
 
+  // Resume from the PERSISTED cursor, not an in-memory one: a restart used to
+  // reset the cursor to undefined, so the first poll re-scanned only the newest
+  // page and silently dropped any backlog beyond it.
+  const sinceId = (await store.getMentionCursor()) ?? undefined;
+
   let mentions;
   try {
-    mentions = await createXAdapter().pollMentions(lastSeenId);
+    mentions = await createXAdapter().pollMentions(sinceId);
   } catch (err) {
     log.warn(`poll: X mention fetch failed: ${String(err)}`);
     logEvent({ level: "warn", area: "service", type: "mention-fetch:failed", msg: `poll: X mention fetch failed: ${String(err)}` });
     return;
   }
-  for (const post of mentions) lastSeenId = newerId(lastSeenId, post.postId);
+  // Advance + persist the cursor so the NEXT poll (even after a restart) resumes
+  // here. Persist only when it actually moved.
+  let newest = sinceId;
+  for (const post of mentions) newest = newerId(newest, post.postId);
+  if (newest && newest !== sinceId) await store.setMentionCursor(newest);
 
   // Intercept author wallet replies (payouts) before triage — they are not
   // theses. Whatever is left flows on to the Step 1 triage filters.
@@ -88,7 +95,14 @@ async function replyToTriageRejects(
   const now = Date.now();
   for (const { post, reason } of rejected) {
     const last = triageReplyCooldown.get(post.authorXId) ?? 0;
-    if (now - last < TRIAGE_REPLY_COOLDOWN_MS) continue;
+    if (now - last < TRIAGE_REPLY_COOLDOWN_MS) {
+      // Suppressed by the per-author reply cooldown — log it so a "tagged but
+      // got no reply" author still leaves a trace (this was previously silent).
+      log.info(
+        `x: suppressed triage-reject reply to ${post.postId} (${post.authorHandle}) — ${reason.kind}, author replied within last 24h`,
+      );
+      continue;
+    }
     const text = triageRejectReplyText(reason);
     try {
       const replyId = await createXAdapter().replyToPost(post.postId, text);

@@ -156,6 +156,13 @@ export interface Store {
   /** The cumulative triage funnel. */
   getFunnel(): Promise<Funnel>;
 
+  /** The newest X mention id already polled — the `since_id` for the next poll,
+   *  or null if never polled (cold start). Persisted so a restart resumes from
+   *  where it left off instead of re-scanning only the newest page. */
+  getMentionCursor(): Promise<string | null>;
+  /** Advance the persisted poll cursor to `mentionId`. */
+  setMentionCursor(mentionId: string): Promise<void>;
+
   /** Submission dedup — has this X post already been reviewed? */
   isProcessed(postId: string): Promise<boolean>;
   markProcessed(postId: string): Promise<void>;
