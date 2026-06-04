@@ -20,7 +20,7 @@ import {
   type JupiterQuote,
   type JupiterSwap,
 } from "./jupiter-parse.js";
-import { fetchTipFloor, submitJitoBundle, tipForAttempt } from "./jito.js";
+import { fetchTipFloor, submitJitoBundle, submitSenderTransaction, tipForAttempt } from "./jito.js";
 
 /**
  * Real Solana client — the RealChain analogue. Swaps route through the Jupiter
@@ -287,6 +287,12 @@ export class RealSolanaChain implements ChainAdapter {
     const escalationSteps = config.solana.jitoMaxAttempts;
     const maxTip = config.solana.jitoMaxTipLamports;
     const maxTransient = config.solana.jitoMaxTransientRetries;
+    // Transport: Jito bundle (default) or Helius Sender. Both carry the SAME
+    // embedded Jito tip (anti-MEV unchanged); Sender just dual-routes at a far
+    // higher rate limit. Sender drops sub-minimum tips, so floor each rung.
+    const useSender = config.solana.submitMode === "sender";
+    const submitSwap = useSender ? submitSenderTransaction : submitJitoBundle;
+    const tipFloorLamports = useSender ? config.solana.senderMinTipLamports : 0;
     let lastReason = "no attempts made";
     let transientRetries = 0;
 
@@ -295,11 +301,11 @@ export class RealSolanaChain implements ChainAdapter {
     // on a rate-limit, which a higher tip can't fix.
     let tier = 0;
     while (tier < escalationSteps) {
-      const tip = tipForAttempt(floor, tier, { maxLamports: maxTip });
+      const tip = Math.max(tipFloorLamports, tipForAttempt(floor, tier, { maxLamports: maxTip }));
       const quote = await this.getQuote(inputMint, outputMint, amount);
       const built = await this.buildSwapTx(quote, tip);
 
-      const submit = await submitJitoBundle(built.tx);
+      const submit = await submitSwap(built.tx);
       if (!submit.ok) {
         // HTTP 429 — the block engine provably never took the bundle, so the
         // signed tx cannot land. Back off and resubmit the SAME tier (a fresh

@@ -186,6 +186,27 @@ export const config = {
      *  double-buys. ~15 retries × (throttle + backoff) ≈ up to ~1min of riding
      *  out a rate-limit spike rather than losing the entry. */
     jitoMaxTransientRetries: num("SOLANA_JITO_MAX_TRANSIENT_RETRIES", 15),
+    /** Which transport carries a protected swap to the chain:
+     *   - "jito"   (default) → private bundle to the free Jito block engine. Pure
+     *              private routing, but the free endpoint rate-limits ~1 req/s
+     *              per IP (HTTP 429).
+     *   - "sender" → Helius Sender (https://sender.helius-rpc.com/fast). Same
+     *              embedded Jito tip (still anti-MEV), but Helius DUAL-ROUTES the
+     *              tx to Jito AND its staked validator connections at once, at
+     *              ~50 TPS with no extra credits — so the 429 that abandons
+     *              entries effectively goes away. The tx still only lands once
+     *              (idempotent by signature), so retries never double-buy.
+     *  Flip via env, no logic redeploy. Default stays "jito" (zero change). */
+    submitMode: str("SOLANA_SUBMIT_MODE", "jito"),
+    /** Helius Sender endpoint. The global HTTPS host auto-routes to the nearest
+     *  of Helius's 7 regions; swap for a regional `http://<reg>-sender...` host to
+     *  shave latency. Keyless at the default 50 TPS. */
+    senderUrl: str("SOLANA_SENDER_URL", "https://sender.helius-rpc.com/fast"),
+    /** Sender's minimum Jito tip for the standard dual route is 0.0002 SOL =
+     *  200_000 lamports — below it Sender rejects the tx. When submitMode=sender
+     *  we floor each attempt's tip to this (still clamped to jitoMaxTipLamports).
+     *  Irrelevant in jito mode. */
+    senderMinTipLamports: num("SOLANA_SENDER_MIN_TIP_LAMPORTS", 200_000),
   },
 
   llm: {
@@ -396,6 +417,24 @@ export function validateConfig(): void {
   range("SOLANA_JITO_BLOCKHASH_SLOTS_TO_EXPIRY", config.solana.jitoBlockhashSlotsToExpiry, 0, 150);
   range("SOLANA_JITO_MIN_SUBMIT_INTERVAL_MS", config.solana.jitoMinSubmitIntervalMs, 0, 60_000);
   range("SOLANA_JITO_MAX_TRANSIENT_RETRIES", config.solana.jitoMaxTransientRetries, 0, 100);
+  // Sender floor must be a landable Jito tip; an unknown submitMode would silently
+  // pick the wrong transport, so reject it loudly at boot rather than mid-trade.
+  range("SOLANA_SENDER_MIN_TIP_LAMPORTS", config.solana.senderMinTipLamports, 1_000, BIG);
+  if (config.solana.submitMode !== "jito" && config.solana.submitMode !== "sender") {
+    problems.push(`SOLANA_SUBMIT_MODE: must be "jito" or "sender" (got ${raw("SOLANA_SUBMIT_MODE")})`);
+  } else if (
+    config.solana.submitMode === "sender" &&
+    Number.isFinite(config.solana.senderMinTipLamports) &&
+    Number.isFinite(config.solana.jitoMaxTipLamports) &&
+    config.solana.senderMinTipLamports > config.solana.jitoMaxTipLamports
+  ) {
+    // Sender floors each tip to its minimum; if that exceeds the cap, the cap can
+    // never bound spend — refuse the contradiction rather than silently overpay.
+    problems.push(
+      `SOLANA_SENDER_MIN_TIP_LAMPORTS (${config.solana.senderMinTipLamports}) must be <= ` +
+        `SOLANA_JITO_MAX_TIP_LAMPORTS (${config.solana.jitoMaxTipLamports}) in sender mode`,
+    );
+  }
 
   // service loop intervals — 0 would hot-loop the self-rescheduling loops.
   range("POLL_INTERVAL_SEC", config.service.pollIntervalSec, 1, DAY_SEC);

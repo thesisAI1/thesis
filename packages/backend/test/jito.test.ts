@@ -16,6 +16,7 @@ import {
   tipForAttempt,
   parseTipFloor,
   buildSendBundleBody,
+  buildSenderSendTxBody,
   parseSendBundleResponse,
   SAFE_DEFAULT_TIP_FLOOR,
   MIN_TIP_LAMPORTS,
@@ -112,6 +113,16 @@ test("buildSendBundleBody: valid JSON-RPC sendBundle with a single-tx bundle", (
   assert.equal(body.jsonrpc, "2.0");
   assert.equal(body.method, "sendBundle");
   assert.deepEqual(body.params, [["BASE58TX"]]);
+});
+
+test("buildSenderSendTxBody: base64 sendTransaction with skipPreflight + no retries", () => {
+  const body = JSON.parse(buildSenderSendTxBody("BASE64TX"));
+  assert.equal(body.jsonrpc, "2.0");
+  assert.equal(body.method, "sendTransaction");
+  assert.deepEqual(body.params, [
+    "BASE64TX",
+    { encoding: "base64", skipPreflight: true, maxRetries: 0 },
+  ]);
 });
 
 test("parseSendBundleResponse: result → ok with bundleId", () => {

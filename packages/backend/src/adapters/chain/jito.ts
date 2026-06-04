@@ -118,6 +118,22 @@ export function buildSendBundleBody(base58Tx: string): string {
 }
 
 /**
+ * JSON-RPC body for Helius Sender `sendTransaction`. Unlike a Jito bundle this is
+ * a single base64 tx with `skipPreflight` (the tx is already built + simulated by
+ * Jupiter) and `maxRetries: 0` (Sender does its own dual-route delivery; OUR loop
+ * owns retry/escalation, so we don't want the RPC silently re-broadcasting and
+ * muddying double-fill reasoning). Pure → testable.
+ */
+export function buildSenderSendTxBody(base64Tx: string): string {
+  return JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "sendTransaction",
+    params: [base64Tx, { encoding: "base64", skipPreflight: true, maxRetries: 0 }],
+  });
+}
+
+/**
  * Outcome of a Jito bundle submission (acceptance, NOT on-chain landing).
  *
  * On failure the extra flags tell the caller how to react safely:
@@ -264,6 +280,55 @@ export async function submitJitoBundle(tx: VersionedTransaction): Promise<JitoSu
     }
     // Other 4xx — a deterministic reject; retrying the same thing won't help.
     return { ok: false, reason: `jito_http_${res.status}`, retryable: false, definitelyNotAccepted: false };
+  }
+  return parseSendBundleResponse(await res.json().catch(() => null));
+}
+
+/**
+ * Submit an already-signed tx via Helius Sender (`sendTransaction`, base64).
+ *
+ * The Sender alternative to {@link submitJitoBundle}: same embedded Jito tip (so
+ * sandwich protection is preserved), but Helius dual-routes to Jito AND its
+ * staked validator connections at ~50 TPS, sidestepping the free Jito engine's
+ * ~1 req/s 429s that abandon entries. Caller MUST have floored the tip to
+ * `senderMinTipLamports` (Sender drops sub-minimum tips).
+ *
+ * Returns gateway ACCEPTANCE only — on-chain landing is confirmed separately by
+ * polling the signature (the JSON-RPC `result` is the signature, surfaced as
+ * `bundleId`). Failures are classified identically to the Jito path so the swap
+ * loop's 429-vs-ambiguous double-fill logic is unchanged.
+ */
+export async function submitSenderTransaction(tx: VersionedTransaction): Promise<JitoSubmit> {
+  const base64Tx = Buffer.from(tx.serialize()).toString("base64");
+  await throttleSubmit();
+  let res: Response;
+  try {
+    res = await fetch(config.solana.senderUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: buildSenderSendTxBody(base64Tx),
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch (err) {
+    // Network error / timeout — request MAY have reached Sender; ambiguous.
+    return { ok: false, reason: (err as Error).message, retryable: true, definitelyNotAccepted: false };
+  }
+  if (!res.ok) {
+    if (res.status === 429) {
+      // Rejected at the gateway before submission — the tx provably never went
+      // out, so it cannot land. Safe to rebuild + resubmit immediately.
+      return {
+        ok: false,
+        reason: "sender_http_429",
+        retryable: true,
+        definitelyNotAccepted: true,
+        retryAfterMs: parseRetryAfterMs(res.headers.get("retry-after")) ?? undefined,
+      };
+    }
+    if (res.status >= 500) {
+      return { ok: false, reason: `sender_http_${res.status}`, retryable: true, definitelyNotAccepted: false };
+    }
+    return { ok: false, reason: `sender_http_${res.status}`, retryable: false, definitelyNotAccepted: false };
   }
   return parseSendBundleResponse(await res.json().catch(() => null));
 }
