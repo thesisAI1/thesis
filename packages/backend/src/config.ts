@@ -105,9 +105,16 @@ export const config = {
      *  lever — replaces the loose static 8% with a route-aware value. Set
      *  SOLANA_DYNAMIC_SLIPPAGE=false to fall back to the static slippagePct. */
     dynamicSlippage: str("SOLANA_DYNAMIC_SLIPPAGE", "true") !== "false",
-    /** Hard ceiling for dynamic slippage, in bps (300 = 3%). Jupiter never
-     *  exceeds this even if its simulation estimates more. */
-    slippageMaxBps: num("SOLANA_SLIPPAGE_MAX_BPS", 300),
+    /** Hard ceiling for dynamic slippage, in bps (800 = 8%). Jupiter never
+     *  exceeds this even if its simulation estimates more — and with dynamic
+     *  slippage ON it still picks the TIGHTEST viable value per route, so this
+     *  is only the worst-case bound. Freshly-graduated pump.fun tokens move
+     *  several % within the quote→land window; a 3% cap made buys intermittently
+     *  revert (Pump.fun AMM custom error 6001 = ExceededSlippage), which Jito
+     *  then drops no matter the tip. 8% gives headroom. Safe because every swap
+     *  is a private Jito bundle (sandwich-proof), so a looser cap can't be
+     *  exploited by MEV. */
+    slippageMaxBps: num("SOLANA_SLIPPAGE_MAX_BPS", 800),
     /** Submit swaps as private Jito bundles instead of broadcasting on the
      *  public RPC — hides the tx from sandwich searchers. When ON (default),
      *  a swap that will not land is RETRIED with a higher tip, never broadcast
