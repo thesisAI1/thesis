@@ -18,6 +18,7 @@ import {
   buildSendBundleBody,
   buildSenderSendTxBody,
   parseSendBundleResponse,
+  isTooLargeReason,
   SAFE_DEFAULT_TIP_FLOOR,
   MIN_TIP_LAMPORTS,
   type TipFloorLamports,
@@ -140,4 +141,32 @@ test("parseSendBundleResponse: error → not-ok with the rpc message", () => {
 test("parseSendBundleResponse: missing result / malformed → not-ok", () => {
   assert.deepEqual(parseSendBundleResponse({}), { ok: false, reason: "missing_bundle_id" });
   assert.deepEqual(parseSendBundleResponse(null), { ok: false, reason: "malformed_response" });
+});
+
+// --- isTooLargeReason: "tx too big to land" classifier -------------------------
+// A swap whose Jupiter route is too complex to fit one 1232-byte Solana packet
+// cannot land no matter the tip — only a SIMPLER route can fix it. This shows up
+// as THREE different strings depending on where the size limit bites; all three
+// must be recognised so protectedSwap shrinks the route instead of escalating the
+// tip. The Helius-Sender form ("base64 encoded too large", inside a -32602 body)
+// was UNRECOGNISED in prod (2026-06-04) → every sender-mode buy burned its whole
+// tip ladder and abandoned. RED until isTooLargeReason exists.
+
+test("isTooLargeReason: recognises the Helius Sender size reject", () => {
+  assert.equal(
+    isTooLargeReason('-32602 ... "Invalid Request: base64 encoded too large", data: None'),
+    true,
+  );
+});
+
+test("isTooLargeReason: recognises the local serialize overruns + legacy too-large", () => {
+  assert.equal(isTooLargeReason("RangeError: encoding overruns Uint8Array"), true);
+  assert.equal(isTooLargeReason("Transaction too large: 1304 > 1232"), true);
+});
+
+test("isTooLargeReason: does NOT match tip/rate/route-content failures", () => {
+  assert.equal(isTooLargeReason("jito_http_429 — rate limited"), false);
+  assert.equal(isTooLargeReason("bundles cannot lock any vote accounts"), false);
+  assert.equal(isTooLargeReason("bundle expired without landing at tip 50000"), false);
+  assert.equal(isTooLargeReason(""), false);
 });

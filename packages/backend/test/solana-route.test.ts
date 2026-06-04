@@ -122,6 +122,26 @@ test("classifySubmitFailure: routeReject WITHOUT definitelyNotAccepted does NOT 
   );
 });
 
+test("classifySubmitFailure: tooLarge (Helius Sender size reject) → reroute", () => {
+  // THE FIX for the sender_http_500 "base64 encoded too large" that, untreated,
+  // was classified "transport" → retried the SAME oversized tx until it gave up.
+  // jito.ts flags it tooLarge + definitelyNotAccepted (the tx never went out), so
+  // it must reroute to a SMALLER route, not retry or escalate the tip.
+  assert.equal(
+    classifySubmitFailure(fail({ reason: "sender_http_500 base64 too large", tooLarge: true, definitelyNotAccepted: true })),
+    "reroute",
+  );
+});
+
+test("classifySubmitFailure: tooLarge WITHOUT definitelyNotAccepted does NOT fast-path reroute", () => {
+  // Same defensive guard as routeReject: no no-confirm rebuild unless the tx
+  // provably never entered the engine.
+  assert.equal(
+    classifySubmitFailure(fail({ tooLarge: true, retryable: true, definitelyNotAccepted: false })),
+    "transport",
+  );
+});
+
 // --- buildRouteLadder / describeRoute / transientBackoffMs --------------------
 
 test("buildRouteLadder: rich → 48 → 32 → direct-routes-only", () => {

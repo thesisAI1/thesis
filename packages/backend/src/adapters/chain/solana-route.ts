@@ -108,9 +108,12 @@ export function planRouteRecovery(
 /**
  * How the swap loop should react to a FAILED submit.
  *
- *  - "reroute":    route-fixable reject (Jito "cannot lock any vote accounts").
- *                  Re-quote a DIFFERENT route at the SAME tip — a bigger tip can
- *                  never fix WHAT the route touches. [submit.routeReject]
+ *  - "reroute":    route-fixable reject — re-quote a SIMPLER route at the SAME tip
+ *                  (a bigger tip can never fix WHAT the route touches or how big it
+ *                  is). Two flavours, distinguished by the loop's recovery plan:
+ *                  a Jito "cannot lock any vote accounts" reject [submit.routeReject]
+ *                  jumps to a direct route; a provider size reject (Helius Sender's
+ *                  "base64 encoded too large") [submit.tooLarge] steps one rung down.
  *  - "rate-limit": gateway 429 — the bundle provably never entered the engine, so
  *                  the signed tx cannot land. Double-fill-safe to rebuild +
  *                  resubmit the SAME tier immediately (after a backoff).
@@ -129,12 +132,13 @@ export function planRouteRecovery(
 export function classifySubmitFailure(
   submit: Extract<JitoSubmit, { ok: false }>,
 ): "reroute" | "rate-limit" | "transport" | "abandon" {
-  // A vote-lock reroute rebuilds a fresh tx WITHOUT a confirm, which is only safe
-  // when the bundle provably never entered the engine. jito.ts always pairs
-  // routeReject with definitelyNotAccepted; this guard makes the safety explicit
-  // so a (theoretical) routeReject without it falls through to a confirm-first
-  // path below instead of silently rebuilding over a possibly-live tx.
-  if (submit.routeReject && submit.definitelyNotAccepted) return "reroute";
+  // A reroute rebuilds a fresh tx WITHOUT a confirm, which is only safe when the
+  // bundle provably never entered the engine. jito.ts always pairs routeReject /
+  // tooLarge with definitelyNotAccepted (both are pre-submission validation
+  // rejects); this guard makes the safety explicit so a (theoretical) one without
+  // it falls through to a confirm-first path below instead of silently rebuilding
+  // over a possibly-live tx.
+  if ((submit.routeReject || submit.tooLarge) && submit.definitelyNotAccepted) return "reroute";
   if (submit.retryable && submit.definitelyNotAccepted) return "rate-limit";
   if (submit.retryable) return "transport";
   return "abandon";
@@ -266,13 +270,18 @@ export async function executeProtectedSwap(
       const action = classifySubmitFailure(submit);
 
       if (action === "reroute") {
-        const next = planRouteRecovery(routeLadder.length, routeStep, "vote_lock");
+        // A vote lock jumps straight to a direct route (shrinking maxAccounts does
+        // NOT change which DEX Jupiter picks, so it re-hits the lock); a too-large
+        // tx just needs a SMALLER one, so step one rung down. Either way the tip is
+        // unchanged — neither is fixable by bidding higher.
+        const failure: RouteFailure = submit.tooLarge ? "too_large" : "vote_lock";
+        const next = planRouteRecovery(routeLadder.length, routeStep, failure);
         if (next) {
           routeStep = next.step;
           deps.log.warn(
             `solana/jito: ${submit.reason} — re-routing (${describeRoute(routeLadder[routeStep])}) and re-quoting at tier ${tier + 1}`,
           );
-          continue; // same tier, different route (a tip can't fix a vote lock)
+          continue; // same tier, simpler route (a tip can't fix route shape/size)
         }
         lastReason = `jito submit failed (${submit.reason}) — route ladder exhausted at tip ${tip}`;
         break;
