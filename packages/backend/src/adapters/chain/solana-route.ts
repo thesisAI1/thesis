@@ -67,15 +67,19 @@ export type RouteFailure = "too_large" | "vote_lock" | "no_route";
  *    (`encoding overruns Uint8Array` from versioned-tx serialize, or the legacy
  *    "Transaction too large"). A SIMPLER route shrinks the tx; a bigger tip
  *    cannot fix tx SIZE.
- *  - "no_route": Jupiter has no route at the CURRENT constraint (HTTP 400 /
- *    COULD_NOT_FIND_ANY_ROUTE). Recoverable only mid-ladder (we constrained the
- *    route ourselves); at the happy-path step it is a genuine no-liquidity error
- *    and the caller propagates it.
+ *  - "no_route": Jupiter has no route at the CURRENT constraint. This surfaces with
+ *    several wordings, all meaning the same thing: parseJupiterQuote's
+ *    `Jupiter: no route (...)` (jupiter-parse.ts — the pure quote validator), a raw
+ *    `Jupiter /quote 400`, or `COULD_NOT_FIND_ANY_ROUTE`. Recoverable only mid-ladder
+ *    (we constrained the route ourselves); at the happy-path step it is a genuine
+ *    no-liquidity error and the caller propagates it.
  */
 export function classifyRouteError(err: unknown): "too_large" | "no_route" | null {
   const msg = err instanceof Error ? err.message : String(err);
   if (/encoding overruns|Transaction too large/i.test(msg)) return "too_large";
-  if (/Jupiter \/quote 400|COULD_NOT_FIND_ANY_ROUTE|no routes? found/i.test(msg)) {
+  // `Jupiter: no route` is parseJupiterQuote's exact throw wording — it must stay in
+  // sync with jupiter-parse.ts so a no-liquidity quote isn't misread as null + lost.
+  if (/Jupiter \/quote 400|Jupiter: no route|COULD_NOT_FIND_ANY_ROUTE|no routes? found/i.test(msg)) {
     return "no_route";
   }
   return null;
