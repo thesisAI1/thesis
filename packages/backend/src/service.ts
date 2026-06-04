@@ -14,6 +14,7 @@ import { processWalletReplies } from "./payout/index.js";
 import { processAuthorCloseRequests } from "./pipeline/author-actions.js";
 import { processChatbotReplies } from "./agents/chatbot.js";
 import { reviewSubmission, type ReviewResult } from "./pipeline/index.js";
+import { BuyExecutionError } from "./agents/bursar.js";
 import { recordActivity } from "./activity.js";
 import { getStore, type QueueItem } from "./store/index.js";
 import { triageMentions } from "./triage/index.js";
@@ -28,6 +29,7 @@ import { startGroupBot } from "./adapters/telegram/groupBot.js";
 import {
   buyReplyText,
   classifySkipReason,
+  executionFailedReplyText,
   notTradeableReplyText,
   skipReplyText,
   triageRejectReplyText,
@@ -197,6 +199,18 @@ async function processSubmission(item: QueueItem): Promise<void> {
       reviewAttempts.delete(submission.postId);
       return;
     }
+    // The Dean approved but the on-chain BUY failed. A buy was attempted, so we
+    // must NOT auto-retry (a blind re-buy could double-fund when the swap's
+    // outcome was uncertain). Reply honestly so the author isn't ghosted after
+    // seeing the live "grade B / funding" stream, and error-log to alarm the
+    // operator (Telegram). No re-enqueue.
+    if (err instanceof BuyExecutionError) {
+      reviewAttempts.delete(submission.postId);
+      log.error(`review: buy execution failed for ${submission.postId} (${err.tokenChain}) — ${String(err.cause)}`);
+      logEvent({ level: "error", area: "service", type: "buy:failed", msg: `buy execution failed for ${submission.postId} (${err.tokenChain}) — ${String(err.cause)}` });
+      await replyOnExecutionFailed(submission, err);
+      return;
+    }
     // Transient failure (e.g. `TypeError: fetch failed` from a DexScreener/RPC
     // network blip). The mention is eligible — dropping it silently is exactly
     // the "didn't reply to a valid mention" bug. Re-enqueue and retry rather
@@ -238,6 +252,30 @@ async function replyOnNotTradeable(
   } catch (e) {
     log.warn(`x: not-tradeable reply failed for ${submission.postId}: ${String(e)}`);
     logEvent({ level: "warn", area: "service", type: "skip-reply:failed", msg: `x: not-tradeable reply failed for ${submission.postId}: ${String(e)}` });
+  }
+}
+
+/** Reply when the Dean approved but the on-chain buy could not be executed.
+ *  Shares the 24h per-author cooldown so a serial submitter hitting a sustained
+ *  DEX outage can't be replied to on a loop. */
+async function replyOnExecutionFailed(
+  submission: Submission,
+  err: BuyExecutionError,
+): Promise<void> {
+  const now = Date.now();
+  const last = triageReplyCooldown.get(submission.authorXId) ?? 0;
+  if (now - last < TRIAGE_REPLY_COOLDOWN_MS) return;
+  try {
+    const replyId = await createXAdapter().replyToPost(
+      submission.postId,
+      executionFailedReplyText(err.tokenChain),
+    );
+    log.info(`x: replied to ${submission.postId} — buy execution failed (reply ${replyId})`);
+    triageReplyCooldown.set(submission.authorXId, now);
+    publishOps({ type: "tweet:posted", at: new Date().toISOString(), kind: "skip", replyId, postId: submission.postId });
+  } catch (e) {
+    log.warn(`x: execution-failed reply failed for ${submission.postId}: ${String(e)}`);
+    logEvent({ level: "warn", area: "service", type: "skip-reply:failed", msg: `x: execution-failed reply failed for ${submission.postId}: ${String(e)}` });
   }
 }
 

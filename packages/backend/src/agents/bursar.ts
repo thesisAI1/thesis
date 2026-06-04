@@ -6,7 +6,7 @@
  * / stop-loss levels, and persists the open position.
  */
 
-import type { Position, TradeOrder, Verdict } from "@thesis/shared";
+import type { Chain, Position, TradeOrder, Verdict } from "@thesis/shared";
 import { config } from "../config.js";
 import { createChainAdapter } from "../adapters/chain/index.js";
 import { evaluateBuyGate } from "../domain/gate.js";
@@ -16,6 +16,26 @@ export interface BursarResult {
   position: Position | null;
   /** Why no position was opened (rate limit, cooldown, empty portfolio...). */
   skippedReason?: string;
+}
+
+/**
+ * The Dean APPROVED and we tried to execute the on-chain buy, but the swap
+ * failed (DEX aggregator unreachable, bundle never landed, etc.). This is a
+ * DISTINCT failure from a pre-buy review error: by the time it's thrown a buy
+ * has been ATTEMPTED, so the outcome of the underlying swap may be uncertain
+ * (a confirm-step error can leave it unknown whether tokens landed). The
+ * service MUST NOT blindly re-run the review on this — re-buying could
+ * double-fund. It replies to the author + alarms the operator instead.
+ */
+export class BuyExecutionError extends Error {
+  constructor(
+    readonly contractAddress: string,
+    readonly tokenChain: Chain,
+    readonly cause: unknown,
+  ) {
+    super(`buy execution failed for ${contractAddress} on ${tokenChain}: ${String(cause)}`);
+    this.name = "BuyExecutionError";
+  }
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -124,9 +144,12 @@ export async function runBursar(verdict: Verdict): Promise<BursarResult> {
   try {
     fill = await chain.buy(order.contractAddress, order.amountInEth);
   } catch (err) {
-    // Swap reverted before any tokens moved — drop the intent and propagate.
+    // The buy was ATTEMPTED and failed. Drop the intent marker and surface a
+    // TYPED error so the service treats this differently from a pre-buy review
+    // failure: it must NOT auto-retry the review (a blind re-buy could
+    // double-fund if the swap's outcome was uncertain).
     await store.clearPendingBuy(verdict.submission.postId);
-    throw err;
+    throw new BuyExecutionError(order.contractAddress, tradeChain, err);
   }
   const now = new Date().toISOString();
   await store.recordBuy(now, tradeChain);

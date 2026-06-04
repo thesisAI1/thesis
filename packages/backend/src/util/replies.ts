@@ -148,6 +148,23 @@ export function notTradeableReplyText(chain: Chain = "base"): string {
 }
 
 /**
+ * Reply text when the Dean APPROVED the thesis but the on-chain buy could not
+ * be executed (e.g. the Jupiter/DEX aggregator was unreachable, or the swap
+ * could not land). The committee graded it — we just couldn't fund it this
+ * round, and we deliberately do NOT auto-retry the buy (a blind re-buy risks
+ * double-funding). Honest + invites a repost so a transient outage doesn't
+ * permanently cost the author their shot.
+ */
+export function executionFailedReplyText(chain: Chain = "base"): string {
+  const venue = chain === "solana" ? "Solana" : "Base";
+  return [
+    "Your thesis cleared the committee — but we hit a temporary issue funding it on-chain.",
+    `No position was opened and no funds moved (the ${venue} swap couldn't be executed this round).`,
+    "Re-tag the committee to try again once things settle.",
+  ].join("\n");
+}
+
+/**
  * Reply text when an author asks to close manually but the position isn't
  * profitable enough yet. We require at least 20% net profit to manual-close
  * — anything tighter and the close barely beats slippage / fees.
