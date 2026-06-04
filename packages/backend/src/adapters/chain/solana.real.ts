@@ -8,7 +8,7 @@ import {
   VersionedTransaction,
   LAMPORTS_PER_SOL,
 } from "@solana/web3.js";
-import { getMint } from "@solana/spl-token";
+import { getMint, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from "@solana/spl-token";
 import bs58 from "bs58";
 import { config } from "../../config.js";
 import { log, logEvent } from "../../util/log.js";
@@ -79,11 +79,21 @@ export class RealSolanaChain implements ChainAdapter {
     return lamports / LAMPORTS_PER_SOL;
   }
 
-  /** Mint decimals, cached (immutable per mint). */
+  /** Mint decimals, cached (immutable per mint). Resolves the owning token
+   *  program from the account itself so BOTH legacy SPL and Token-2022 mints
+   *  work: getMint defaults to the legacy program and throws
+   *  TokenInvalidAccountOwnerError on a Token-2022 mint (a graduated token can
+   *  be either), which previously failed the whole buy/sell. */
   private async decimals(mint: string): Promise<number> {
     const hit = this.decimalsCache.get(mint);
     if (hit !== undefined) return hit;
-    const info = await getMint(this.connection, new PublicKey(mint));
+    const mintPk = new PublicKey(mint);
+    const account = await this.connection.getAccountInfo(mintPk);
+    if (!account) throw new Error(`solana: mint ${mint} not found on-chain`);
+    const programId = account.owner.equals(TOKEN_2022_PROGRAM_ID)
+      ? TOKEN_2022_PROGRAM_ID
+      : TOKEN_PROGRAM_ID;
+    const info = await getMint(this.connection, mintPk, "confirmed", programId);
     this.decimalsCache.set(mint, info.decimals);
     return info.decimals;
   }
