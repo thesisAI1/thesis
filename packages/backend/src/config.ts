@@ -151,9 +151,12 @@ export const config = {
     ),
     /** Hard ceiling on the Jito tip per swap, in lamports (1e9 = 1 SOL). The tip
      *  ladder escalates UP TO this; past it the swap is abandoned rather than
-     *  over-paid or exposed. 2_000_000 = 0.002 SOL ≈ $0.40. Raise it if you'd
-     *  rather pay more than miss a fill during a tip-market spike. */
-    jitoMaxTipLamports: num("SOLANA_JITO_MAX_TIP_LAMPORTS", 2_000_000),
+     *  over-paid or exposed. 4_000_000 = 0.004 SOL ≈ $0.80. A real fresh-graduate
+     *  buy landed at 1.6M (attempt 7/8) — uncomfortably close to the old 2M cap —
+     *  so this gives headroom for a Jito tip-market spike without abandoning the
+     *  fill. The tip is still a fraction of a cent per losing rung; only the
+     *  landing rung is actually paid. */
+    jitoMaxTipLamports: num("SOLANA_JITO_MAX_TIP_LAMPORTS", 4_000_000),
     /** How many escalating Jito attempts before abandoning the swap. Each attempt
      *  is one fresh quote+bundle at a higher tip, bounded by its own blockhash
      *  expiry (no double-fill). The tip ladder is p50→p75→p95→p95×2→×4→×8…; a
