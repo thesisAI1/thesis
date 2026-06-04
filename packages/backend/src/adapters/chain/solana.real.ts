@@ -204,14 +204,46 @@ export class RealSolanaChain implements ChainAdapter {
    *  loop indefinitely (the loop already has its own per-attempt budget). */
   private static readonly JUPITER_TIMEOUT_MS = 10_000;
 
+  /** How many times to attempt each Jupiter HTTP call before giving up. */
+  private static readonly JUPITER_MAX_TRIES = 4;
+
+  /**
+   * Jupiter HTTP with a bounded retry on TRANSIENT failures — network
+   * `fetch failed` (DNS/connection reset), request timeout, 5xx, or 429.
+   *
+   * SAFE BY CONSTRUCTION: the only callers are /quote and /swap, which merely
+   * BUILD the request — they run BEFORE any bundle is submitted on-chain
+   * (submission is submitJitoBundle). So a retry here can never double-fill; it
+   * just rides out a brief Jupiter blip instead of aborting the whole buy. A
+   * deterministic 4xx (≠429) is returned as-is for the caller to throw on.
+   */
+  private async jupiterFetch(url: string, init?: RequestInit): Promise<Response> {
+    let lastErr: unknown = new Error("jupiter fetch: no attempt made");
+    for (let i = 0; i < RealSolanaChain.JUPITER_MAX_TRIES; i++) {
+      try {
+        const res = await fetch(url, {
+          ...init,
+          signal: AbortSignal.timeout(RealSolanaChain.JUPITER_TIMEOUT_MS),
+        });
+        if (res.ok || (res.status < 500 && res.status !== 429)) return res;
+        lastErr = new Error(`Jupiter ${res.status}`);
+      } catch (err) {
+        lastErr = err; // `fetch failed` (DNS/connection) or AbortError (timeout)
+      }
+      if (i < RealSolanaChain.JUPITER_MAX_TRIES - 1) {
+        log.warn(`solana/jupiter: transient HTTP failure (try ${i + 1}/${RealSolanaChain.JUPITER_MAX_TRIES}) — ${String(lastErr)}`);
+        await new Promise((r) => setTimeout(r, 600 * 2 ** i)); // 0.6s, 1.2s, 2.4s
+      }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+  }
+
   private async getQuote(inputMint: string, outputMint: string, amount: string) {
     const bps = Math.max(1, Math.round(config.solana.slippagePct * 100));
     const url =
       `${config.solana.jupiterApiBase}/quote?inputMint=${inputMint}` +
       `&outputMint=${outputMint}&amount=${amount}&slippageBps=${bps}`;
-    const res = await fetch(url, {
-      signal: AbortSignal.timeout(RealSolanaChain.JUPITER_TIMEOUT_MS),
-    });
+    const res = await this.jupiterFetch(url);
     if (!res.ok) throw new Error(`Jupiter /quote ${res.status}`);
     return parseJupiterQuote((await res.json()) as JupiterQuote);
   }
@@ -334,11 +366,12 @@ export class RealSolanaChain implements ChainAdapter {
       body.blockhashSlotsToExpiry = config.solana.jitoBlockhashSlotsToExpiry;
     }
 
-    const res = await fetch(`${config.solana.jupiterApiBase}/swap`, {
+    // Pre-submission only (builds + signs locally; nothing is broadcast here),
+    // so the bounded retry in jupiterFetch can never double-fill.
+    const res = await this.jupiterFetch(`${config.solana.jupiterApiBase}/swap`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(RealSolanaChain.JUPITER_TIMEOUT_MS),
     });
     if (!res.ok) throw new Error(`Jupiter /swap ${res.status}`);
     const built = parseJupiterSwap((await res.json()) as JupiterSwap);
