@@ -207,6 +207,13 @@ export const config = {
      *  we floor each attempt's tip to this (still clamped to jitoMaxTipLamports).
      *  Irrelevant in jito mode. */
     senderMinTipLamports: num("SOLANA_SENDER_MIN_TIP_LAMPORTS", 200_000),
+    /** Starting cap on the number of accounts Jupiter may use for a route. A
+     *  route too complex to serialise into one 1232-byte Solana packet throws
+     *  "encoding overruns Uint8Array" and the swap is lost — a bigger tip can't
+     *  fix tx size, only a SIMPLER route can. protectedSwap shrinks this budget
+     *  (then falls back to direct-routes-only) and re-quotes when a route
+     *  overruns. 64 is Jupiter's own default; lower it if overflows recur. */
+    jupiterMaxAccounts: num("SOLANA_JUPITER_MAX_ACCOUNTS", 64),
   },
 
   llm: {
@@ -420,6 +427,8 @@ export function validateConfig(): void {
   // Sender floor must be a landable Jito tip; an unknown submitMode would silently
   // pick the wrong transport, so reject it loudly at boot rather than mid-trade.
   range("SOLANA_SENDER_MIN_TIP_LAMPORTS", config.solana.senderMinTipLamports, 1_000, BIG);
+  // Jupiter caps maxAccounts at 64; below ~20 most multi-hop routes vanish.
+  range("SOLANA_JUPITER_MAX_ACCOUNTS", config.solana.jupiterMaxAccounts, 16, 64);
   if (config.solana.submitMode !== "jito" && config.solana.submitMode !== "sender") {
     problems.push(`SOLANA_SUBMIT_MODE: must be "jito" or "sender" (got ${raw("SOLANA_SUBMIT_MODE")})`);
   } else if (

@@ -20,7 +20,13 @@ import {
   type JupiterQuote,
   type JupiterSwap,
 } from "./jupiter-parse.js";
-import { fetchTipFloor, submitJitoBundle, submitSenderTransaction, tipForAttempt } from "./jito.js";
+import {
+  fetchTipFloor,
+  submitJitoBundle,
+  submitSenderTransaction,
+  tipForAttempt,
+  type JitoSubmit,
+} from "./jito.js";
 
 /**
  * Real Solana client — the RealChain analogue. Swaps route through the Jupiter
@@ -43,6 +49,20 @@ import { fetchTipFloor, submitJitoBundle, submitSenderTransaction, tipForAttempt
  * lazily so merely selecting this adapter (e.g. for a stray Solana submission on
  * a Base-only deployment) never throws — only an actual trade/read does.
  */
+
+/**
+ * Did this error mean "the route is too big to serialise into one Solana packet"?
+ * VersionedTransaction.serialize() builds the message into a fixed PACKET_DATA_SIZE
+ * (1232-byte) buffer; an over-large route makes @solana/buffer-layout throw
+ * `RangeError: encoding overruns Uint8Array`. (The legacy Transaction path instead
+ * throws "Transaction too large" — matched too, for completeness.) This is
+ * recoverable by re-quoting a SIMPLER route, never by a higher tip.
+ */
+function isTxTooLarge(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /encoding overruns|Transaction too large/i.test(msg);
+}
+
 export class RealSolanaChain implements ChainAdapter {
   /** Wrapped-SOL mint (Jupiter's quote asset), from config. */
   private readonly wsol = config.solana.wsolMint;
@@ -238,7 +258,12 @@ export class RealSolanaChain implements ChainAdapter {
     throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
   }
 
-  private async getQuote(inputMint: string, outputMint: string, amount: string) {
+  private async getQuote(
+    inputMint: string,
+    outputMint: string,
+    amount: string,
+    route?: { maxAccounts?: number; onlyDirectRoutes?: boolean },
+  ) {
     const bps = Math.max(1, Math.round(config.solana.slippagePct * 100));
     let url =
       `${config.solana.jupiterApiBase}/quote?inputMint=${inputMint}` +
@@ -250,6 +275,14 @@ export class RealSolanaChain implements ChainAdapter {
     // hope for a clean route. See config.solana.excludeDexes.
     if (config.solana.excludeDexes.length > 0) {
       url += `&excludeDexes=${config.solana.excludeDexes.map(encodeURIComponent).join(",")}`;
+    }
+    // Route-size shaping (protectedSwap's too-large fallback): cap the account
+    // budget, or force a single-hop direct route, so the built tx fits in one
+    // 1232-byte packet. Omitted on the happy path → Jupiter's default routing.
+    if (route?.onlyDirectRoutes) {
+      url += `&onlyDirectRoutes=true`;
+    } else if (route?.maxAccounts && route.maxAccounts > 0) {
+      url += `&maxAccounts=${Math.floor(route.maxAccounts)}`;
     }
     const res = await this.jupiterFetch(url);
     if (!res.ok) throw new Error(`Jupiter /quote ${res.status}`);
@@ -296,16 +329,54 @@ export class RealSolanaChain implements ChainAdapter {
     let lastReason = "no attempts made";
     let transientRetries = 0;
 
+    // Route-size fallback. A route too complex to serialise into one 1232-byte
+    // Solana packet makes tx.serialize() throw "encoding overruns Uint8Array",
+    // killing the swap — and a bigger tip can't fix tx SIZE, only a SIMPLER
+    // route can. On such a failure we step down this ladder (tighter account
+    // budget → finally direct-routes-only, the smallest possible tx) and
+    // re-quote the SAME tier. The slippage guard still protects the fill.
+    const routeLadder: Array<{ maxAccounts?: number; onlyDirectRoutes?: boolean }> = [
+      { maxAccounts: config.solana.jupiterMaxAccounts },
+      { maxAccounts: 48 },
+      { maxAccounts: 32 },
+      { onlyDirectRoutes: true },
+    ];
+    let routeStep = 0;
+
     // `tier` is the tip-escalation level; it advances ONLY on a genuine
     // "accepted but did not land" (tip too low) or a deterministic reject — never
     // on a rate-limit, which a higher tip can't fix.
     let tier = 0;
     while (tier < escalationSteps) {
       const tip = Math.max(tipFloorLamports, tipForAttempt(floor, tier, { maxLamports: maxTip }));
-      const quote = await this.getQuote(inputMint, outputMint, amount);
-      const built = await this.buildSwapTx(quote, tip);
-
-      const submit = await submitSwap(built.tx);
+      let quote: Awaited<ReturnType<typeof parseJupiterQuote>>;
+      let built: {
+        tx: VersionedTransaction;
+        signature: string;
+        blockhash: string;
+        lastValidBlockHeight: number;
+      };
+      let submit: JitoSubmit;
+      try {
+        quote = await this.getQuote(inputMint, outputMint, amount, routeLadder[routeStep]);
+        built = await this.buildSwapTx(quote, tip);
+        submit = await submitSwap(built.tx);
+      } catch (err) {
+        // A too-large route is the only error we can recover from here: shrink
+        // the route and retry the SAME tier (no tip change). Anything else
+        // (or an exhausted ladder) propagates → the swap is abandoned safely.
+        if (isTxTooLarge(err) && routeStep < routeLadder.length - 1) {
+          routeStep++;
+          const next = routeLadder[routeStep];
+          log.warn(
+            `solana: route too large for one packet — shrinking route ` +
+              `(${next.onlyDirectRoutes ? "direct-routes-only" : `maxAccounts=${next.maxAccounts}`}) ` +
+              `and re-quoting at tier ${tier + 1}`,
+          );
+          continue; // same tier, simpler route
+        }
+        throw err;
+      }
       if (!submit.ok) {
         // HTTP 429 — the block engine provably never took the bundle, so the
         // signed tx cannot land. Back off and resubmit the SAME tier (a fresh
