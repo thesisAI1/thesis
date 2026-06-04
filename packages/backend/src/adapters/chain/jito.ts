@@ -179,6 +179,17 @@ export function parseRetryAfterMs(header: string | null, now: number = Date.now(
   return null;
 }
 
+/** Read a failed response's body and collapse it to a short one-line snippet for
+ *  the failure `reason` — this is what surfaces the ACTUAL provider error (e.g.
+ *  Helius Sender wraps a JSON-RPC `-32602 InvalidParams` inside an HTTP 500, which
+ *  is invisible unless we read the body). Best-effort: never throws. */
+async function readErrSnippet(res: Response): Promise<string> {
+  const txt = await res.text().catch(() => "");
+  const oneLine = txt.replace(/\s+/g, " ").trim();
+  if (!oneLine) return "";
+  return oneLine.length > 200 ? `${oneLine.slice(0, 200)}…` : oneLine;
+}
+
 // --- IO wrappers (thin) --------------------------------------------------------
 
 let tipFloorCache: { at: number; floor: TipFloorLamports } | null = null;
@@ -263,12 +274,14 @@ export async function submitJitoBundle(tx: VersionedTransaction): Promise<JitoSu
     return { ok: false, reason: (err as Error).message, retryable: true, definitelyNotAccepted: false };
   }
   if (!res.ok) {
+    const detail = await readErrSnippet(res);
+    const tail = detail ? ` — ${detail}` : "";
     if (res.status === 429) {
       // Rejected at the gateway — the bundle provably never entered the engine,
       // so the signed tx cannot land. Safe to rebuild + resubmit immediately.
       return {
         ok: false,
-        reason: "jito_http_429",
+        reason: `jito_http_429${tail}`,
         retryable: true,
         definitelyNotAccepted: true,
         retryAfterMs: parseRetryAfterMs(res.headers.get("retry-after")) ?? undefined,
@@ -276,10 +289,10 @@ export async function submitJitoBundle(tx: VersionedTransaction): Promise<JitoSu
     }
     if (res.status >= 500) {
       // Server-side error — ambiguous acceptance (the tx might have been taken).
-      return { ok: false, reason: `jito_http_${res.status}`, retryable: true, definitelyNotAccepted: false };
+      return { ok: false, reason: `jito_http_${res.status}${tail}`, retryable: true, definitelyNotAccepted: false };
     }
     // Other 4xx — a deterministic reject; retrying the same thing won't help.
-    return { ok: false, reason: `jito_http_${res.status}`, retryable: false, definitelyNotAccepted: false };
+    return { ok: false, reason: `jito_http_${res.status}${tail}`, retryable: false, definitelyNotAccepted: false };
   }
   return parseSendBundleResponse(await res.json().catch(() => null));
 }
@@ -314,21 +327,25 @@ export async function submitSenderTransaction(tx: VersionedTransaction): Promise
     return { ok: false, reason: (err as Error).message, retryable: true, definitelyNotAccepted: false };
   }
   if (!res.ok) {
+    const detail = await readErrSnippet(res);
+    const tail = detail ? ` — ${detail}` : "";
     if (res.status === 429) {
       // Rejected at the gateway before submission — the tx provably never went
       // out, so it cannot land. Safe to rebuild + resubmit immediately.
       return {
         ok: false,
-        reason: "sender_http_429",
+        reason: `sender_http_429${tail}`,
         retryable: true,
         definitelyNotAccepted: true,
         retryAfterMs: parseRetryAfterMs(res.headers.get("retry-after")) ?? undefined,
       };
     }
     if (res.status >= 500) {
-      return { ok: false, reason: `sender_http_${res.status}`, retryable: true, definitelyNotAccepted: false };
+      // Helius Sender wraps client errors (e.g. -32602 InvalidParams, bad tip) in
+      // an HTTP 500, so the snippet is the only signal of WHY — surface it.
+      return { ok: false, reason: `sender_http_${res.status}${tail}`, retryable: true, definitelyNotAccepted: false };
     }
-    return { ok: false, reason: `sender_http_${res.status}`, retryable: false, definitelyNotAccepted: false };
+    return { ok: false, reason: `sender_http_${res.status}${tail}`, retryable: false, definitelyNotAccepted: false };
   }
   return parseSendBundleResponse(await res.json().catch(() => null));
 }
