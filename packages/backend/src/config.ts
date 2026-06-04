@@ -115,6 +115,24 @@ export const config = {
      *  is a private Jito bundle (sandwich-proof), so a looser cap can't be
      *  exploited by MEV. */
     slippageMaxBps: num("SOLANA_SLIPPAGE_MAX_BPS", 800),
+    /** DEXes Jupiter must NOT route through, comma-separated (matched against
+     *  the routePlan label). Jito FORBIDS any bundle that locks a vote account
+     *  ("bundles cannot lock any vote accounts"), and a few Solana DEXes
+     *  reference a validator vote account among their pool accounts. A swap
+     *  routed through one is rejected by Jito at EVERY tip, so the bundle never
+     *  lands and the buy is ABANDONED — a silently lost entry. Jupiter routing
+     *  is dynamic, so the same mint intermittently picks a tainted route, which
+     *  is exactly why Solana buys failed only *sometimes*. We exclude the known
+     *  offenders up-front; a clean route (Meteora / Whirlpool / Raydium /
+     *  Pump.fun AMM / …) is virtually always still available, so this costs an
+     *  entry only if a token's *sole* route is the bad DEX (which Jito would
+     *  reject anyway). GoonFi V2 locks vote account
+     *  J1to1yufRnoWn81KYg1XkTWzmKjnYSnmE2VY8DGUJ9Qv. Add more here if Jito ever
+     *  rejects a new DEX the same way. */
+    excludeDexes: str("SOLANA_EXCLUDE_DEXES", "GoonFi V2")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0),
     /** Submit swaps as private Jito bundles instead of broadcasting on the
      *  public RPC — hides the tx from sandwich searchers. When ON (default),
      *  a swap that will not land is RETRIED with a higher tip, never broadcast

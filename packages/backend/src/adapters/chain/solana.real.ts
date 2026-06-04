@@ -240,9 +240,17 @@ export class RealSolanaChain implements ChainAdapter {
 
   private async getQuote(inputMint: string, outputMint: string, amount: string) {
     const bps = Math.max(1, Math.round(config.solana.slippagePct * 100));
-    const url =
+    let url =
       `${config.solana.jupiterApiBase}/quote?inputMint=${inputMint}` +
       `&outputMint=${outputMint}&amount=${amount}&slippageBps=${bps}`;
+    // Keep Jupiter off any DEX that locks a vote account: Jito rejects such a
+    // bundle outright ("cannot lock any vote accounts") at every tip, so the
+    // swap would be abandoned and the entry lost. Routing is dynamic, so we
+    // exclude the known offenders on EVERY quote (buy and sell) rather than
+    // hope for a clean route. See config.solana.excludeDexes.
+    if (config.solana.excludeDexes.length > 0) {
+      url += `&excludeDexes=${config.solana.excludeDexes.map(encodeURIComponent).join(",")}`;
+    }
     const res = await this.jupiterFetch(url);
     if (!res.ok) throw new Error(`Jupiter /quote ${res.status}`);
     return parseJupiterQuote((await res.json()) as JupiterQuote);
