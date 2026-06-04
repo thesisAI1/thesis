@@ -378,6 +378,31 @@ export class RealSolanaChain implements ChainAdapter {
         throw err;
       }
       if (!submit.ok) {
+        // Route-fixable reject (Jito "cannot lock any vote accounts"): THIS
+        // route touched a writable vote account, which the engine refuses. The
+        // bundle was provably rejected (definitelyNotAccepted) so the tx cannot
+        // land — no confirm needed, no double-fill risk. A bigger tip can't fix
+        // it; only a different route can. Step DOWN the route ladder (toward
+        // simpler/direct single-hop routes, which dodge the multi-hop DEX that
+        // introduced the vote account) and re-quote the SAME tier. Checked
+        // before the 429 branch because both set definitelyNotAccepted.
+        if (submit.routeReject) {
+          if (routeStep < routeLadder.length - 1) {
+            routeStep++;
+            const next = routeLadder[routeStep];
+            log.warn(
+              `solana/jito: ${submit.reason} — re-routing ` +
+                `(${next.onlyDirectRoutes ? "direct-routes-only" : `maxAccounts=${next.maxAccounts}`}) ` +
+                `and re-quoting at tier ${tier + 1}`,
+            );
+            continue; // same tier, different route
+          }
+          // Every route still locks a vote account — a tip won't change that.
+          // Abandon safely rather than burn tiers bidding against a dead route.
+          lastReason = `jito submit failed (${submit.reason}) — route ladder exhausted at tip ${tip}`;
+          break;
+        }
+
         // HTTP 429 — the block engine provably never took the bundle, so the
         // signed tx cannot land. Back off and resubmit the SAME tier (a fresh
         // tx/blockhash is built next loop). Double-fill-safe: the rejected tx is

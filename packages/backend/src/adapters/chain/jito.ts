@@ -148,6 +148,14 @@ export function buildSenderSendTxBody(base64Tx: string): string {
  *                             first confirm-or-expire the tx it already sent
  *                             before building a new one — otherwise a resend
  *                             could double-fill.
+ *  - `routeReject`           — the bundle was rejected because of WHAT the route
+ *                             touches, not the tip (Jito refuses bundles that
+ *                             lock a writable vote account, which some DEX hops
+ *                             do). A bigger tip can never fix it; only a
+ *                             different/simpler route can. Always paired with
+ *                             `definitelyNotAccepted` (validation reject = never
+ *                             entered the engine), so the caller re-quotes a new
+ *                             route at the SAME tip instead of escalating.
  */
 export type JitoSubmit =
   | { ok: true; bundleId: string }
@@ -157,6 +165,7 @@ export type JitoSubmit =
       retryable?: boolean;
       definitelyNotAccepted?: boolean;
       retryAfterMs?: number;
+      routeReject?: boolean;
     };
 
 /** Parse a Jito `sendBundle` JSON-RPC response. Pure → testable. */
@@ -290,6 +299,20 @@ export async function submitJitoBundle(tx: VersionedTransaction): Promise<JitoSu
     if (res.status >= 500) {
       // Server-side error — ambiguous acceptance (the tx might have been taken).
       return { ok: false, reason: `jito_http_${res.status}${tail}`, retryable: true, definitelyNotAccepted: false };
+    }
+    // A "vote account lock" reject is route-fixable: THIS route happened to
+    // touch a writable vote account (a quirk of some DEX hops), which the block
+    // engine refuses. The bundle was provably rejected at validation — it never
+    // entered the engine, so the signed tx cannot land (definitelyNotAccepted).
+    // A bigger tip can't help; the caller must re-quote a different route.
+    if (/cannot lock any vote accounts/i.test(detail)) {
+      return {
+        ok: false,
+        reason: `jito_http_${res.status}${tail}`,
+        retryable: true,
+        definitelyNotAccepted: true,
+        routeReject: true,
+      };
     }
     // Other 4xx — a deterministic reject; retrying the same thing won't help.
     return { ok: false, reason: `jito_http_${res.status}${tail}`, retryable: false, definitelyNotAccepted: false };
