@@ -131,13 +131,18 @@ export const config = {
     jitoMaxTipLamports: num("SOLANA_JITO_MAX_TIP_LAMPORTS", 2_000_000),
     /** How many escalating Jito attempts before abandoning the swap. Each attempt
      *  is one fresh quote+bundle at a higher tip, bounded by its own blockhash
-     *  expiry (no double-fill). */
-    jitoMaxAttempts: num("SOLANA_JITO_MAX_ATTEMPTS", 4),
+     *  expiry (no double-fill). The tip ladder is p50→p75→p95→p95×2→×4→×8…; a
+     *  freshly-graduated pump.fun token is contested well above the GLOBAL tip
+     *  floor, so 4 attempts top out around 2× p95 — too timid to ever land.
+     *  8 lets the ladder climb to the maxTip cap (×16/×32) and actually win
+     *  inclusion. Each rung still costs only a fraction of a cent. */
+    jitoMaxAttempts: num("SOLANA_JITO_MAX_ATTEMPTS", 8),
     /** Blockhash validity per attempt, in slots (~400ms each). Short = a bundle
-     *  that will not land dies fast so we can re-tip quickly; 12 ≈ ~5s. This is
-     *  what makes escalation both quick AND double-fill-safe. 0 = Jupiter default
+     *  that will not land dies fast so we can re-tip quickly; 16 ≈ ~6.5s. This is
+     *  what makes escalation both quick AND double-fill-safe (the next attempt
+     *  fires only AFTER this blockhash is provably dead). 0 = Jupiter default
      *  (~150 slots / ~60s — safe but slow to escalate). */
-    jitoBlockhashSlotsToExpiry: num("SOLANA_JITO_BLOCKHASH_SLOTS_TO_EXPIRY", 12),
+    jitoBlockhashSlotsToExpiry: num("SOLANA_JITO_BLOCKHASH_SLOTS_TO_EXPIRY", 16),
   },
 
   llm: {
