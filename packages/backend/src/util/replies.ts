@@ -125,6 +125,29 @@ export function triageRejectReplyText(r: TriageRejectKind): string {
 }
 
 /**
+ * Reply when a submitted token has no live DEX market yet, so the committee
+ * can't price or trade it. On Solana the committee only funds tokens that have
+ * fully graduated off the pump.fun bonding curve (LP migrated + locked) and are
+ * trading on a DEX — so this most often means "not graduated yet". Posting it
+ * (instead of staying silent) keeps the agent from looking like it ignored the
+ * author.
+ */
+export function notTradeableReplyText(chain: Chain = "base"): string {
+  if (chain === "solana") {
+    return [
+      "Got your thesis — but the committee can't trade this one yet.",
+      "No live DEX market found on-chain. On Solana the committee only funds tokens that have fully graduated off the pump.fun bonding curve (LP migrated + locked).",
+      "Re-tag the committee once it has graduated and is trading, and the Dean will grade your call.",
+    ].join("\n");
+  }
+  return [
+    "Got your thesis — but the committee can't trade this one yet.",
+    "No live DEX market found on-chain — the token may be too new or not trading yet.",
+    "Re-tag the committee once it's live on a DEX and the Dean will grade your call.",
+  ].join("\n");
+}
+
+/**
  * Reply text when an author asks to close manually but the position isn't
  * profitable enough yet. We require at least 20% net profit to manual-close
  * — anything tighter and the close barely beats slippage / fees.

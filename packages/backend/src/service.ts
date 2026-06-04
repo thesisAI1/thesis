@@ -28,9 +28,11 @@ import { startGroupBot } from "./adapters/telegram/groupBot.js";
 import {
   buyReplyText,
   classifySkipReason,
+  notTradeableReplyText,
   skipReplyText,
   triageRejectReplyText,
 } from "./util/replies.js";
+import { TokenNotTradeableError } from "./adapters/basedata/index.js";
 
 let lastSeenId: string | undefined;
 
@@ -174,8 +176,41 @@ async function processSubmission(submission: Submission): Promise<void> {
       await replyOnSkip(submission, result);
     }
   } catch (err) {
+    // Expected, recoverable state: the token has no live DEX market yet (on
+    // Solana, almost always "not graduated off the pump.fun curve"). Reply with
+    // a friendly explanation instead of a silent review failure, so the author
+    // isn't left thinking the committee ignored them.
+    if (err instanceof TokenNotTradeableError) {
+      log.info(`review: ${submission.postId} not tradeable yet (${err.tokenChain}) — ${err.address}`);
+      await replyOnNotTradeable(submission, err);
+      return;
+    }
     log.error(`review failed for ${submission.postId}: ${String(err)}`);
     logEvent({ level: "error", area: "service", type: "review:failed", msg: `review failed for ${submission.postId}: ${String(err)}` });
+  }
+}
+
+/** Reply that a submitted token isn't trading yet (e.g. not graduated off the
+ *  pump.fun curve). Shares the 24h per-author cooldown with triage rejects so a
+ *  serial submitter of un-graduated tokens can't be replied to on a loop. */
+async function replyOnNotTradeable(
+  submission: Submission,
+  err: TokenNotTradeableError,
+): Promise<void> {
+  const now = Date.now();
+  const last = triageReplyCooldown.get(submission.authorXId) ?? 0;
+  if (now - last < TRIAGE_REPLY_COOLDOWN_MS) return;
+  try {
+    const replyId = await createXAdapter().replyToPost(
+      submission.postId,
+      notTradeableReplyText(err.tokenChain),
+    );
+    log.info(`x: replied to ${submission.postId} — token not tradeable yet (reply ${replyId})`);
+    triageReplyCooldown.set(submission.authorXId, now);
+    publishOps({ type: "tweet:posted", at: new Date().toISOString(), kind: "skip", replyId, postId: submission.postId });
+  } catch (e) {
+    log.warn(`x: not-tradeable reply failed for ${submission.postId}: ${String(e)}`);
+    logEvent({ level: "warn", area: "service", type: "skip-reply:failed", msg: `x: not-tradeable reply failed for ${submission.postId}: ${String(e)}` });
   }
 }
 

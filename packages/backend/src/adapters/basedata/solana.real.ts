@@ -2,7 +2,12 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import type { Holder } from "@thesis/shared";
 import { config } from "../../config.js";
 import { log } from "../../util/log.js";
-import type { BaseDataAdapter, PriceSnapshotEth, TokenOnChain } from "./index.js";
+import {
+  TokenNotTradeableError,
+  type BaseDataAdapter,
+  type PriceSnapshotEth,
+  type TokenOnChain,
+} from "./index.js";
 import { getPumpFunStatus, type PumpFunStatus } from "./pumpfun-graduation.js";
 
 /**
@@ -160,7 +165,11 @@ export class RealSolanaData implements BaseDataAdapter {
     const json = (await res.json()) as { pairs?: DexPair[] };
     const solPairs = (json.pairs ?? []).filter((p) => p.chainId === "solana");
     const pool = solPairs.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
-    if (!pool) throw new Error(`No Solana DEX pairs found for ${mint}`);
+    // No live Solana pool — the token isn't trading yet (commonly: not graduated
+    // off the pump.fun bonding curve, or not indexed by DexScreener). A typed,
+    // recoverable signal so the service can reply "not tradeable yet" instead of
+    // surfacing a silent review failure.
+    if (!pool) throw new TokenNotTradeableError(mint, "solana");
     return {
       priceEth: Number(pool.priceNative ?? 0),
       liquidityUsd: pool.liquidity?.usd ?? 0,

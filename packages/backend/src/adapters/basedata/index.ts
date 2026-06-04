@@ -38,6 +38,25 @@ export interface PriceSnapshotEth {
   logoUrl: string | null;
 }
 
+/**
+ * A submitted token has no live DEX market to price yet — it isn't trading.
+ * On Solana the usual cause is a token that has NOT graduated off the pump.fun
+ * bonding curve (or isn't indexed by DexScreener yet); on Base, a brand-new or
+ * delisted token. This is an EXPECTED, recoverable state — not an internal
+ * fault — so the service replies with a friendly "not tradeable yet" note
+ * instead of failing the review silently. A transient API error (timeout, 5xx)
+ * is NOT this — keep throwing a generic Error there so it stays silent.
+ */
+export class TokenNotTradeableError extends Error {
+  constructor(
+    readonly address: string,
+    readonly tokenChain: Chain,
+  ) {
+    super(`No live DEX pair for ${address} on ${tokenChain} — not tradeable yet`);
+    this.name = "TokenNotTradeableError";
+  }
+}
+
 /** On-chain snapshot of a token. */
 export interface TokenOnChain {
   contractAddress: string;
