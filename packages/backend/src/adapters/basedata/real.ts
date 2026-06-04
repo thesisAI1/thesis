@@ -9,6 +9,9 @@ const DEXSCREENER = "https://api.dexscreener.com/latest/dex/tokens";
 const GOPLUS = "https://api.gopluslabs.io/api/v1/token_security";
 const BANKR_LAUNCHES = "https://api.bankr.bot/token-launches";
 const ETHERSCAN_V2 = "https://api.etherscan.io/v2/api";
+/** Per-request timeout for the Bankr launch check — a hung host must not stall
+ *  (or, worse, fail-closed) the launchpad gate. */
+const BANKR_TIMEOUT_MS = 5_000;
 
 /**
  * Clanker token-factory contracts on Base (v0-v4). A token whose on-chain
@@ -284,17 +287,7 @@ export class RealBaseData implements BaseDataAdapter {
 
   /** Identify whether a token was launched via Bankr or Clanker (else null). */
   private async detectLaunchpad(address: string): Promise<string | null> {
-    // Bankr — public, unauthenticated. A token-launch fee record exists only
-    // for tokens that Bankr deployed.
-    try {
-      const res = await fetch(`${BANKR_LAUNCHES}/${address}/fees`);
-      if (res.ok) {
-        const json = (await res.json()) as { error?: unknown };
-        if (json && json.error === undefined) return "bankr";
-      }
-    } catch {
-      /* ignore — fall through to the Clanker check */
-    }
+    if (await this.isBankrLaunch(address)) return "bankr";
     // Clanker — the token's on-chain deployer is one of the Clanker factories.
     try {
       const deployer = await this.deployerOf(address);
@@ -303,6 +296,39 @@ export class RealBaseData implements BaseDataAdapter {
       /* ignore */
     }
     return null;
+  }
+
+  /** True when Bankr's launch API records this token. Bankr is public and
+   *  unauthenticated: a deployed token returns HTTP 200 (no `error`), a
+   *  non-Bankr token returns 404.
+   *
+   *  Robustness matters here because the launchpad gate is FAIL-CLOSED and a
+   *  review is one-shot/cached — so a single transient blip used to brand a
+   *  real Bankr token Grade D forever, invisibly. We therefore: (a) bound the
+   *  call with a timeout, (b) retry once on a transient failure (timeout, 5xx,
+   *  429, network), and (c) LOG when we give up rather than swallow it. A 404 is
+   *  a definitive "not Bankr" and returns immediately without a retry/log. */
+  private async isBankrLaunch(address: string): Promise<boolean> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch(`${BANKR_LAUNCHES}/${address}/fees`, {
+          signal: AbortSignal.timeout(BANKR_TIMEOUT_MS),
+        });
+        if (res.status === 404) return false; // definitive: not a Bankr launch
+        if (res.ok) {
+          const json = (await res.json()) as { error?: unknown };
+          return !!json && json.error === undefined;
+        }
+        // 5xx / 429 / other non-OK → transient, fall through to retry.
+      } catch {
+        // network / timeout → transient, fall through to retry.
+      }
+    }
+    log.warn(
+      `basedata: Bankr launch check failed for ${address} after retries — ` +
+        `treating as not Bankr this pass (may cause a false Grade D)`,
+    );
+    return false;
   }
 
   /** The address that created a contract, via the explorer API. */
