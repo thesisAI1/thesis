@@ -3,7 +3,7 @@
  *
  * Server-rendered. All figures come from the live dashboard payload:
  *   - big chart cell .............. EquityChart (portfolio value + realised curve)
- *   - hero KPI .................... portfolio value (USD + ETH, open count)
+ *   - hero KPI .................... portfolio value (combined Base+Solana USD, open count)
  *   - realised PnL ............... portfolio.realizedPnlEth
  *   - win rate ................... portfolio.winRate (+ wins / closed)
  *   - funded ..................... reviews.buys of reviews.total
@@ -78,13 +78,12 @@ export function BentoOverview({
           <span className={styles.kpiL}>Portfolio value</span>
         </div>
         <div className={styles.kpiV}>
-          {portfolio.totalPortfolioValueUsd > 0
-            ? fmtUsd(portfolio.totalPortfolioValueUsd)
+          {portfolio.combinedTotalUsd > 0
+            ? fmtUsd(portfolio.combinedTotalUsd)
             : `${portfolio.totalPortfolioValueEth.toFixed(2)} ETH`}
         </div>
         <div className={styles.kpiN}>
-          {portfolio.totalPortfolioValueEth.toFixed(2)} ETH · wallet +{" "}
-          {portfolio.openCount} open
+          wallet + {portfolio.openCount} open · Base + Solana
         </div>
       </div>
 
