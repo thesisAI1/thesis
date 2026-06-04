@@ -45,6 +45,17 @@ test("classifyRouteError: a 5xx / unrelated error is NOT route-shaped → null",
   assert.equal(classifyRouteError(new Error("fetch failed")), null);
 });
 
+test("classifyRouteError: parseJupiterQuote 'Jupiter: no route (...)' wording → no_route", () => {
+  // parseJupiterQuote (jupiter-parse.ts:46) throws EXACTLY this wording on a no-
+  // liquidity quote: `Jupiter: no route (<reason>).`. The old regex only matched
+  // "no routes found" / "Jupiter /quote 400" / "COULD_NOT_FIND_ANY_ROUTE", none of
+  // which appear in that string — so a genuine mid-ladder no-route rethrew RAW
+  // (lost the entry) instead of taking the clean abandon path. Pin the real wording
+  // with reasons that do NOT incidentally match the other arms.
+  assert.equal(classifyRouteError(new Error("Jupiter: no route (missing outAmount).")), "no_route");
+  assert.equal(classifyRouteError(new Error("Jupiter: no route (TOKEN_NOT_TRADABLE).")), "no_route");
+});
+
 // --- planRouteRecovery (4-step ladder: 64 → 48 → 32 → direct) -----------------
 
 test("planRouteRecovery: vote_lock JUMPS straight to the direct-routes step", () => {
