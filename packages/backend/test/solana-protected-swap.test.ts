@@ -246,6 +246,35 @@ test("too-large at every route step abandons cleanly (no raw RangeError thrown)"
   assert.deepEqual(rec.routes[3], { onlyDirectRoutes: true });
 });
 
+// --- Regression guard: SUBMIT-side tooLarge at EVERY rung abandons (no infinite loop) ---
+// Sibling of the test above, but the size limit arrives as a SUBMIT FAILURE flagged
+// tooLarge (Helius Sender "base64 encoded too large") rather than a thrown serialize
+// RangeError. If planRouteRecovery ever stopped returning null at the last rung, the
+// reroute branch would re-quote onlyDirectRoutes forever; this pins that it exhausts
+// the ladder exactly once and abandons cleanly.
+
+test("submit-side tooLarge at every rung (incl. the last direct route) abandons cleanly — no infinite loop", async () => {
+  const rec: Recorder = { routes: [], tips: [], confirms: 0 };
+  const deps = makeDeps(rec, {
+    attempt: async () =>
+      failAttempt({
+        reason: "sender_http_500 base64 encoded too large",
+        tooLarge: true,
+        retryable: false,
+        definitelyNotAccepted: true,
+      }),
+  });
+
+  const res = await executeProtectedSwap(deps); // must terminate, not loop forever
+  assert.equal(res.ok, false);
+  if (!res.ok) assert.match(res.reason, /route ladder exhausted/);
+  // Walked the whole ladder ONCE: 64 → 48 → 32 → direct (4 quotes), then abandoned.
+  assert.equal(rec.routes.length, 4);
+  assert.deepEqual(rec.routes[3], { onlyDirectRoutes: true });
+  // No confirm before reroute — tooLarge is definitelyNotAccepted (tx never went out).
+  assert.equal(rec.confirms, 0);
+});
+
 // --- Edge: a genuine no-route at the HAPPY path propagates (no liquidity) ------
 
 test("no-route at the happy path (step 0) propagates — not silently abandoned", async () => {
@@ -297,6 +326,26 @@ test("deterministic reject (non-retryable 4xx) confirms then abandons cleanly", 
   if (!res.ok) assert.match(res.reason, /jito submit rejected \(jito_http_400\)/);
   assert.equal(rec.confirms, 1); // confirmed-before-abandon (no blind give-up)
   assert.equal(rec.routes.length, 1); // did not rebuild over a possibly-live tx
+});
+
+test("abandon path whose tx actually LANDED returns success (no double-fill on a deterministic reject)", async () => {
+  const rec: Recorder = { routes: [], tips: [], confirms: 0 };
+  const deps = makeDeps(rec, {
+    // The LANDED mirror of the abandon test above: a deterministic non-retryable 4xx
+    // (classifySubmitFailure → "abandon"), but the already-broadcast tx DID land. The
+    // confirm-before-give-up must surface success, NOT abandon — abandoning would let
+    // the caller treat a filled buy as failed and re-fire → DOUBLE-FILL over a live
+    // position. Same guard the 5xx-landed test pins, on the deterministic-reject path.
+    attempt: async () => failAttempt({ reason: "jito_http_400", retryable: false }, "sigAbandonLanded"),
+    confirmOrExpire: async () => "landed",
+  });
+
+  const res = await executeProtectedSwap(deps);
+
+  assert.equal(res.ok, true);
+  if (res.ok) assert.equal(res.txHash, "sigAbandonLanded");
+  assert.equal(rec.confirms, 1); // confirmed once (the landed check), then returned
+  assert.equal(rec.routes.length, 1); // did NOT rebuild/re-quote over a live tx
 });
 
 test("tip-cap early-exit: a tier at the cap that won't land abandons with 'tip cap'", async () => {
