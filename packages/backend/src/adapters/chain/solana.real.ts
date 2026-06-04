@@ -20,13 +20,8 @@ import {
   type JupiterQuote,
   type JupiterSwap,
 } from "./jupiter-parse.js";
-import {
-  fetchTipFloor,
-  submitJitoBundle,
-  submitSenderTransaction,
-  tipForAttempt,
-  type JitoSubmit,
-} from "./jito.js";
+import { fetchTipFloor, submitJitoBundle, submitSenderTransaction } from "./jito.js";
+import { buildRouteLadder, executeProtectedSwap, type RouteSpec } from "./solana-route.js";
 
 /**
  * Real Solana client — the RealChain analogue. Swaps route through the Jupiter
@@ -49,19 +44,6 @@ import {
  * lazily so merely selecting this adapter (e.g. for a stray Solana submission on
  * a Base-only deployment) never throws — only an actual trade/read does.
  */
-
-/**
- * Did this error mean "the route is too big to serialise into one Solana packet"?
- * VersionedTransaction.serialize() builds the message into a fixed PACKET_DATA_SIZE
- * (1232-byte) buffer; an over-large route makes @solana/buffer-layout throw
- * `RangeError: encoding overruns Uint8Array`. (The legacy Transaction path instead
- * throws "Transaction too large" — matched too, for completeness.) This is
- * recoverable by re-quoting a SIMPLER route, never by a higher tip.
- */
-function isTxTooLarge(err: unknown): boolean {
-  const msg = err instanceof Error ? err.message : String(err);
-  return /encoding overruns|Transaction too large/i.test(msg);
-}
 
 export class RealSolanaChain implements ChainAdapter {
   /** Wrapped-SOL mint (Jupiter's quote asset), from config. */
@@ -317,162 +299,49 @@ export class RealSolanaChain implements ChainAdapter {
     }
 
     const floor = await fetchTipFloor();
-    const escalationSteps = config.solana.jitoMaxAttempts;
-    const maxTip = config.solana.jitoMaxTipLamports;
-    const maxTransient = config.solana.jitoMaxTransientRetries;
     // Transport: Jito bundle (default) or Helius Sender. Both carry the SAME
     // embedded Jito tip (anti-MEV unchanged); Sender just dual-routes at a far
     // higher rate limit. Sender drops sub-minimum tips, so floor each rung.
     const useSender = config.solana.submitMode === "sender";
     const submitSwap = useSender ? submitSenderTransaction : submitJitoBundle;
     const tipFloorLamports = useSender ? config.solana.senderMinTipLamports : 0;
-    let lastReason = "no attempts made";
-    let transientRetries = 0;
 
-    // Route-size fallback. A route too complex to serialise into one 1232-byte
-    // Solana packet makes tx.serialize() throw "encoding overruns Uint8Array",
-    // killing the swap — and a bigger tip can't fix tx SIZE, only a SIMPLER
-    // route can. On such a failure we step down this ladder (tighter account
-    // budget → finally direct-routes-only, the smallest possible tx) and
-    // re-quote the SAME tier. The slippage guard still protects the fill.
-    const routeLadder: Array<{ maxAccounts?: number; onlyDirectRoutes?: boolean }> = [
-      { maxAccounts: config.solana.jupiterMaxAccounts },
-      { maxAccounts: 48 },
-      { maxAccounts: 32 },
-      { onlyDirectRoutes: true },
-    ];
-    let routeStep = 0;
+    // The escalation/recovery state machine lives in executeProtectedSwap (pure,
+    // unit-tested in test/solana-route.test.ts + solana-protected-swap.test.ts).
+    // Here we only inject the IO: one quote→build→submit attempt, and the
+    // confirm-or-expire landing check.
+    const result = await executeProtectedSwap({
+      floor,
+      maxAttempts: config.solana.jitoMaxAttempts,
+      maxTipLamports: config.solana.jitoMaxTipLamports,
+      maxTransientRetries: config.solana.jitoMaxTransientRetries,
+      tipFloorLamports,
+      routeLadder: buildRouteLadder(config.solana.jupiterMaxAccounts),
+      attempt: async (routeSpec: RouteSpec, tip: number): Promise<{
+        outAmount: string;
+        submit: Awaited<ReturnType<typeof submitSwap>>;
+        built: { signature: string; blockhash: string; lastValidBlockHeight: number };
+      }> => {
+        const quote = await this.getQuote(inputMint, outputMint, amount, routeSpec);
+        const built = await this.buildSwapTx(quote, tip);
+        const submit = await submitSwap(built.tx);
+        return {
+          outAmount: quote.outAmount,
+          submit,
+          built: {
+            signature: built.signature,
+            blockhash: built.blockhash,
+            lastValidBlockHeight: built.lastValidBlockHeight,
+          },
+        };
+      },
+      confirmOrExpire: (built) =>
+        this.confirmOrExpire(built.signature, built.blockhash, built.lastValidBlockHeight),
+      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+      log,
+    });
 
-    // `tier` is the tip-escalation level; it advances ONLY on a genuine
-    // "accepted but did not land" (tip too low) or a deterministic reject — never
-    // on a rate-limit, which a higher tip can't fix.
-    let tier = 0;
-    while (tier < escalationSteps) {
-      const tip = Math.max(tipFloorLamports, tipForAttempt(floor, tier, { maxLamports: maxTip }));
-      let quote: Awaited<ReturnType<typeof parseJupiterQuote>>;
-      let built: {
-        tx: VersionedTransaction;
-        signature: string;
-        blockhash: string;
-        lastValidBlockHeight: number;
-      };
-      let submit: JitoSubmit;
-      try {
-        quote = await this.getQuote(inputMint, outputMint, amount, routeLadder[routeStep]);
-        built = await this.buildSwapTx(quote, tip);
-        submit = await submitSwap(built.tx);
-      } catch (err) {
-        // A too-large route is the only error we can recover from here: shrink
-        // the route and retry the SAME tier (no tip change). Anything else
-        // (or an exhausted ladder) propagates → the swap is abandoned safely.
-        if (isTxTooLarge(err) && routeStep < routeLadder.length - 1) {
-          routeStep++;
-          const next = routeLadder[routeStep];
-          log.warn(
-            `solana: route too large for one packet — shrinking route ` +
-              `(${next.onlyDirectRoutes ? "direct-routes-only" : `maxAccounts=${next.maxAccounts}`}) ` +
-              `and re-quoting at tier ${tier + 1}`,
-          );
-          continue; // same tier, simpler route
-        }
-        throw err;
-      }
-      if (!submit.ok) {
-        // Route-fixable reject (Jito "cannot lock any vote accounts"): THIS
-        // route touched a writable vote account, which the engine refuses. The
-        // bundle was provably rejected (definitelyNotAccepted) so the tx cannot
-        // land — no confirm needed, no double-fill risk. A bigger tip can't fix
-        // it; only a different route can. Step DOWN the route ladder (toward
-        // simpler/direct single-hop routes, which dodge the multi-hop DEX that
-        // introduced the vote account) and re-quote the SAME tier. Checked
-        // before the 429 branch because both set definitelyNotAccepted.
-        if (submit.routeReject) {
-          if (routeStep < routeLadder.length - 1) {
-            routeStep++;
-            const next = routeLadder[routeStep];
-            log.warn(
-              `solana/jito: ${submit.reason} — re-routing ` +
-                `(${next.onlyDirectRoutes ? "direct-routes-only" : `maxAccounts=${next.maxAccounts}`}) ` +
-                `and re-quoting at tier ${tier + 1}`,
-            );
-            continue; // same tier, different route
-          }
-          // Every route still locks a vote account — a tip won't change that.
-          // Abandon safely rather than burn tiers bidding against a dead route.
-          lastReason = `jito submit failed (${submit.reason}) — route ladder exhausted at tip ${tip}`;
-          break;
-        }
-
-        // HTTP 429 — the block engine provably never took the bundle, so the
-        // signed tx cannot land. Back off and resubmit the SAME tier (a fresh
-        // tx/blockhash is built next loop). Double-fill-safe: the rejected tx is
-        // dead-on-arrival. Escalating the tip here would just burn the budget.
-        if (submit.retryable && submit.definitelyNotAccepted) {
-          transientRetries++;
-          if (transientRetries > maxTransient) {
-            lastReason = `jito rate-limited (${submit.reason}) — gave up after ${maxTransient} retries`;
-            break;
-          }
-          const backoff =
-            submit.retryAfterMs ?? Math.min(5_000, 400 * 2 ** Math.min(transientRetries - 1, 4));
-          log.warn(
-            `solana/jito: ${submit.reason} (rate limit) — backing off ${backoff}ms, ` +
-              `retry ${transientRetries}/${maxTransient} at tier ${tier + 1}`,
-          );
-          await new Promise((r) => setTimeout(r, backoff));
-          continue; // same tier, same tip
-        }
-
-        // Ambiguous (5xx / network) or a deterministic reject. The tx we just
-        // sent MIGHT have landed (the request may have reached the engine), so
-        // confirm-or-expire it BEFORE building a new one — never blind-rebuild
-        // over a possibly-live tx, that could double-fill.
-        const maybeLanded = await this.confirmOrExpire(
-          built.signature,
-          built.blockhash,
-          built.lastValidBlockHeight,
-        );
-        if (maybeLanded === "landed") {
-          log.info(
-            `solana/jito: swap landed despite submit error (${submit.reason}) ` +
-              `at tier ${tier + 1} (tip ${tip}) — tx ${built.signature}`,
-          );
-          return { txHash: built.signature, outAmount: quote.outAmount };
-        }
-        lastReason = `jito submit failed (${submit.reason}) at tip ${tip}`;
-        log.warn(`solana/jito: tier ${tier + 1}/${escalationSteps} — ${lastReason}, escalating`);
-        tier++;
-        if (tip >= maxTip) {
-          lastReason = `tip cap ${maxTip} lamports reached, still not landing`;
-          break;
-        }
-        continue;
-      }
-
-      const outcome = await this.confirmOrExpire(
-        built.signature,
-        built.blockhash,
-        built.lastValidBlockHeight,
-      );
-      if (outcome === "landed") {
-        log.info(
-          `solana/jito: swap landed on tier ${tier + 1}/${escalationSteps} ` +
-            `(tip ${tip} lamports) — tx ${built.signature}`,
-        );
-        return { txHash: built.signature, outAmount: quote.outAmount };
-      }
-
-      // Accepted but expired without landing = tip too low → escalate.
-      lastReason = `bundle expired without landing at tip ${tip}`;
-      log.warn(`solana/jito: tier ${tier + 1}/${escalationSteps} — ${lastReason}, escalating`);
-      tier++;
-      // Tip already pinned at the cap → a further tier would bid the same and
-      // fail the same way. Stop and abandon rather than burn attempts.
-      if (tip >= maxTip) {
-        lastReason = `tip cap ${maxTip} lamports reached, still not landing`;
-        break;
-      }
-    }
+    if (result.ok) return { txHash: result.txHash, outAmount: result.outAmount };
 
     // Never broadcast unprotected — abandon loudly (error → ops alarm) so the
     // operator can react (raise the cap, or close manually).
@@ -481,11 +350,11 @@ export class RealSolanaChain implements ChainAdapter {
       area: "solana",
       type: "jito_swap_abandoned",
       msg:
-        `solana/jito: ABANDONED ${inputMint}→${outputMint} — ${lastReason}. ` +
+        `solana/jito: ABANDONED ${inputMint}→${outputMint} — ${result.reason}. ` +
         `NOT broadcast on public RPC (MEV-protected mode).`,
     });
     throw new Error(
-      `solana/jito: swap abandoned after ${escalationSteps} tiers — ${lastReason}. ` +
+      `solana/jito: swap abandoned after ${config.solana.jitoMaxAttempts} tiers — ${result.reason}. ` +
         `Raise SOLANA_JITO_MAX_TIP_LAMPORTS / SOLANA_JITO_MAX_ATTEMPTS if this recurs.`,
     );
   }
