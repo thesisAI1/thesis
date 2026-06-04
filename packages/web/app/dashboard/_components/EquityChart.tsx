@@ -76,8 +76,8 @@ export function EquityChart({ portfolio, closedPositions }: EquityChartProps) {
     <div className={`${styles.b} ${styles.b2} ${styles.r2} ${styles.bChart}`}>
       <div className={styles.bpad}>
         <div className={styles.chartBig}>
-          {portfolio.totalPortfolioValueUsd > 0 ? fmtUsd(portfolio.totalPortfolioValueUsd) : "—"}
-          <small>· {portfolio.totalPortfolioValueEth.toFixed(2)} ETH</small>
+          {portfolio.combinedTotalUsd > 0 ? fmtUsd(portfolio.combinedTotalUsd) : "—"}
+          <small>· wallet + open positions · Base + Solana</small>
         </div>
         <div className={`${styles.chartDelta} ${deltaUp ? styles.pos : styles.neg}`}>
           {deltaUp ? "▲" : "▼"} {fmtEthSigned(portfolio.realizedPnlEth)} ETH ·{" "}
