@@ -165,12 +165,25 @@ export const config = {
      *  8 lets the ladder climb to the maxTip cap (×16/×32) and actually win
      *  inclusion. Each rung still costs only a fraction of a cent. */
     jitoMaxAttempts: num("SOLANA_JITO_MAX_ATTEMPTS", 8),
-    /** Blockhash validity per attempt, in slots (~400ms each). Short = a bundle
-     *  that will not land dies fast so we can re-tip quickly; 16 ≈ ~6.5s. This is
-     *  what makes escalation both quick AND double-fill-safe (the next attempt
-     *  fires only AFTER this blockhash is provably dead). 0 = Jupiter default
-     *  (~150 slots / ~60s — safe but slow to escalate). */
-    jitoBlockhashSlotsToExpiry: num("SOLANA_JITO_BLOCKHASH_SLOTS_TO_EXPIRY", 16),
+    /** Blockhash validity per attempt, in slots (~400ms each). This is the window
+     *  a submitted bundle has to LAND before confirmOrExpire declares it dead and
+     *  escalates the tip. It must be long enough for the bundle to reach a
+     *  bundle-accepting (Jito) validator: leaders rotate in groups of 4 slots and
+     *  only a fraction run the block engine, so a too-short window expires even a
+     *  bundle whose tip already WON the auction.
+     *
+     *  Incident 2026-06-04: the old 16-slot (~6.5s) default abandoned 24/24 prod
+     *  buys — a 3.29M-lamport tip (above the 1.6M that historically landed) still
+     *  expired in 6.5s. 48 slots (~19s) spans enough leader rotations to reliably
+     *  land a winning bundle, with margin for Jupiter/relay/throttle startup lag.
+     *
+     *  Double-fill safety does NOT depend on this being short: confirmOrExpire only
+     *  escalates AFTER the prior tx is provably dead (blockheight-exceeded +
+     *  getSignatureStatuses absent), so the loop is strictly sequential for ANY
+     *  window. The window only trades landing-reliability vs escalation-speed. 0 =
+     *  Jupiter default (~150 slots / ~60s — lands most reliably but slowest to
+     *  abandon). */
+    jitoBlockhashSlotsToExpiry: num("SOLANA_JITO_BLOCKHASH_SLOTS_TO_EXPIRY", 48),
     /** Minimum spacing between Jito sendBundle calls, in ms. The free public
      *  block engine rate-limits per IP (~1 req/s); firing bundles in a burst
      *  (the escalation ladder, or a buy + a monitor sell at once) trips HTTP 429

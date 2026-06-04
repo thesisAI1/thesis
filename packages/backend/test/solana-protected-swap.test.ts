@@ -194,6 +194,40 @@ test("too-large route shrinks the ladder (same tier) and then lands", async () =
   assert.equal(rec.tips[0], rec.tips[1]);
 });
 
+// --- Sender size reject (submit-side too-large) shrinks the ladder and lands ----
+// The prod gap: Helius Sender rejects an oversized tx as sender_http_500 "base64
+// encoded too large". Unlike the LOCAL serialize overrun (a thrown error caught by
+// classifyRouteError), this arrives as a SUBMIT failure flagged tooLarge. It must
+// shrink the route ONE rung (like too_large), NOT jump to a direct route (that is
+// the vote_lock recovery), and NOT escalate the tip (it burned the ladder in prod).
+
+test("submit-side tooLarge (Helius Sender) steps one rung down (same tier) and lands", async () => {
+  const rec: Recorder = { routes: [], tips: [], confirms: 0 };
+  const deps = makeDeps(rec, {
+    attempt: async (call) =>
+      call === 0
+        ? failAttempt({
+            reason: "sender_http_500 base64 encoded too large",
+            tooLarge: true,
+            retryable: false,
+            definitelyNotAccepted: true,
+          })
+        : okAttempt("888", "sigSmaller"),
+    confirmOrExpire: async () => "landed",
+  });
+
+  const res = await executeProtectedSwap(deps);
+
+  assert.equal(res.ok, true);
+  if (res.ok) assert.equal(res.txHash, "sigSmaller");
+  // Stepped ONE rung (64 → 48), NOT a jump to direct (that's the vote-lock path).
+  assert.deepEqual(rec.routes[1], { maxAccounts: 48 });
+  // Same tier — a size reject never escalates the tip.
+  assert.equal(rec.tips[0], rec.tips[1]);
+  // No confirm before reroute: tooLarge is definitelyNotAccepted (tx never went out).
+  assert.equal(rec.confirms, 1); // only the landed second attempt
+});
+
 // --- I2: too-large at EVERY route → clean abandon (no raw RangeError thrown) ---
 
 test("too-large at every route step abandons cleanly (no raw RangeError thrown)", async () => {
