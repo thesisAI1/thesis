@@ -87,12 +87,57 @@ export const config = {
      *  Solana to burn, so this leg sends the SOL to a dedicated collection
      *  wallet for a later manual bridge → buyback → burn (phase 2). */
     buybackWallet: str("SOLANA_BUYBACK_WALLET"),
-    /** Jupiter aggregator API base (v6 quote + swap). */
-    jupiterApiBase: str("JUPITER_API_BASE", "https://quote-api.jup.ag/v6"),
-    /** Slippage tolerance for Jupiter swaps, in percent. */
+    /** Jupiter aggregator API base. Keyless, maintained host that supports the
+     *  MEV params below (dynamicSlippage, jito tip, blockhashSlotsToExpiry).
+     *  Swap to https://api.jup.ag/swap/v1 (with a Jupiter key) for higher limits,
+     *  or the legacy https://quote-api.jup.ag/v6 if needed. */
+    jupiterApiBase: str("JUPITER_API_BASE", "https://lite-api.jup.ag/swap/v1"),
+    /** Slippage tolerance for Jupiter swaps, in percent. With dynamic slippage
+     *  ON (default) this is only the quote-time ceiling — Jupiter picks a
+     *  tighter per-route value at /swap, bounded by slippageMaxBps. */
     slippagePct: num("SOLANA_SLIPPAGE_PCT", 8),
     /** Wrapped-SOL mint — Jupiter's input/output sentinel for native SOL. */
     wsolMint: str("SOLANA_WSOL_MINT", "So11111111111111111111111111111111111111112"),
+
+    // ── MEV protection (sandwich defence) ──────────────────────────────────
+    /** Dynamic slippage: let Jupiter simulate + pick a tight per-route slippage
+     *  at /swap, capped at slippageMaxBps. The single biggest anti-sandwich
+     *  lever — replaces the loose static 8% with a route-aware value. Set
+     *  SOLANA_DYNAMIC_SLIPPAGE=false to fall back to the static slippagePct. */
+    dynamicSlippage: str("SOLANA_DYNAMIC_SLIPPAGE", "true") !== "false",
+    /** Hard ceiling for dynamic slippage, in bps (300 = 3%). Jupiter never
+     *  exceeds this even if its simulation estimates more. */
+    slippageMaxBps: num("SOLANA_SLIPPAGE_MAX_BPS", 300),
+    /** Submit swaps as private Jito bundles instead of broadcasting on the
+     *  public RPC — hides the tx from sandwich searchers. When ON (default),
+     *  a swap that will not land is RETRIED with a higher tip, never broadcast
+     *  unprotected; if the tip cap is hit it is ABANDONED (alarm), not exposed.
+     *  Set false ONLY for testing — that reverts to the unprotected public path. */
+    jitoEnabled: str("SOLANA_JITO_ENABLED", "true") !== "false",
+    /** Jito block-engine bundle endpoint (keyless, free). */
+    jitoBundleUrl: str(
+      "SOLANA_JITO_BUNDLE_URL",
+      "https://mainnet.block-engine.jito.wtf/api/v1/bundles",
+    ),
+    /** Jito tip-floor stats endpoint — recent landed-tip percentiles. */
+    jitoTipFloorUrl: str(
+      "SOLANA_JITO_TIP_FLOOR_URL",
+      "https://bundles.jito.wtf/api/v1/bundles/tip_floor",
+    ),
+    /** Hard ceiling on the Jito tip per swap, in lamports (1e9 = 1 SOL). The tip
+     *  ladder escalates UP TO this; past it the swap is abandoned rather than
+     *  over-paid or exposed. 2_000_000 = 0.002 SOL ≈ $0.40. Raise it if you'd
+     *  rather pay more than miss a fill during a tip-market spike. */
+    jitoMaxTipLamports: num("SOLANA_JITO_MAX_TIP_LAMPORTS", 2_000_000),
+    /** How many escalating Jito attempts before abandoning the swap. Each attempt
+     *  is one fresh quote+bundle at a higher tip, bounded by its own blockhash
+     *  expiry (no double-fill). */
+    jitoMaxAttempts: num("SOLANA_JITO_MAX_ATTEMPTS", 4),
+    /** Blockhash validity per attempt, in slots (~400ms each). Short = a bundle
+     *  that will not land dies fast so we can re-tip quickly; 12 ≈ ~5s. This is
+     *  what makes escalation both quick AND double-fill-safe. 0 = Jupiter default
+     *  (~150 slots / ~60s — safe but slow to escalate). */
+    jitoBlockhashSlotsToExpiry: num("SOLANA_JITO_BLOCKHASH_SLOTS_TO_EXPIRY", 12),
   },
 
   llm: {
@@ -292,6 +337,15 @@ export function validateConfig(): void {
   // Solana (optional) — only the slippage knob can silently NaN-poison a swap;
   // the wallet/RPC are checked lazily by the Solana adapter when it trades.
   range("SOLANA_SLIPPAGE_PCT", config.solana.slippagePct, 0, 100);
+  // Solana MEV knobs — a NaN cap/tip/attempts would poison the dynamic-slippage
+  // bound, the tip ladder, or the retry loop (NaN attempts → instant abandon or
+  // hot-loop), silently sending an unprotected, over-tipped, or never-landing swap.
+  range("SOLANA_SLIPPAGE_MAX_BPS", config.solana.slippageMaxBps, 1, 10_000);
+  // 1_000 = Jito's min landable tip (MIN_TIP_LAMPORTS in jito.ts; inlined to
+  // avoid a config→jito import cycle). A cap below it can never land a bundle.
+  range("SOLANA_JITO_MAX_TIP_LAMPORTS", config.solana.jitoMaxTipLamports, 1_000, BIG);
+  range("SOLANA_JITO_MAX_ATTEMPTS", config.solana.jitoMaxAttempts, 1, 20);
+  range("SOLANA_JITO_BLOCKHASH_SLOTS_TO_EXPIRY", config.solana.jitoBlockhashSlotsToExpiry, 0, 150);
 
   // service loop intervals — 0 would hot-loop the self-rescheduling loops.
   range("POLL_INTERVAL_SEC", config.service.pollIntervalSec, 1, DAY_SEC);
