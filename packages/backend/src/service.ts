@@ -15,7 +15,7 @@ import { processAuthorCloseRequests } from "./pipeline/author-actions.js";
 import { processChatbotReplies } from "./agents/chatbot.js";
 import { reviewSubmission, type ReviewResult } from "./pipeline/index.js";
 import { recordActivity } from "./activity.js";
-import { getStore } from "./store/index.js";
+import { getStore, type QueueItem } from "./store/index.js";
 import { triageMentions } from "./triage/index.js";
 import { nativeSymbol } from "./util/chains.js";
 import { log, logEvent } from "./util/log.js";
@@ -121,11 +121,21 @@ export async function reviewTick(): Promise<void> {
   }
 
   const item = await store.dequeueHighest();
-  if (item) await processSubmission(item.submission);
+  if (item) await processSubmission(item);
 }
 
+/** A transient review failure (network blip, RPC hiccup, DexScreener 5xx) must
+ *  NOT silently drop an eligible mention — the author tagged us correctly and
+ *  deserves a reply. We re-enqueue and retry up to this many TOTAL attempts;
+ *  beyond that we give up (and the 40-min queue TTL is the ultimate backstop).
+ *  TokenNotTradeableError is exempt — it's a definitive answer, not a failure,
+ *  and is replied to on the first attempt. */
+const MAX_REVIEW_ATTEMPTS = 3;
+const reviewAttempts = new Map<string, number>();
+
 /** Review one submission, persist it, and reply on X if it was funded. */
-async function processSubmission(submission: Submission): Promise<void> {
+async function processSubmission(item: QueueItem): Promise<void> {
+  const submission = item.submission;
   const store = getStore();
   try {
     const result = await reviewSubmission(submission);
@@ -175,6 +185,7 @@ async function processSubmission(submission: Submission): Promise<void> {
     } else if (v.decision === "SKIP") {
       await replyOnSkip(submission, result);
     }
+    reviewAttempts.delete(submission.postId);
   } catch (err) {
     // Expected, recoverable state: the token has no live DEX market yet (on
     // Solana, almost always "not graduated off the pump.fun curve"). Reply with
@@ -183,10 +194,26 @@ async function processSubmission(submission: Submission): Promise<void> {
     if (err instanceof TokenNotTradeableError) {
       log.info(`review: ${submission.postId} not tradeable yet (${err.tokenChain}) — ${err.address}`);
       await replyOnNotTradeable(submission, err);
+      reviewAttempts.delete(submission.postId);
       return;
     }
-    log.error(`review failed for ${submission.postId}: ${String(err)}`);
-    logEvent({ level: "error", area: "service", type: "review:failed", msg: `review failed for ${submission.postId}: ${String(err)}` });
+    // Transient failure (e.g. `TypeError: fetch failed` from a DexScreener/RPC
+    // network blip). The mention is eligible — dropping it silently is exactly
+    // the "didn't reply to a valid mention" bug. Re-enqueue and retry rather
+    // than lose it, up to MAX_REVIEW_ATTEMPTS.
+    const attempts = (reviewAttempts.get(submission.postId) ?? 0) + 1;
+    if (attempts < MAX_REVIEW_ATTEMPTS) {
+      reviewAttempts.set(submission.postId, attempts);
+      await store.enqueue(item);
+      log.warn(
+        `review transient failure for ${submission.postId} (attempt ${attempts}/${MAX_REVIEW_ATTEMPTS}) — re-queued: ${String(err)}`,
+      );
+      logEvent({ level: "warn", area: "service", type: "review:retry", msg: `review retry ${attempts}/${MAX_REVIEW_ATTEMPTS} for ${submission.postId}: ${String(err)}` });
+      return;
+    }
+    reviewAttempts.delete(submission.postId);
+    log.error(`review failed for ${submission.postId} after ${attempts} attempts: ${String(err)}`);
+    logEvent({ level: "error", area: "service", type: "review:failed", msg: `review failed for ${submission.postId} after ${attempts} attempts: ${String(err)}` });
   }
 }
 
@@ -269,7 +296,7 @@ export async function runOnce(): Promise<void> {
   for (let i = 0; i < 12; i++) {
     const item = await store.dequeueHighest();
     if (!item) break;
-    await processSubmission(item.submission);
+    await processSubmission(item);
   }
   for (let i = 0; i < 20; i++) {
     if ((await store.getOpenPositions()).length === 0) break;
