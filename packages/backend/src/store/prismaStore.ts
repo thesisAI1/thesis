@@ -39,6 +39,8 @@ import type { EscrowEntry, Funnel, PayoutRequest, PendingBuy, QueueItem, Store }
 
 /** The fixed primary key of the single funnel-counters row. */
 const FUNNEL_ID = 1;
+/** The fixed primary key of the single poll-cursor row. */
+const POLL_STATE_ID = 1;
 /** Keep the dedup log bounded — same cap FileStore enforces. */
 const PROCESSED_CAP = 5000;
 
@@ -584,5 +586,20 @@ export class PrismaStore implements Store {
   async getFunnel(): Promise<Funnel> {
     const row = await this.prisma.funnel.findUnique({ where: { id: FUNNEL_ID } });
     return { seen: row?.seen ?? 0, passed: row?.passed ?? 0 };
+  }
+
+  // ---- poll cursor ---------------------------------------------------------
+
+  async getMentionCursor(): Promise<string | null> {
+    const row = await this.prisma.pollState.findUnique({ where: { id: POLL_STATE_ID } });
+    return row?.mentionCursor ?? null;
+  }
+
+  async setMentionCursor(mentionId: string): Promise<void> {
+    await this.prisma.pollState.upsert({
+      where: { id: POLL_STATE_ID },
+      create: { id: POLL_STATE_ID, mentionCursor: mentionId },
+      update: { mentionCursor: mentionId },
+    });
   }
 }

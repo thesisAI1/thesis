@@ -34,6 +34,9 @@ interface Data {
   distributions: Distribution[];
   queue: QueueItem[];
   funnel: Funnel;
+  /** Newest X mention id already polled (the next poll's since_id). Absent on
+   *  files written before this field existed (treated as null = cold start). */
+  mentionCursor?: string | null;
   /** On-disk schema version, for one-time migrations on load. ABSENT on files
    *  written before migrations existed (treated as 0). Deliberately NOT in
    *  EMPTY — if it were, the {...EMPTY, ...parsed} merge would mask a legacy
@@ -57,6 +60,7 @@ const EMPTY: Data = {
   distributions: [],
   queue: [],
   funnel: { seen: 0, passed: 0 },
+  mentionCursor: null,
 };
 
 /**
@@ -392,5 +396,14 @@ export class FileStore implements Store {
 
   async getFunnel(): Promise<Funnel> {
     return { ...this.data.funnel };
+  }
+
+  async getMentionCursor(): Promise<string | null> {
+    return this.data.mentionCursor ?? null;
+  }
+
+  async setMentionCursor(mentionId: string): Promise<void> {
+    this.data.mentionCursor = mentionId;
+    this.persist();
   }
 }

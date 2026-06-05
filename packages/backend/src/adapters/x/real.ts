@@ -2,9 +2,15 @@ import { config } from "../../config.js";
 import { oauth1Header } from "../../util/oauth1.js";
 import { log } from "../../util/log.js";
 import { uploadPng } from "./media.js";
+import { drainPages, type Page } from "./paginate.js";
 import type { XAdapter, XPost } from "./index.js";
 
 const API = "https://api.twitter.com/2";
+
+/** Max mention pages to drain in one poll (100 each). Bounds API spend while
+ *  letting a burst / restart-backlog of up to ~500 mentions be recovered rather
+ *  than truncated at the first page. */
+const MAX_MENTION_PAGES = 5;
 
 /**
  * Real X API v2 client.
@@ -19,9 +25,16 @@ export class RealX implements XAdapter {
     if (!config.x.agentUserId) {
       throw new Error("X_AGENT_USER_ID is required to poll mentions.");
     }
-    const params = baseParams();
-    if (sinceId) params.set("since_id", sinceId);
-    return this.fetchTweets(`${API}/users/${config.x.agentUserId}/mentions?${params}`);
+    // Cold start (no cursor): one page only — don't drain history and reply to
+    // old mentions. With a cursor: drain the full backlog since it (bounded by
+    // MAX_MENTION_PAGES) so a burst or restart isn't truncated at one page.
+    const maxPages = sinceId ? MAX_MENTION_PAGES : 1;
+    return drainPages((pageToken) => {
+      const params = baseParams();
+      if (sinceId) params.set("since_id", sinceId);
+      if (pageToken) params.set("pagination_token", pageToken);
+      return this.fetchPage(`${API}/users/${config.x.agentUserId}/mentions?${params}`);
+    }, maxPages);
   }
 
   async getUserTimeline(xUserId: string): Promise<XPost[]> {
@@ -75,13 +88,18 @@ export class RealX implements XAdapter {
   }
 
   private async fetchTweets(url: string): Promise<XPost[]> {
+    return (await this.fetchPage(url)).items;
+  }
+
+  /** One page of tweets plus the cursor for the next page (for drainPages). */
+  private async fetchPage(url: string): Promise<Page<XPost>> {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${config.x.bearerToken}` },
     });
     if (!res.ok) throw new Error(`X API ${res.status}: ${await res.text()}`);
     const json = (await res.json()) as XApiResponse;
     const users = new Map((json.includes?.users ?? []).map((u) => [u.id, u]));
-    return (json.data ?? []).map((t) => {
+    const items = (json.data ?? []).map((t) => {
       const user = users.get(t.author_id);
       const metrics = t.public_metrics;
       const repliedTo = (t.referenced_tweets ?? []).find((r) => r.type === "replied_to");
@@ -106,6 +124,7 @@ export class RealX implements XAdapter {
         authorAvatarUrl: avatarUrl || undefined,
       };
     });
+    return { items, nextToken: json.meta?.next_token };
   }
 }
 
@@ -114,7 +133,7 @@ function baseParams(): URLSearchParams {
     "tweet.fields": "created_at,author_id,public_metrics,referenced_tweets,note_tweet",
     expansions: "author_id",
     "user.fields": "username,public_metrics,profile_image_url",
-    max_results: "50",
+    max_results: "100",
   });
 }
 
@@ -140,4 +159,6 @@ interface XTweet {
 interface XApiResponse {
   data?: XTweet[];
   includes?: { users?: XUser[] };
+  /** Cursor for the next page of results — absent on the last page. */
+  meta?: { next_token?: string };
 }

@@ -428,6 +428,15 @@ describe.each(cases)("Store contract — $name", ({ name, make }) => {
     expect(await store.getFunnel()).toEqual({ seen: 5, passed: 3 });
   });
 
+  // ---- poll cursor ----
+  it("getMentionCursor starts null; setMentionCursor persists + overwrites", async () => {
+    expect(await store.getMentionCursor()).toBeNull();
+    await store.setMentionCursor("100");
+    expect(await store.getMentionCursor()).toBe("100");
+    await store.setMentionCursor("250");
+    expect(await store.getMentionCursor()).toBe("250"); // singleton row, overwritten
+  });
+
   // ---- NEW PINNED INVARIANTS (from Phase-1 review) ----
 
   it("addEscrow increment: three sequential calls accumulate correctly without read-modify-write races", async () => {

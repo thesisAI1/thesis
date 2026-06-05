@@ -187,6 +187,16 @@ model Funnel {
   passed Int @default(0)
 }
 
+/// Poll cursor — a single fixed row holding the newest X mention id already
+/// seen, used as the `since_id` for the next mentions poll. Persisted so a
+/// restart resumes from where it left off instead of an in-memory `undefined`
+/// (which made every restart re-scan only the newest page and silently drop any
+/// backlog beyond it). Nullable = never polled yet (cold start).
+model PollState {
+  id            Int     @id @default(1)
+  mentionCursor String?
+}
+
 /// Durable operational event log (observability Phase B). Append-only mirror of the
 /// in-memory ring; survives restarts to power /api/events history + digests. `at` is
 /// ISO-8601 (sortable, same convention as BuyLog.isoAt). `opsType` is the OpsEvent
