@@ -1503,9 +1503,61 @@ async function buildDashboardPayload(): Promise<object> {
   // Solana value is SOL-denominated, so the two can't be summed natively (only
   // converted to USD per chain). Drives the per-chain wallet+positions total.
   const openValueByChain = new Map<Chain, number>();
+
+  // ── Phantom-price guard for the DISPLAYED unrealised (Solana) ─────────────
+  // A thin/manipulated Solana pool can print a snapshot price far above what is
+  // actually realizable — the same fake spike the monitor's TP guard rejects
+  // ($ZERO / $peg, 2026-06-05). Left unchecked the dashboard shows a phantom
+  // unrealised (e.g. +5950% on a flat position) on the PUBLIC page. The
+  // min-liquidity floor filters near-empty pools, but a pool that fakes its
+  // reported liquidity clears it — so for any Solana open position whose
+  // snapshot implies a large gain, confirm the realizable price on-chain via
+  // quoteSell and never display MORE unrealised than is actually realizable.
+  // Bounded cost: only positions already showing ≥ +100% trigger a quote, and
+  // for a genuine winner quoteSell ≈ snapshot so the number is unchanged.
+  const PHANTOM_CONFIRM_X = 2; // confirm once the snapshot implies ≥ +100%
+  const realizablePriceEth = new Map<string, number>();
+  await Promise.all(
+    open
+      .filter((p) => {
+        if (p.order.chain !== "solana" || p.entryPriceEth <= 0) return false;
+        const snap = livePrices.get(p.order.contractAddress.toLowerCase());
+        return snap !== undefined && snap > 0 && snap >= p.entryPriceEth * PHANTOM_CONFIRM_X;
+      })
+      .map(async (p) => {
+        const tokens = tokensRemaining(p);
+        if (tokens <= 0) return;
+        try {
+          const { proceedsEth } = await createChainAdapter(p.order.chain).quoteSell(
+            p.order.contractAddress,
+            tokens,
+          );
+          // proceedsEth ≤ 0 → can't actually sell → treat as flat (entry price).
+          realizablePriceEth.set(p.id, proceedsEth > 0 ? proceedsEth / tokens : p.entryPriceEth);
+        } catch (err) {
+          // Quote failed — we can't confirm the spike, so don't display it.
+          // Fall back to entry price (flat) rather than show an unconfirmed gain.
+          logEvent({
+            level: "warn",
+            area: "server",
+            type: "dashboard-quote-confirm:failed",
+            msg: `dashboard: quoteSell confirm failed for ${p.id} — showing flat: ${String(err)}`,
+          });
+          realizablePriceEth.set(p.id, p.entryPriceEth);
+        }
+      }),
+  );
+
   for (const p of open) {
     const cached = livePrices.get(p.order.contractAddress.toLowerCase());
-    const currentPriceEth = cached && cached > 0 ? cached : p.entryPriceEth;
+    let currentPriceEth = cached && cached > 0 ? cached : p.entryPriceEth;
+    // Never display more unrealised than is realizable on-chain: when the
+    // phantom guard above confirmed a (lower) realizable price, clamp DOWN to
+    // it. A genuine winner is unaffected (realizable ≈ snapshot).
+    const realizable = realizablePriceEth.get(p.id);
+    if (realizable !== undefined && realizable < currentPriceEth) {
+      currentPriceEth = realizable;
+    }
     // Unrealised PnL is measured on the slice still held. Tokens come from the
     // measured entry delivery (not the market-mid cost basis) so delivery-
     // shortfall positions don't show an inflated bag / unrealised PnL.
