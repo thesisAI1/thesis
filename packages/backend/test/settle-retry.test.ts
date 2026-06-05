@@ -59,6 +59,11 @@ class FlakyChain implements ChainAdapter {
   async getTokenPriceEth(): Promise<number> {
     return 1e-6;
   }
+  async quoteSell(_address: string, amountTokens: number): Promise<{ proceedsEth: number }> {
+    // Mirrors getTokenPriceEth (1e-6) so the monitor's TP confirm-before-sell
+    // gate sees a realizable price well above the 2e-8 tier exit and fires.
+    return { proceedsEth: amountTokens * 1e-6 };
+  }
   async sendEth(toAddress: string, _amountEth: number): Promise<string> {
     this.sendCalls += 1;
     if (this.sendCalls <= this.failSends) {
