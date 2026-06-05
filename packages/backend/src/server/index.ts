@@ -215,6 +215,10 @@ interface PortfolioSnapshot {
   totalValueEth: number;
   walletEth: number;
   openPositionsValueEth: number;
+  /** Solana-side total value (wallet SOL + open Solana positions), in SOL.
+   *  Separate native unit from the ETH fields — drives the chart's 2nd line.
+   *  Optional so snapshots taken before this field existed still parse. */
+  totalValueSol?: number;
 }
 const SNAPSHOT_INTERVAL_MS = 30 * 60 * 1000; // every 30 min
 const SNAPSHOT_BUFFER_SIZE = 96; // 48h of 30min snapshots
@@ -1615,16 +1619,40 @@ async function buildDashboardPayload(): Promise<object> {
     .sort((a, b) => (b.closedAt || "").localeCompare(a.closedAt || ""));
 
   // Realised PnL accrues on partial exits too — sum across every position.
-  const realizedPnlEth = positions.reduce((s, p) => s + p.realisedPnlEth, 0);
-  const wins = closed.filter((p) => p.realisedPnlEth > 0).length;
-  const dist = distributions.reduce(
-    (a, d) => ({
-      toAuthors: a.toAuthors + d.toAuthorEth,
-      toPortfolio: a.toPortfolio + d.toPortfolioEth,
-      toBuyback: a.toBuyback + d.toBuybackEth,
-    }),
-    { toAuthors: 0, toPortfolio: 0, toBuyback: 0 },
+  // Base PnL is ETH-denominated, Solana PnL is SOL-denominated; they're in
+  // different coins and must never be summed. `realizedPnlEth` stays as the
+  // Base figure (legacy field name kept for the API contract) and
+  // `realizedPnlByChain` carries both natives split out.
+  // Only two native coins are in play: SOL on Solana, ETH everywhere else
+  // (Base + any EVM/testnet chain). Bucket each position into one of the two so
+  // the split is exhaustive over the wider Chain union without summing coins.
+  const nativeBucket = (chain: Chain): "base" | "solana" =>
+    chain === "solana" ? "solana" : "base";
+  const chainByPosition = new Map<string, Chain>(
+    positions.map((p) => [p.id, p.order.chain]),
   );
+  const realizedPnlByChain = { base: 0, solana: 0 };
+  for (const p of positions) {
+    realizedPnlByChain[nativeBucket(p.order.chain)] += p.realisedPnlEth;
+  }
+  const realizedPnlEth = realizedPnlByChain.base;
+  const wins = closed.filter((p) => p.realisedPnlEth > 0).length;
+  // Distribution legs split by the chain of the position they settled. A
+  // Distribution row has no chain field, so we join through positionId →
+  // position.chain. Native amounts (ETH on Base, SOL on Solana) are never
+  // summed across chains; `dist` retains the Base totals for the legacy field.
+  const distByChain = {
+    base: { toAuthors: 0, toPortfolio: 0, toBuyback: 0 },
+    solana: { toAuthors: 0, toPortfolio: 0, toBuyback: 0 },
+  };
+  for (const d of distributions) {
+    const chain = chainByPosition.get(d.positionId) ?? "base";
+    const leg = distByChain[nativeBucket(chain)];
+    leg.toAuthors += d.toAuthorEth;
+    leg.toPortfolio += d.toPortfolioEth;
+    leg.toBuyback += d.toBuybackEth;
+  }
+  const dist = distByChain.base;
 
   // ETH/USD reference — used for the portfolio total-value display. Comes
   // from a 5-min cache (CoinGecko); on cache miss this kicks off a fetch
@@ -1652,6 +1680,7 @@ async function buildDashboardPayload(): Promise<object> {
     totalValueEth: totalPortfolioValueEth,
     walletEth: balanceEth,
     openPositionsValueEth,
+    totalValueSol: solBalance + solOpenValueSol,
   });
 
   // Recent wins highlight strip (last 24h). Filters closed positions by
@@ -1711,6 +1740,9 @@ async function buildDashboardPayload(): Promise<object> {
       /** Total USD value (wallet + open positions). */
       totalPortfolioValueUsd: ethUsdPrice > 0 ? totalPortfolioValueEth * ethUsdPrice : 0,
       realizedPnlEth,
+      /** Realised PnL split by chain — Base in ETH, Solana in SOL. The two
+       *  are different coins and are shown as separate figures (never summed). */
+      realizedPnlByChain,
       openCount: open.length,
       closedCount: closed.length,
       winCount: wins,
@@ -1742,7 +1774,9 @@ async function buildDashboardPayload(): Promise<object> {
       buys: reviews.filter((r) => r.decision === "BUY").length,
       skips: reviews.filter((r) => r.decision === "SKIP").length,
     },
-    distributions: { count: distributions.length, ...dist },
+    /** `count` + the Base-native legs (legacy top-level fields). `byChain`
+     *  carries both chains' legs split out — Base in ETH, Solana in SOL. */
+    distributions: { count: distributions.length, ...dist, byChain: distByChain },
     funnel: {
       seen: funnel.seen,
       passed: funnel.passed,
@@ -1758,6 +1792,10 @@ async function buildDashboardPayload(): Promise<object> {
       authorsTotalEth: dist.toAuthors,
       buybackTotalEth: dist.toBuyback, // proxy for "$THESIS burned ever"
       portfolioTotalEth: dist.toPortfolio,
+      /** Same three legs split by chain — Base in ETH, Solana in SOL. */
+      authorsTotalByChain: { base: distByChain.base.toAuthors, solana: distByChain.solana.toAuthors },
+      buybackTotalByChain: { base: distByChain.base.toBuyback, solana: distByChain.solana.toBuyback },
+      portfolioTotalByChain: { base: distByChain.base.toPortfolio, solana: distByChain.solana.toPortfolio },
       winRate7d,
       winRate7dCount: recentWeekClosed.length,
     },
@@ -1790,6 +1828,12 @@ interface LeaderboardEntry {
   wins: number;
   winRate: number;
   totalEarnedEth: number;
+  /** Author share earned on Solana wins, in SOL. Separate native unit from
+   *  `totalEarnedEth` (Base/ETH) — the two are never summed natively. */
+  totalEarnedSol: number;
+  /** ETH+SOL earnings converted to USD — the only cross-chain total. 0 when
+   *  neither USD rate is known yet (frontend hides the USD line in that case). */
+  totalEarnedUsd: number;
   bestTradePct: number;
 }
 
@@ -1807,10 +1851,18 @@ async function apiLeaderboard(res: ServerResponse): Promise<void> {
     store.getDistributions(),
   ]);
 
-  // Map positionId → author so distributions can be credited correctly.
-  const positionToAuthor = new Map<string, { xUserId: string; handle: string }>();
+  // Map positionId → author + chain so distributions can be credited to the
+  // right author AND the right native coin (Base→ETH, Solana→SOL).
+  const positionToAuthor = new Map<
+    string,
+    { xUserId: string; handle: string; chain: Chain }
+  >();
   for (const p of positions) {
-    positionToAuthor.set(p.id, { xUserId: p.authorXId, handle: p.authorHandle });
+    positionToAuthor.set(p.id, {
+      xUserId: p.authorXId,
+      handle: p.authorHandle,
+      chain: p.order.chain,
+    });
   }
 
   interface Agg {
@@ -1822,6 +1874,7 @@ async function apiLeaderboard(res: ServerResponse): Promise<void> {
     closed: number;
     wins: number;
     totalEarnedEth: number;
+    totalEarnedSol: number;
     bestTradePct: number;
   }
   const by = new Map<string, Agg>();
@@ -1837,6 +1890,7 @@ async function apiLeaderboard(res: ServerResponse): Promise<void> {
         closed: 0,
         wins: 0,
         totalEarnedEth: 0,
+        totalEarnedSol: 0,
         bestTradePct: 0,
       };
       by.set(xUserId, row);
@@ -1874,19 +1928,36 @@ async function apiLeaderboard(res: ServerResponse): Promise<void> {
     if (pct > a.bestTradePct) a.bestTradePct = pct;
   }
 
-  // Distributions credit the author's 25% to whoever sourced the position.
+  // Distributions credit the author's 25% to whoever sourced the position,
+  // in the native coin of that position's chain (ETH on Base, SOL on Solana).
   for (const d of distributions) {
     const owner = positionToAuthor.get(d.positionId);
     if (!owner) continue;
     const a = ensure(owner.xUserId, owner.handle);
-    a.totalEarnedEth += d.toAuthorEth ?? 0;
+    if (owner.chain === "solana") a.totalEarnedSol += d.toAuthorEth ?? 0;
+    else a.totalEarnedEth += d.toAuthorEth ?? 0;
   }
+
+  // Cross-chain ranking + the per-row "total" need a common unit: convert each
+  // author's ETH+SOL earnings to USD. The two natives are never summed directly;
+  // USD is the only legitimate cross-chain aggregate.
+  const [ethUsdPrice, solUsdPrice] = await Promise.all([getEthUsdRate(), getSolUsdRate()]);
+  const earnedUsd = (a: Agg): number =>
+    a.totalEarnedEth * ethUsdPrice + a.totalEarnedSol * solUsdPrice;
+  // On a rate cache-miss (USD = 0) fall back to the native sum purely to keep
+  // ordering stable — never shown to the user as a dollar figure.
+  const rankKey = (a: Agg): number => {
+    const usd = earnedUsd(a);
+    return usd > 0 ? usd : a.totalEarnedEth + a.totalEarnedSol;
+  };
 
   // Surface only authors who have actually had a position funded.
   const ranked: LeaderboardEntry[] = Array.from(by.values())
     .filter((a) => a.funded > 0)
     .sort((a, b) => {
-      if (b.totalEarnedEth !== a.totalEarnedEth) return b.totalEarnedEth - a.totalEarnedEth;
+      const ua = rankKey(a);
+      const ub = rankKey(b);
+      if (ub !== ua) return ub - ua;
       if (b.wins !== a.wins) return b.wins - a.wins;
       return b.funded - a.funded;
     })
@@ -1901,6 +1972,8 @@ async function apiLeaderboard(res: ServerResponse): Promise<void> {
       wins: a.wins,
       winRate: a.closed > 0 ? a.wins / a.closed : 0,
       totalEarnedEth: a.totalEarnedEth,
+      totalEarnedSol: a.totalEarnedSol,
+      totalEarnedUsd: earnedUsd(a),
       bestTradePct: a.bestTradePct,
     }));
 

@@ -27,6 +27,7 @@ import { createXAdapter } from "../adapters/x/index.js";
 import { config, useMock } from "../config.js";
 import { getStore } from "../store/index.js";
 import { log, logEvent } from "../util/log.js";
+import { nativeGlyph } from "../util/chains.js";
 import { payoutRequestText, payoutSentText } from "../util/replies.js";
 
 /** Outcome of the author leg, returned to the caller so it can fold the
@@ -257,14 +258,14 @@ async function payAuthorDirect(
     level: "info",
     area: "endowment",
     type: "author-payout:sent",
-    msg: `endowment: paid author ${entry.handle} ${amountEth.toFixed(4)} ETH — tx ${txHash}`,
+    msg: `endowment: paid author ${entry.handle} ${amountEth.toFixed(4)} ${nativeGlyph(position.order.chain)} — tx ${txHash}`,
     ops: { type: "payout:sent", at: new Date().toISOString(), path: "direct", chain: position.order.chain, handle: entry.handle, amountEth, wallet: entry.wallet, txHash },
   });
   if (!silent) {
     try {
       const replyId = await createXAdapter().replyToPost(
         position.postId,
-        payoutSentText({ handle: position.authorHandle, amountEth, wallet: entry.wallet, txHash }),
+        payoutSentText({ handle: position.authorHandle, amountEth, wallet: entry.wallet, txHash, chain: position.order.chain }),
       );
       log.info(`x: replied to ${position.postId} confirming author payout (reply ${replyId})`);
     } catch (err) {
@@ -311,7 +312,7 @@ async function requestAuthorPayout(position: Position): Promise<void> {
       chain: position.order.chain,
     });
     log.info(
-      `endowment: ${position.authorHandle} payout request posted — total escrow ${owed.toFixed(4)} ETH (tweet ${requestTweetId})`,
+      `endowment: ${position.authorHandle} payout request posted — total escrow ${owed.toFixed(4)} ${nativeGlyph(position.order.chain)} (tweet ${requestTweetId})`,
     );
   } catch (err) {
     const handle = position.authorHandle;

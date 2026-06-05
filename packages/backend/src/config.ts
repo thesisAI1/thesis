@@ -98,6 +98,16 @@ export const config = {
     slippagePct: num("SOLANA_SLIPPAGE_PCT", 8),
     /** Wrapped-SOL mint — Jupiter's input/output sentinel for native SOL. */
     wsolMint: str("SOLANA_WSOL_MINT", "So11111111111111111111111111111111111111112"),
+    /** Minimum USD liquidity a DexScreener pool must have before we trust its
+     *  price. A token can have many pools; a tiny/thin one (e.g. a dev-seeded
+     *  Meteora LP) prints a manipulable price that does not reflect anything
+     *  realizable. Pools below this floor are ignored for pricing, so a thin
+     *  pool can't set a phantom spike that trips every take-profit at once
+     *  (2026-06-05 $ZERO: a ~$0 Meteora LP printed a fake ~1M× price and the
+     *  whole TP ladder fired, dumping the bag at a loss). If NO pool clears the
+     *  floor the token is treated as not-yet-priced (no TP/SL this tick) rather
+     *  than priced off a manipulable pool. */
+    minPoolLiquidityUsd: num("SOLANA_MIN_POOL_LIQUIDITY_USD", 5_000),
 
     // ── MEV protection (sandwich defence) ──────────────────────────────────
     /** Dynamic slippage: let Jupiter simulate + pick a tight per-route slippage

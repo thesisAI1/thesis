@@ -9,7 +9,7 @@
  */
 import type { LeaderboardEntry } from "@/lib/api";
 import { usePagination, Pager } from "@/app/dashboard/_components/Pager";
-import { fmtPct, fmtRate, initials } from "@/app/dashboard/_components/format";
+import { fmtPct, fmtRate, fmtUsd, initials } from "@/app/dashboard/_components/format";
 import styles from "@/app/dashboard/_components/dashboard.module.css";
 
 const PAGE_SIZE = 10;
@@ -63,7 +63,23 @@ export function LeaderboardTable({ entries }: { entries: LeaderboardEntry[] }) {
                       {fmtPct(e.bestTradePct)}
                     </span>
                   </td>
-                  <td className={`${styles.tRight} ${styles.earned}`}>{e.totalEarnedEth.toFixed(2)} ETH</td>
+                  <td className={`${styles.tRight} ${styles.earned}`}>
+                    {e.totalEarnedEth.toFixed(2)} ETH
+                    {e.totalEarnedSol > 0 && (
+                      <>
+                        <br />
+                        {e.totalEarnedSol.toFixed(2)} SOL
+                      </>
+                    )}
+                    {e.totalEarnedUsd > 0 && (
+                      <>
+                        <br />
+                        <span style={{ color: "var(--dim)", fontWeight: 400 }}>
+                          ≈ {fmtUsd(e.totalEarnedUsd)}
+                        </span>
+                      </>
+                    )}
+                  </td>
                 </tr>
               ))
             ) : (

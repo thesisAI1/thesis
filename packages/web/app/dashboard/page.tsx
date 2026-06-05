@@ -54,6 +54,9 @@ const EMPTY_COUNTERS: CountersSummary = {
   authorsTotalEth: 0,
   buybackTotalEth: 0,
   portfolioTotalEth: 0,
+  authorsTotalByChain: { base: 0, solana: 0 },
+  buybackTotalByChain: { base: 0, solana: 0 },
+  portfolioTotalByChain: { base: 0, solana: 0 },
   winRate7d: 0,
   winRate7dCount: 0,
 };
@@ -73,6 +76,18 @@ function withSafeDashboard(d: DashboardData): DashboardData {
       totalPortfolioValueEth: num(p.totalPortfolioValueEth),
       openPositionsValueUsd: num(p.openPositionsValueUsd),
       totalPortfolioValueUsd: num(p.totalPortfolioValueUsd),
+      realizedPnlByChain: p.realizedPnlByChain ?? { base: num(p.realizedPnlEth), solana: 0 },
+    },
+    distributions: {
+      ...d.distributions,
+      byChain: d.distributions.byChain ?? {
+        base: {
+          toAuthors: num(d.distributions.toAuthors),
+          toPortfolio: num(d.distributions.toPortfolio),
+          toBuyback: num(d.distributions.toBuyback),
+        },
+        solana: { toAuthors: 0, toPortfolio: 0, toBuyback: 0 },
+      },
     },
     counters: d.counters ?? EMPTY_COUNTERS,
     recentWins: d.recentWins ?? EMPTY_RECENT_WINS,

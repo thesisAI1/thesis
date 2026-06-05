@@ -36,6 +36,9 @@ function xProfile(handle: string): string {
 function fmtEth(n: number): string {
   return `${n >= 0 ? "+" : ""}${n.toFixed(4)}`;
 }
+function fmtUsd(n: number): string {
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+}
 
 function Avatar({ e, size }: { e: LeaderboardEntry; size: number }) {
   const [broken, setBroken] = useState(false);
@@ -111,6 +114,16 @@ export function LeaderboardPodium({ entries }: { entries: LeaderboardEntry[] }) 
             <div className="font-mono" style={{ fontSize: m.earnedSize, marginBottom: 4, color: "var(--green)" }}>
               {fmtEth(e.totalEarnedEth)} ETH
             </div>
+            {e.totalEarnedSol > 0 && (
+              <div className="font-mono" style={{ fontSize: m.earnedSize - 4, marginBottom: 4, color: "#9945FF" }}>
+                {fmtEth(e.totalEarnedSol)} SOL
+              </div>
+            )}
+            {e.totalEarnedUsd > 0 && (
+              <div className="font-mono text-dim" style={{ fontSize: 12, marginBottom: 4 }}>
+                ≈ {fmtUsd(e.totalEarnedUsd)}
+              </div>
+            )}
             <div className="text-dim" style={{ fontSize: 12 }}>
               {e.funded} funded · {e.wins} {e.wins === 1 ? "win" : "wins"}
               {e.closed > 0 ? ` · ${Math.round(e.winRate * 100)}% win rate` : ""}

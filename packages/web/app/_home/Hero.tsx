@@ -25,6 +25,12 @@ export function Hero({ data }: HeroProps) {
       value: (
         <>
           <CountUp value={data?.distributions?.toAuthors ?? 0} decimals={2} /> ETH
+          {(data?.distributions?.byChain?.solana?.toAuthors ?? 0) > 0 && (
+            <>
+              {" · "}
+              <CountUp value={data?.distributions?.byChain?.solana?.toAuthors ?? 0} decimals={2} /> SOL
+            </>
+          )}
         </>
       ),
       label: "Paid to authors",

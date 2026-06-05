@@ -116,6 +116,13 @@ export interface ChainBalance {
   totalUsd: number;
 }
 
+/** A native figure split by chain — Base value in ETH, Solana value in SOL.
+ *  The two are different coins and are never summed natively. */
+export interface PerChainNative {
+  base: number;
+  solana: number;
+}
+
 /** The portfolio block — wallet + open-positions value, USD references, PnL. */
 export interface PortfolioSummary {
   walletAddress: string;
@@ -127,7 +134,11 @@ export interface PortfolioSummary {
   walletBalanceUsd: number;
   openPositionsValueUsd: number;
   totalPortfolioValueUsd: number;
+  /** Base-side realised PnL, in ETH (legacy field name). Use `realizedPnlByChain`
+   *  for the chain-split figures shown as two separate numbers. */
   realizedPnlEth: number;
+  /** Realised PnL split by chain — Base in ETH, Solana in SOL. */
+  realizedPnlByChain: PerChainNative;
   openCount: number;
   closedCount: number;
   winCount: number;
@@ -150,10 +161,16 @@ export interface ReviewsSummary {
  *  "total paid to authors" / portfolio / buyback KPIs. */
 export interface DistributionsSummary {
   count: number;
-  /** Sum of toAuthorEth — the "total paid to authors" figure. */
+  /** Sum of toAuthorEth — the "total paid to authors" figure (Base/ETH only;
+   *  legacy top-level field). Use `byChain` for the chain-split figures. */
   toAuthors: number;
   toPortfolio: number;
   toBuyback: number;
+  /** The three legs split by chain — Base in ETH, Solana in SOL. */
+  byChain: {
+    base: { toAuthors: number; toPortfolio: number; toBuyback: number };
+    solana: { toAuthors: number; toPortfolio: number; toBuyback: number };
+  };
 }
 
 /** Submission funnel counters. */
@@ -185,6 +202,10 @@ export interface CountersSummary {
   authorsTotalEth: number;
   buybackTotalEth: number;
   portfolioTotalEth: number;
+  /** Same three legs split by chain — Base in ETH, Solana in SOL. */
+  authorsTotalByChain: PerChainNative;
+  buybackTotalByChain: PerChainNative;
+  portfolioTotalByChain: PerChainNative;
   /** 0-1, rolling 7-day. */
   winRate7d: number;
   winRate7dCount: number;
@@ -257,7 +278,12 @@ export interface LeaderboardEntry {
   wins: number;
   /** 0-1. */
   winRate: number;
+  /** Author share earned on Base wins, in ETH. */
   totalEarnedEth: number;
+  /** Author share earned on Solana wins, in SOL. Shown as a separate figure. */
+  totalEarnedSol: number;
+  /** ETH+SOL earnings combined into USD — the per-row total. 0 until rates load. */
+  totalEarnedUsd: number;
   bestTradePct: number;
 }
 

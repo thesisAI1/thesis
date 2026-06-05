@@ -310,6 +310,40 @@ async function takeTier(pos: Position): Promise<boolean> {
   const gainPct = Math.round((tier.priceX - 1) * 100);
   const exitPrice = pos.entryPriceEth * tier.priceX;
   const cost = pos.order.amountInEth * tier.sellFraction;
+  const tokens = tokensForCost(pos, cost);
+
+  // Confirm the tier is REALLY reachable on-chain before selling. The feed
+  // price that brought us here can be faked by a thin/manipulated pool — a
+  // tiny Meteora LP printed a phantom ~1M× spike for $ZERO (2026-06-05) that
+  // tripped every tier and dumped the bag at a loss. An independent quoteSell
+  // hits live LP state, so a phantom spike reveals its true (low) realizable
+  // price and we refuse to fire. A genuine move confirms and fires next tick.
+  // (The min-liquidity floor in the Solana price feed is the first line of
+  // defence; this is the chain-agnostic backstop right at the point of sale.)
+  if (tokens > 0) {
+    let realizable = 0;
+    try {
+      const { proceedsEth } = await createChainAdapter(pos.order.chain).quoteSell(
+        pos.order.contractAddress,
+        tokens,
+      );
+      realizable = proceedsEth > 0 ? proceedsEth / tokens : 0;
+    } catch (err) {
+      log.warn(
+        `monitor: ${pos.id} TP${tierNum} quote-confirm failed — not firing this tick: ${String(err)}`,
+      );
+      return false;
+    }
+    if (!(realizable >= exitPrice)) {
+      const msg =
+        `monitor: ${pos.id} TP${tierNum} NOT confirmed on-chain — feed implied exit ` +
+        `${exitPrice.toExponential(4)} but quoteSell realizes ${realizable.toExponential(4)}; ` +
+        `skipping (suspected thin/manipulated pool). Retry next tick.`;
+      log.warn(msg);
+      logEvent({ level: "warn", area: "monitor", type: "tp-confirm:rejected", msg });
+      return false;
+    }
+  }
 
   let sale: { proceeds: number; profit: number; txHash: string };
   try {
@@ -450,7 +484,7 @@ async function closeOutWithKind(
         ? "aged out (un-tiered, time-tightened SL)"
         : "stopped out";
   log.info(
-    `monitor: ${pos.id} ${kindLabel} — net result ${total >= 0 ? "+" : ""}${total.toFixed(4)} ETH`,
+    `monitor: ${pos.id} ${kindLabel} — net result ${total >= 0 ? "+" : ""}${total.toFixed(4)} ${nativeGlyph(pos.order.chain)}`,
   );
   // Feed the dashboard ticker — every close (win or loss) is news.
   recordActivity({
@@ -765,6 +799,7 @@ async function reply(
           payoutRequestText({
             handle: pos.authorHandle,
             amountEth: authorPayment.amountEth,
+            chain: pos.order.chain,
           }),
         );
         log.info(`x: posted fallback payout request — reply ${requestTweetId}`);
@@ -782,11 +817,12 @@ async function reply(
       handle: pos.authorHandle,
       threadPostId: pos.postId,
       requestedAt: new Date().toISOString(),
+      chain: pos.order.chain,
     });
     log.info(
       `endowment: ${pos.authorHandle} payout request bound to tweet ${finalRequestTweetId} ` +
         `(${finalRequestTweetId === pos.postId ? "fallback to original thesis post — both tweet attempts failed" : finalRequestTweetId === replyId ? "via close announcement" : "via fallback request post"}) ` +
-        `— escrow ${authorPayment.amountEth.toFixed(4)} ETH`,
+        `— escrow ${authorPayment.amountEth.toFixed(4)} ${nativeGlyph(pos.order.chain)}`,
     );
   }
 }
@@ -824,6 +860,7 @@ function buildClosingText(
           amountEth: authorPayment.amountEth,
           wallet: authorPayment.wallet,
           txHash: authorPayment.txHash,
+          chain: pos.order.chain,
         }),
       );
     } else if (authorPayment.kind === "escrowed") {
@@ -831,6 +868,7 @@ function buildClosingText(
         payoutRequestText({
           handle: pos.authorHandle,
           amountEth: authorPayment.amountEth,
+          chain: pos.order.chain,
         }),
       );
     } else {

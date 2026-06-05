@@ -45,6 +45,24 @@ function buildSeries(
   return series.length >= 2 ? series : [baseline, portfolio.totalPortfolioValueEth];
 }
 
+/** Cumulative realised-PnL series (SOL) from Solana closes only, oldest→newest,
+ *  starting at 0. Returns null when there are no Solana closes (no 2nd line). */
+function buildSolSeries(closed: ClosedPositionView[]): number[] | null {
+  const ordered = closed
+    .filter((p) => p.chain === "solana")
+    .sort((a, b) => new Date(a.closedAt).getTime() - new Date(b.closedAt).getTime());
+  if (ordered.length === 0) return null;
+  const series = [0];
+  let running = 0;
+  for (const pos of ordered) {
+    running += pos.realisedPnlEth; // SOL-denominated for Solana positions
+    series.push(running);
+  }
+  return series;
+}
+
+const SOL_COLOR = "#9945FF"; // Solana brand purple
+
 export function EquityChart({ portfolio, closedPositions }: EquityChartProps) {
   const data = buildSeries(portfolio, closedPositions);
   const min = Math.min(...data) * 0.96;
@@ -57,6 +75,21 @@ export function EquityChart({ portfolio, closedPositions }: EquityChartProps) {
   const linePath =
     "M" + data.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" L");
   const areaPath = `${linePath} L${x(data.length - 1).toFixed(1)},${H} L${PAD},${H} Z`;
+
+  // Solana realised-PnL line. ETH and SOL are different units, so the SOL line
+  // is normalised to its OWN min/max within the same box (it shares the time
+  // axis, not the ETH value axis) — drawing SOL on the ETH gridlines would be
+  // the exact cross-chain unit conflation this dashboard fix is removing.
+  const sol = buildSolSeries(closedPositions);
+  let solLinePath: string | null = null;
+  if (sol && sol.length >= 2) {
+    const sMin = Math.min(...sol);
+    const sMax = Math.max(...sol);
+    const sSpan = sMax - sMin || 1;
+    const sx = (i: number) => PAD + ((W - PAD * 2) * i) / (sol.length - 1);
+    const sy = (v: number) => H - PAD - ((H - PAD * 2) * (v - sMin)) / sSpan;
+    solLinePath = "M" + sol.map((v, i) => `${sx(i).toFixed(1)},${sy(v).toFixed(1)}`).join(" L");
+  }
 
   const gridLines = Array.from({ length: GRID_ROWS + 1 }, (_, g) => {
     const gy = PAD + ((H - PAD * 2) * g) / GRID_ROWS;
@@ -82,6 +115,17 @@ export function EquityChart({ portfolio, closedPositions }: EquityChartProps) {
         <div className={`${styles.chartDelta} ${deltaUp ? styles.pos : styles.neg}`}>
           {deltaUp ? "▲" : "▼"} {fmtEthSigned(portfolio.realizedPnlEth)} ETH ·{" "}
           {fmtPct(allTimePct)} all-time realised
+        </div>
+        <div style={{ display: "flex", gap: "16px", marginTop: "4px", fontSize: "11px", color: "var(--dim)" }}>
+          <span>
+            <span style={{ color: "#E6A33E" }}>―</span> Portfolio value (ETH)
+          </span>
+          {solLinePath && (
+            <span>
+              <span style={{ color: SOL_COLOR }}>―</span>{" "}
+              Solana realised ({fmtEthSigned(portfolio.realizedPnlByChain.solana)} SOL)
+            </span>
+          )}
         </div>
       </div>
       <svg
@@ -120,6 +164,16 @@ export function EquityChart({ portfolio, closedPositions }: EquityChartProps) {
           r="3.5"
           fill="#E6A33E"
         />
+        {solLinePath && (
+          <path
+            d={solLinePath}
+            fill="none"
+            stroke={SOL_COLOR}
+            strokeWidth="1.6"
+            strokeDasharray="5 4"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
       </svg>
     </div>
   );

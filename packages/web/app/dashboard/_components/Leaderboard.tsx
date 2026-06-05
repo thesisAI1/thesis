@@ -7,7 +7,7 @@
  * initials when no image is on file.
  */
 import type { LeaderboardEntry } from "@/lib/api";
-import { fmtPct, fmtRate, initials } from "./format";
+import { fmtPct, fmtRate, fmtUsd, initials } from "./format";
 import styles from "./dashboard.module.css";
 
 export interface LeaderboardProps {
@@ -69,6 +69,20 @@ export function Leaderboard({ entries }: LeaderboardProps) {
                   </td>
                   <td className={`${styles.tRight} ${styles.earned}`}>
                     {e.totalEarnedEth.toFixed(2)} ETH
+                    {e.totalEarnedSol > 0 && (
+                      <>
+                        <br />
+                        {e.totalEarnedSol.toFixed(2)} SOL
+                      </>
+                    )}
+                    {e.totalEarnedUsd > 0 && (
+                      <>
+                        <br />
+                        <span style={{ color: "var(--dim)", fontWeight: 400 }}>
+                          ≈ {fmtUsd(e.totalEarnedUsd)}
+                        </span>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))

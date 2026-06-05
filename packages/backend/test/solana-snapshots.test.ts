@@ -14,6 +14,7 @@ import { RealSolanaData } from "../src/adapters/basedata/solana.real.js";
 const MINT_A = "6p6xgHyF7AeE6TZkSmFsko444wqoP15icUSqi2jfpump";
 const MINT_B = "So11111111111111111111111111111111111111112"; // absent mint
 const MINT_C = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"; // has price, no MC
+const MINT_D = "D1nToXThinPoo111111111111111111111111111111"; // only a thin (sub-floor) pool
 
 const MOCK_PRICE_NATIVE = "0.00000025";
 const MOCK_MARKET_CAP = 1_500_000;
@@ -51,13 +52,23 @@ before(() => {
             liquidity: { usd: 1 },
             marketCap: 99,
           },
-          // MINT_C: valid price but NO marketCap/fdv — must still be included with marketCapUsd=0
+          // MINT_C: valid price but NO marketCap/fdv — must still be included with marketCapUsd=0.
+          // Liquidity is above the trust floor so the MC-absence behaviour is what's under test.
           {
             chainId: "solana",
             baseToken: { address: MINT_C, symbol: "NOMC" },
             priceNative: "0.000001",
-            liquidity: { usd: 1_000 },
+            liquidity: { usd: 50_000 },
             // no marketCap, no fdv
+          },
+          // MINT_D: only a THIN pool (below the min-liquidity floor) printing a
+          // fake high price — must be IGNORED for pricing (2026-06-05 $ZERO).
+          {
+            chainId: "solana",
+            baseToken: { address: MINT_D, symbol: "ZERO" },
+            priceNative: "999999",
+            liquidity: { usd: 100 },
+            marketCap: 1_000_000,
           },
         ],
       });
@@ -121,4 +132,14 @@ test("getSnapshotsEth: token with valid price but missing MC is included with ma
   assert.ok(snap, "snapshot must exist for MINT_C even though MC is absent");
   assert.ok(snap.priceEth > 0, "priceEth must be populated");
   assert.equal(snap.marketCapUsd, 0, "marketCapUsd must be 0 when absent, not cause omission");
+});
+
+test("getSnapshotsEth: a mint with only a sub-floor (thin) pool is omitted — no phantom price", async () => {
+  const adapter = new RealSolanaData();
+  const map = await adapter.getSnapshotsEth([MINT_D]);
+  assert.equal(
+    map.has(MINT_D.toLowerCase()),
+    false,
+    "a thin pool below the liquidity floor must never set a price (phantom-spike guard)",
+  );
 });

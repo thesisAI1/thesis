@@ -41,8 +41,13 @@ export function DistributionSplit({
           >
             <div className={styles.distPct}>{leg.pct}</div>
             {/* `?? 0` guards deploy skew: an older backend that omits a leg would
-                otherwise throw on `.toFixed` and crash the whole overview slot. */}
+                otherwise throw on `.toFixed` and crash the whole overview slot.
+                ETH (Base) and SOL (Solana) are shown as two separate figures —
+                never summed into one cross-chain number. */}
             <div className={styles.distValue}>{(distributions[leg.key] ?? 0).toFixed(2)} ETH</div>
+            <div className={styles.distValue} style={{ opacity: 0.85 }}>
+              {(distributions.byChain?.solana?.[leg.key] ?? 0).toFixed(2)} SOL
+            </div>
             <div className={styles.distLabel}>{leg.label}</div>
           </div>
         ))}

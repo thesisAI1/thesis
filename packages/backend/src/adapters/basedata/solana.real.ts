@@ -32,6 +32,23 @@ import { getPumpFunStatus, type PumpFunStatus } from "./pumpfun-graduation.js";
 const DEXSCREENER = "https://api.dexscreener.com/latest/dex/tokens";
 const GOPLUS_SOL = "https://api.gopluslabs.io/api/v1/solana/token_security";
 
+/**
+ * Pick the deepest Solana pool whose USD liquidity clears the trust floor.
+ * A token often has several pools; a thin/manipulated one (a dev-seeded
+ * Meteora LP) prints a fake price that isn't realizable. Filtering by a
+ * minimum-USD-liquidity floor before taking the deepest pool stops a phantom
+ * spike from a near-empty pool setting the price (2026-06-05 $ZERO). Returns
+ * null when NO pool clears the floor — the caller then treats the token as
+ * not-yet-priced rather than pricing it off a manipulable pool.
+ */
+function pickTrustedPool(pairs: DexPair[]): DexPair | null {
+  const floor = config.solana.minPoolLiquidityUsd;
+  const trusted = pairs
+    .filter((p) => (p.liquidity?.usd ?? 0) >= floor)
+    .sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
+  return trusted[0] ?? null;
+}
+
 export class RealSolanaData implements BaseDataAdapter {
   private readonly connection = new Connection(config.solana.rpcUrl, "confirmed");
 
@@ -83,7 +100,7 @@ export class RealSolanaData implements BaseDataAdapter {
             byMint.set(addr, list);
           }
           for (const [addr, pairs] of byMint) {
-            const pool = pairs.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
+            const pool = pickTrustedPool(pairs);
             const price = Number(pool?.priceNative ?? 0);
             if (price > 0) out.set(addr, price);
           }
@@ -117,9 +134,9 @@ export class RealSolanaData implements BaseDataAdapter {
             byMint.set(addr, list);
           }
           for (const [addr, pairs] of byMint) {
-            const pool = pairs.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
+            const pool = pickTrustedPool(pairs);
             const priceEth = Number(pool?.priceNative ?? 0);
-            if (!(priceEth > 0)) continue;
+            if (!pool || !(priceEth > 0)) continue;
             const rawMc = Number(pool.marketCap ?? pool.fdv ?? 0);
             const marketCapUsd = Number.isNaN(rawMc) ? 0 : rawMc;
             const symbol = pool.baseToken?.symbol ?? "";
@@ -164,11 +181,13 @@ export class RealSolanaData implements BaseDataAdapter {
     if (!res.ok) throw new Error(`DexScreener ${res.status}`);
     const json = (await res.json()) as { pairs?: DexPair[] };
     const solPairs = (json.pairs ?? []).filter((p) => p.chainId === "solana");
-    const pool = solPairs.sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0))[0];
-    // No live Solana pool — the token isn't trading yet (commonly: not graduated
-    // off the pump.fun bonding curve, or not indexed by DexScreener). A typed,
+    const pool = pickTrustedPool(solPairs);
+    // No live Solana pool deep enough to trust — the token isn't meaningfully
+    // tradeable yet (commonly: not graduated off the pump.fun bonding curve, not
+    // indexed by DexScreener, or only thin/manipulable pools exist). A typed,
     // recoverable signal so the service can reply "not tradeable yet" instead of
-    // surfacing a silent review failure.
+    // surfacing a silent review failure — and so a phantom price from a near-
+    // empty pool can never seed an entry baseline.
     if (!pool) throw new TokenNotTradeableError(mint, "solana");
     return {
       priceEth: Number(pool.priceNative ?? 0),

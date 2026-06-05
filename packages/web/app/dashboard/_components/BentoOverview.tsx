@@ -57,7 +57,10 @@ export function BentoOverview({
 
   const authorsUsd = usdSuffix(distributions.toAuthors, portfolio.ethUsdPrice);
   const buybackUsd = usdSuffix(distributions.toBuyback, portfolio.ethUsdPrice);
-  const realisedUp = portfolio.realizedPnlEth >= 0;
+  const realisedEth = portfolio.realizedPnlByChain.base;
+  const realisedSol = portfolio.realizedPnlByChain.solana;
+  const authorsSol = distributions.byChain.solana.toAuthors;
+  const buybackSol = distributions.byChain.solana.toBuyback;
 
   return (
     <div className={styles.bento}>
@@ -95,10 +98,16 @@ export function BentoOverview({
           </span>
           <span className={styles.kpiL}>Realised PnL</span>
         </div>
-        <div className={`${styles.kpiV} ${realisedUp ? styles.pos : styles.neg}`}>
-          {fmtEthSigned(portfolio.realizedPnlEth)} ETH
+        <div className={`${styles.kpiV} ${realisedEth >= 0 ? styles.pos : styles.neg}`}>
+          {fmtEthSigned(realisedEth)} ETH
         </div>
-        <div className={styles.kpiN}>since inception</div>
+        <div
+          className={realisedSol >= 0 ? styles.pos : styles.neg}
+          style={{ fontSize: "20px", fontWeight: 600, lineHeight: 1.2 }}
+        >
+          {fmtEthSigned(realisedSol)} SOL
+        </div>
+        <div className={styles.kpiN}>since inception · Base + Solana</div>
       </div>
 
       {/* win rate */}
@@ -139,6 +148,9 @@ export function BentoOverview({
         >
           {distributions.toAuthors.toFixed(2)} ETH
         </div>
+        <div style={{ color: "var(--blue)", fontSize: "22px", fontWeight: 600, lineHeight: 1.2 }}>
+          {authorsSol.toFixed(2)} SOL
+        </div>
         <div className={styles.kpiN}>
           {authorsUsd ? `${authorsUsd} · ` : ""}25% author share · {distributions.count} paid on X
         </div>
@@ -154,6 +166,9 @@ export function BentoOverview({
         </div>
         <div className={styles.bigv} style={{ color: "var(--accent)" }}>
           {distributions.toBuyback.toFixed(2)} ETH
+        </div>
+        <div style={{ color: "var(--accent)", fontSize: "18px", fontWeight: 600, lineHeight: 1.2 }}>
+          {buybackSol.toFixed(2)} SOL
         </div>
         <div className={styles.kpiN}>
           {buybackUsd ? `${buybackUsd} · ` : ""}$THESIS removed
